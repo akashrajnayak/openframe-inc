@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenFrame IT Solutions Private Limited | Technology, Education & Innovation</title>
+    <meta name="description" content="Official corporate portal of OpenFrame IT Solutions Private Limited. Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development." />
+    <meta property="og:title" content="OpenFrame IT Solutions Private Limited | Technology, Education & Innovation" />
+    <meta property="og:description" content="Official corporate portal of OpenFrame IT Solutions Private Limited. Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OpenFrame IT Solutions Private Limited" />
+    <meta property="og:url" content="https://openframeitsolutions.com/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OpenFrame IT Solutions Private Limited | Technology, Education & Innovation" />
+    <meta name="twitter:description" content="Official corporate portal of OpenFrame IT Solutions Private Limited. Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/jpeg" href="/openframe_official_logo.jpg" />
+    <link rel="apple-touch-icon" href="/openframe_official_logo.jpg" />
+    <link rel="canonical" href="https://openframeitsolutions.com/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Corporation",
+      "name": "OpenFrame IT Solutions Private Limited",
+      "url": "https://openframeitsolutions.com",
+      "logo": "https://openframeitsolutions.com/favicon.svg",
+      "description": "Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development.",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Bengaluru",
+        "addressRegion": "Karnataka",
+        "addressCountry": "IN"
+      },
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "corporate inquiries",
+        "email": "contact@openframeitsolutions.com"
+      }
+    }
+    </script>
+    <script>
+      // Defensive guard against third-party browser extension injection errors (e.g. MetaMask, wallet extensions)
+      window.addEventListener('error', function(event) {
+        var filename = event.filename || '';
+        var msg = event.message || '';
+        if (
+          filename.indexOf('chrome-extension://') !== -1 ||
+          msg.indexOf('MetaMask') !== -1 ||
+          msg.indexOf('ethereum') !== -1 ||
+          msg.indexOf('inpage.js') !== -1
+        ) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          return true;
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || (typeof reason === 'string' ? reason : ''))) || '';
+        var stack = (reason && reason.stack) || '';
+        if (
+          msg.indexOf('MetaMask') !== -1 ||
+          msg.indexOf('ethereum') !== -1 ||
+          stack.indexOf('chrome-extension://') !== -1 ||
+          stack.indexOf('inpage.js') !== -1
+        ) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+        }
+      }, true);
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-800 antialiased selection:bg-blue-600 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

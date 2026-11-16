@@ -1,0 +1,1171 @@
+{
+  "entities": {
+    "ContactMessage": {
+      "title": "ContactMessage",
+      "description": "Direct inquiries submitted via the Contact Us form.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 25 },
+        "organization": { "type": "string", "maxLength": 120 },
+        "division": { "type": "string", "maxLength": 80 },
+        "subject": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Responded", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "emailAddress", "message", "submittedAt"]
+    },
+    "GeneralEnquiry": {
+      "title": "GeneralEnquiry",
+      "description": "General corporate and partnership inquiries via /inquiry/general.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "enquiryCategory": { "type": "string", "maxLength": 80 },
+        "subject": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Responded", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "city", "state", "enquiryCategory", "subject", "message", "consentAccepted", "submittedAt"]
+    },
+    "SoftwareEnquiry": {
+      "title": "SoftwareEnquiry",
+      "description": "Software development project scope and quotation inquiries.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "companyName": { "type": "string", "maxLength": 120 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "requiredService": { "type": "string", "maxLength": 100 },
+        "projectDescription": { "type": "string", "maxLength": 3500 },
+        "estimatedBudget": { "type": "string", "maxLength": 100 },
+        "timeline": { "type": "string", "maxLength": 100 },
+        "preferredContactMethod": { "type": "string", "maxLength": 60 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Quotation Prepared", "Responded", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["name", "mobileNumber", "emailAddress", "requiredService", "projectDescription", "submittedAt"]
+    },
+    "BusinessEnquiry": {
+      "title": "BusinessEnquiry",
+      "description": "Commercial proposals and B2B alliances.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "organisation": { "type": "string", "maxLength": 120 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "businessRequirement": { "type": "string", "maxLength": 150 },
+        "message": { "type": "string", "maxLength": 3500 },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Meeting Scheduled", "MoU Drafted", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["name", "organisation", "mobileNumber", "emailAddress", "businessRequirement", "message", "submittedAt"]
+    },
+    "ProductEnquiry": {
+      "title": "ProductEnquiry",
+      "description": "Enquiries for digital products like Life Smart Card, StudyNotePro, LearnXcel.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "maxLength": 80 },
+        "productName": { "type": "string", "maxLength": 100 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "organizationName": { "type": "string", "maxLength": 120 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Contacted", "In Progress", "Converted", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["productId", "productName", "fullName", "mobileNumber", "emailAddress", "message", "consentAccepted", "submittedAt"]
+    },
+    "StudentRegistration": {
+      "title": "StudentRegistration",
+      "description": "Student enrolments in OpenFrame Education courses.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "dob": { "type": "string", "maxLength": 30 },
+        "state": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "schoolCollegeName": { "type": "string", "maxLength": 150 },
+        "currentClassQualification": { "type": "string", "maxLength": 100 },
+        "interestedCourse": { "type": "string", "maxLength": 120 },
+        "parentName": { "type": "string", "maxLength": 100 },
+        "parentMobile": { "type": "string", "maxLength": 25 },
+        "preferredLearningMode": { "type": "string", "maxLength": 80 },
+        "consentAccepted": { "type": "boolean" },
+        "registeredAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Registered", "Counseling Scheduled", "Enrolled", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "state", "city", "interestedCourse", "consentAccepted", "registeredAt"]
+    },
+    "TeacherRegistration": {
+      "title": "TeacherRegistration",
+      "description": "Faculty and educator registrations.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "email": { "type": "string", "maxLength": 120 },
+        "qualification": { "type": "string", "maxLength": 120 },
+        "teachingExperience": { "type": "string", "maxLength": 80 },
+        "subjectSpecialization": { "type": "string", "maxLength": 120 },
+        "preferredTeachingMode": { "type": "string", "maxLength": 80 },
+        "location": { "type": "string", "maxLength": 100 },
+        "resumeUrlOrProfile": { "type": "string", "maxLength": 500 },
+        "resumeStorageUrl": { "type": "string", "maxLength": 500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Under Review", "Interview Scheduled", "Onboarded", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "mobileNumber", "email", "qualification", "teachingExperience", "subjectSpecialization", "consentAccepted", "submittedAt"]
+    },
+    "JobApplication": {
+      "title": "JobApplication",
+      "description": "Verified job opening applications.",
+      "type": "object",
+      "properties": {
+        "jobId": { "type": "string", "maxLength": 80 },
+        "jobTitle": { "type": "string", "maxLength": 120 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 25 },
+        "currentLocation": { "type": "string", "maxLength": 100 },
+        "qualification": { "type": "string", "maxLength": 120 },
+        "experience": { "type": "string", "maxLength": 80 },
+        "skills": { "type": "string", "maxLength": 300 },
+        "resumeName": { "type": "string", "maxLength": 150 },
+        "resumeUrl": { "type": "string", "maxLength": 500 },
+        "portfolioUrl": { "type": "string", "maxLength": 300 },
+        "coverNote": { "type": "string", "maxLength": 2000 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Shortlisted", "Interview Scheduled", "Selected", "Onboarded", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["jobId", "jobTitle", "fullName", "email", "phone", "consentAccepted", "submittedAt"]
+    },
+    "InternshipApplication": {
+      "title": "InternshipApplication",
+      "description": "Undergraduate and graduate internship registrations.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "collegeOrUniversity": { "type": "string", "maxLength": 150 },
+        "courseAndYear": { "type": "string", "maxLength": 100 },
+        "preferredDomain": { "type": "string", "maxLength": 100 },
+        "keySkills": { "type": "string", "maxLength": 300 },
+        "internshipDuration": { "type": "string", "maxLength": 50 },
+        "currentLocation": { "type": "string", "maxLength": 100 },
+        "resumeName": { "type": "string", "maxLength": 150 },
+        "resumeUrl": { "type": "string", "maxLength": 500 },
+        "portfolioOrGithub": { "type": "string", "maxLength": 300 },
+        "statementOfInterest": { "type": "string", "maxLength": 2000 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Shortlisted", "Selected", "Completed", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "collegeOrUniversity", "courseAndYear", "preferredDomain", "consentAccepted", "submittedAt"]
+    },
+    "ProfessionalRegistration": {
+      "title": "ProfessionalRegistration",
+      "description": "Senior industry expert network and consulting registrations.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "primaryDomain": { "type": "string", "maxLength": 120 },
+        "qualification": { "type": "string", "maxLength": 120 },
+        "experienceYears": { "type": "string", "maxLength": 50 },
+        "keySkills": { "type": "string", "maxLength": 300 },
+        "portfolioOrLinkedIn": { "type": "string", "maxLength": 300 },
+        "areaOfInterest": { "type": "string", "maxLength": 100 },
+        "currentLocation": { "type": "string", "maxLength": 100 },
+        "resumeName": { "type": "string", "maxLength": 150 },
+        "resumeUrl": { "type": "string", "maxLength": 500 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Profile Evaluated", "Meeting Scheduled", "Engaged", "Archived"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "primaryDomain", "areaOfInterest", "consentAccepted", "submittedAt"]
+    },
+    "SchoolPartnerEnquiry": {
+      "title": "SchoolPartnerEnquiry",
+      "description": "K-12 schools, Junior Colleges, and universities partnership inquiries.",
+      "type": "object",
+      "properties": {
+        "organizationName": { "type": "string", "maxLength": 150 },
+        "contactPerson": { "type": "string", "maxLength": 100 },
+        "designation": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "institutionType": { "type": "string", "maxLength": 80 },
+        "partnershipInterest": { "type": "string", "maxLength": 150 },
+        "studentStrength": { "type": "string", "maxLength": 60 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Proposal Sent", "Meeting Held", "Partnered", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["organizationName", "contactPerson", "mobileNumber", "emailAddress", "city", "state", "partnershipInterest", "consentAccepted", "submittedAt"]
+    },
+    "NgoPartnerEnquiry": {
+      "title": "NgoPartnerEnquiry",
+      "description": "NGO and Non-profit community alliances.",
+      "type": "object",
+      "properties": {
+        "organizationName": { "type": "string", "maxLength": 150 },
+        "registrationNumber": { "type": "string", "maxLength": 80 },
+        "contactPerson": { "type": "string", "maxLength": 100 },
+        "designation": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "focusArea": { "type": "string", "maxLength": 100 },
+        "partnershipInterest": { "type": "string", "maxLength": 150 },
+        "targetBeneficiaryCount": { "type": "string", "maxLength": 80 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "In Discussion", "MoU Drafted", "Active Alliance", "Closed"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["organizationName", "contactPerson", "mobileNumber", "emailAddress", "city", "state", "focusArea", "consentAccepted", "submittedAt"]
+    },
+    "GeneralWorkEnquiry": {
+      "title": "GeneralWorkEnquiry",
+      "description": "General collaboration and freelance contractor proposals via /work-with-us.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "collaborationType": { "type": "string", "maxLength": 100 },
+        "currentLocation": { "type": "string", "maxLength": 100 },
+        "experienceYears": { "type": "string", "maxLength": 50 },
+        "keyCompetencies": { "type": "string", "maxLength": 300 },
+        "proposalSummary": { "type": "string", "maxLength": 2500 },
+        "portfolioOrWebsite": { "type": "string", "maxLength": 300 },
+        "resumeName": { "type": "string", "maxLength": 150 },
+        "resumeUrl": { "type": "string", "maxLength": 500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Contacted", "Archived"] },
+        "internalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "collaborationType", "proposalSummary", "consentAccepted", "submittedAt"]
+    },
+    "HopeNestVolunteer": {
+      "title": "HopeNestVolunteer",
+      "description": "Volunteers registered with HopeNest Global Foundation.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "location": { "type": "string", "maxLength": 100 },
+        "professionOrOccupation": { "type": "string", "maxLength": 100 },
+        "areaOfInterest": { "type": "string", "maxLength": 100 },
+        "availability": { "type": "string", "maxLength": 60 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Contacted", "Onboarded", "Closed"] }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "location", "areaOfInterest", "consentAccepted", "submittedAt"]
+    },
+    "HopeNestDonation": {
+      "title": "HopeNestDonation",
+      "description": "Equipment, infrastructure and general support enquiries for HopeNest.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "organizationName": { "type": "string", "maxLength": 120 },
+        "supportType": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["New", "Under Review", "Responded", "Closed"] }
+      },
+      "required": ["fullName", "mobileNumber", "emailAddress", "supportType", "city", "state", "consentAccepted", "submittedAt"]
+    },
+    "HopeNestParticipant": {
+      "title": "HopeNestParticipant",
+      "description": "Community program beneficiaries and participants for HopeNest.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "mobileNumber": { "type": "string", "maxLength": 25 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "programmeInterested": { "type": "string", "maxLength": 120 },
+        "participantType": { "type": "string", "maxLength": 80 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "consentAccepted": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Registered", "Contacted", "Enrolled", "Closed"] }
+      },
+      "required": ["fullName", "mobileNumber", "city", "state", "programmeInterested", "consentAccepted", "submittedAt"]
+    },
+    "HopeNestUpdate": {
+      "title": "HopeNestUpdate",
+      "description": "Field activity updates and community bulletins.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "date": { "type": "string", "maxLength": 40 },
+        "category": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 3000 },
+        "location": { "type": "string", "maxLength": 100 },
+        "reportUrl": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["Published", "Draft"] }
+      },
+      "required": ["title", "date", "category", "description"]
+    },
+    "BlogPost": {
+      "title": "BlogPost",
+      "description": "Thought leadership and technical articles.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 80 },
+        "publishedDate": { "type": "string", "maxLength": 40 },
+        "readTime": { "type": "string", "maxLength": 30 },
+        "author": { "type": "string", "maxLength": 100 },
+        "authorRole": { "type": "string", "maxLength": 120 },
+        "excerpt": { "type": "string", "maxLength": 400 },
+        "shortDescription": { "type": "string", "maxLength": 400 },
+        "content": { "type": "string", "maxLength": 20000 },
+        "tags": { "type": "string", "maxLength": 300 },
+        "featuredImageUrl": { "type": "string", "maxLength": 500 },
+        "seoTitle": { "type": "string", "maxLength": 150 },
+        "seoMetaDescription": { "type": "string", "maxLength": 300 },
+        "status": { "type": "string", "enum": ["Draft", "Published", "Scheduled"] }
+      },
+      "required": ["slug", "title", "category", "publishedDate", "author", "excerpt", "status"]
+    },
+    "BranchLocation": {
+      "title": "BranchLocation",
+      "description": "Office and regional centers.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "fullAddress": { "type": "string", "maxLength": 300 },
+        "contactNumber": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 100 },
+        "officeHours": { "type": "string", "maxLength": 100 },
+        "googleMapsUrl": { "type": "string", "maxLength": 500 },
+        "isHeadquarters": { "type": "boolean" },
+        "isPlaceholder": { "type": "boolean" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "city", "state", "fullAddress", "contactNumber", "email", "officeHours", "isActive"]
+    },
+    "NewsletterSubscriber": {
+      "title": "NewsletterSubscriber",
+      "description": "Subscribers for corporate updates.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "emailAddress": { "type": "string", "maxLength": 120 },
+        "consentAccepted": { "type": "boolean" },
+        "subscribedAt": { "type": "string", "maxLength": 40 },
+        "source": { "type": "string", "maxLength": 80 }
+      },
+      "required": ["emailAddress", "consentAccepted", "subscribedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authenticated corporate administrators with assigned RBAC roles.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 120 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": {
+          "type": "string",
+          "enum": ["Super Admin", "HR Admin", "Sales Admin", "Education Admin", "HopeNest Admin", "Content Admin"]
+        },
+        "createdAt": { "type": "string", "maxLength": 40 },
+        "lastLoginAt": { "type": "string", "maxLength": 40 },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["uid", "email", "role", "createdAt", "isActive"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit trails of admin actions across collections.",
+      "type": "object",
+      "properties": {
+        "adminEmail": { "type": "string", "maxLength": 120 },
+        "adminRole": { "type": "string", "maxLength": 50 },
+        "action": { "type": "string", "maxLength": 100 },
+        "collection": { "type": "string", "maxLength": 80 },
+        "recordId": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "timestamp": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["adminEmail", "adminRole", "action", "collection", "timestamp"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Educational course record supporting standard, YouTube video, and YouTube playlist courses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "category": { "type": "string", "maxLength": 120 },
+        "subcategory": { "type": "string", "maxLength": 120 },
+        "categoryGroup": { "type": "string", "maxLength": 80 },
+        "level": { "type": "string", "maxLength": 50 },
+        "duration": { "type": "string", "maxLength": 80 },
+        "language": { "type": "string", "maxLength": 60 },
+        "courseType": { "type": "string", "enum": ["standard", "youtube_video", "youtube_playlist"] },
+        "contentType": {
+          "type": "string",
+          "enum": ["Individual video", "Full course", "Playlist", "Tutorial", "Workshop", "Webinar"]
+        },
+        "topic": { "type": "string", "maxLength": 160 },
+        "libraryCollection": { "type": "string", "enum": ["standard", "corporate_training"] },
+        "youtubeUrl": { "type": "string", "maxLength": 500 },
+        "youtubeVideoId": { "type": "string", "maxLength": 60 },
+        "youtubePlaylistUrl": { "type": "string", "maxLength": 500 },
+        "youtubePlaylistId": { "type": "string", "maxLength": 100 },
+        "youtubeChannelName": { "type": "string", "maxLength": 150 },
+        "instructorName": { "type": "string", "maxLength": 150 },
+        "price": { "type": "number" },
+        "isFree": { "type": "boolean" },
+        "pricingTier": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "shortDesc": { "type": "string", "maxLength": 2000 },
+        "description": { "type": "string", "maxLength": 8000 },
+        "certificateEligibility": { "type": "boolean" },
+        "isCustomAdded": { "type": "boolean" },
+        "rating": { "type": "number" },
+        "enrolledCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "title", "category", "price", "status"]
+    },
+    "LmsUserProfile": {
+      "title": "LmsUserProfile",
+      "description": "Unified LMS role and identity record for students, teachers, parents, and admins.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 120 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["student", "teacher", "parent", "admin"] },
+        "registrationNumber": { "type": "string", "maxLength": 60 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "email", "displayName", "role", "registrationNumber", "createdAt"]
+    },
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Academic student profile linked to registrations and enrollments.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "registrationNumber": { "type": "string", "maxLength": 60 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 120 },
+        "assignedTeacherId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["uid", "studentId", "registrationNumber", "fullName", "email"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Faculty evaluator profile linked to teacher_registrations and courses.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "registrationNumber": { "type": "string", "maxLength": 60 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 120 },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["uid", "teacherId", "fullName", "email", "isActive"]
+    },
+    "ParentStudentLink": {
+      "title": "ParentStudentLink",
+      "description": "Links a parent account to their child's student account for progress monitoring.",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string", "maxLength": 128 },
+        "parentEmail": { "type": "string", "maxLength": 120 },
+        "studentUid": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "registrationNumber": { "type": "string", "maxLength": 60 }
+      },
+      "required": ["parentUid", "parentEmail", "studentUid", "studentName"]
+    },
+    "CourseEnrollment": {
+      "title": "CourseEnrollment",
+      "description": "Student enrollment record linking student, course, and assigned teacher.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "courseTitle": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["Active", "Completed", "Suspended"] },
+        "enrolledAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "courseId", "status", "enrolledAt"]
+    },
+    "CourseModule": {
+      "title": "CourseModule",
+      "description": "Custom or edited module belonging to a course.",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string", "maxLength": 128 },
+        "moduleNumber": { "type": "number" },
+        "title": { "type": "string", "maxLength": 200 },
+        "duration": { "type": "string", "maxLength": 80 }
+      },
+      "required": ["courseId", "moduleNumber", "title"]
+    },
+    "LessonDoc": {
+      "title": "LessonDoc",
+      "description": "Structured lesson with learning objectives, materials, and quiz configuration.",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string", "maxLength": 128 },
+        "moduleId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "durationMinutes": { "type": "number" }
+      },
+      "required": ["courseId", "title"]
+    },
+    "VideoLearningSession": {
+      "title": "VideoLearningSession",
+      "description": "Tracks YouTube lecture openings, playback progress, and confirmed completion.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "lessonId": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 60 },
+        "completed": { "type": "boolean" }
+      },
+      "required": ["studentId", "courseId", "lessonId", "videoId", "completed"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "Submitted verification quiz attempt and Quinn AI rubric feedback.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "lessonId": { "type": "string", "maxLength": 128 },
+        "percentageScore": { "type": "number" },
+        "passed": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "courseId", "lessonId", "percentageScore", "passed", "submittedAt"]
+    },
+    "ProjectSubmission": {
+      "title": "ProjectSubmission",
+      "description": "Student practical capstone project deliverables and review status.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "projectId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 60 },
+        "submittedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "courseId", "projectId", "status"]
+    },
+    "StudentPresentation": {
+      "title": "StudentPresentation",
+      "description": "Student project defense via slides, video, or live meeting schedule.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 60 },
+        "submittedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "courseId", "status", "submittedAt"]
+    },
+    "TeacherEvaluation": {
+      "title": "TeacherEvaluation",
+      "description": "Authorized teacher 100-mark 6-criteria rubric evaluation and final decision.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "totalScore": { "type": "number" },
+        "isApproved": { "type": "boolean" }
+      },
+      "required": ["studentId", "courseId", "teacherName", "totalScore", "isApproved"]
+    },
+    "IssuedCertificate": {
+      "title": "IssuedCertificate",
+      "description": "Publicly verifiable OpenFrame credential gated by 6 academic conditions.",
+      "type": "object",
+      "properties": {
+        "certificateId": { "type": "string", "maxLength": 80 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "courseTitle": { "type": "string", "maxLength": 200 },
+        "grade": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "maxLength": 60 }
+      },
+      "required": ["certificateId", "studentId", "studentName", "courseId", "status"]
+    },
+    "StudentProgress": {
+      "title": "StudentProgress",
+      "description": "Aggregated 8-stage learning progress record per student and course.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "currentStage": { "type": "string", "maxLength": 60 },
+        "overallProgressPercent": { "type": "number" }
+      },
+      "required": ["studentId", "courseId", "currentStage"]
+    },
+    "LmsNotification": {
+      "title": "LmsNotification",
+      "description": "Student, teacher, parent, and admin LMS notifications.",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "read": { "type": "boolean" }
+      },
+      "required": ["recipientId", "title", "message", "read"]
+    },
+    "MarketplaceCategory": {
+      "title": "MarketplaceCategory",
+      "description": "Scalable course category and subcategory taxonomy with course counts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "slug": { "type": "string", "maxLength": 128 },
+        "domainGroup": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 500 },
+        "baseCourseCount": { "type": "number" },
+        "customCourseCount": { "type": "number" },
+        "totalCourseCount": { "type": "number" },
+        "isSystemDefault": { "type": "boolean" }
+      },
+      "required": ["id", "name", "slug", "domainGroup"]
+    },
+    "CourseDedupKey": {
+      "title": "CourseDedupKey",
+      "description": "O(1) duplicate prevention lookup key for YouTube video IDs, playlist IDs, and normalized titles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "keyType": { "type": "string", "enum": ["video", "playlist", "course", "title"] },
+        "rawValue": { "type": "string", "maxLength": 200 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "keyType", "rawValue", "courseId", "createdAt"]
+    },
+    "CourseImportLog": {
+      "title": "CourseImportLog",
+      "description": "Audit log for batch CSV, JSON, Manual, YouTube URL, and YouTube Playlist course imports.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sourceType": { "type": "string", "maxLength": 50 },
+        "totalProcessed": { "type": "number" },
+        "importedCount": { "type": "number" },
+        "duplicateCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "importedBy": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "sourceType", "totalProcessed", "importedCount", "duplicateCount", "failedCount", "createdAt"]
+    },
+    "MarketplaceStats": {
+      "title": "MarketplaceStats",
+      "description": "Aggregated real-time public and admin course counters for 1M+ scalability.",
+      "type": "object",
+      "properties": {
+        "totalCoursesAvailable": { "type": "number" },
+        "freeCourses": { "type": "number" },
+        "paidCourses": { "type": "number" },
+        "youtubeCourses": { "type": "number" },
+        "videoPlaylists": { "type": "number" },
+        "newlyAddedCourses": { "type": "number" },
+        "draftCourses": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["totalCoursesAvailable", "newlyAddedCourses", "updatedAt"]
+    },
+    "StudentFavorite": {
+      "title": "StudentFavorite",
+      "description": "Student saved favorite courses for quick access and enrollment tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "courseTitle": { "type": "string", "maxLength": 300 },
+        "savedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "courseId", "courseTitle", "savedAt"]
+    },
+    "DiscoveredCourse": {
+      "title": "DiscoveredCourse",
+      "description": "Staging candidate discovered via official YouTube Data API v3 for verification, deduplication, and import.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "jobId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 8000 },
+        "category": { "type": "string", "maxLength": 120 },
+        "subcategory": { "type": "string", "maxLength": 120 },
+        "categoryGroup": { "type": "string", "maxLength": 80 },
+        "youtubeVideoId": { "type": "string", "maxLength": 60 },
+        "youtubeUrl": { "type": "string", "maxLength": 500 },
+        "youtubePlaylistId": { "type": "string", "maxLength": 100 },
+        "youtubePlaylistUrl": { "type": "string", "maxLength": 500 },
+        "youtubeChannelId": { "type": "string", "maxLength": 80 },
+        "youtubeChannelName": { "type": "string", "maxLength": 150 },
+        "thumbnailUrl": { "type": "string", "maxLength": 500 },
+        "language": { "type": "string", "maxLength": 60 },
+        "level": { "type": "string", "maxLength": 50 },
+        "courseType": { "type": "string", "enum": ["standard", "youtube_video", "youtube_playlist"] },
+        "contentType": {
+          "type": "string",
+          "enum": ["Individual video", "Full course", "Playlist", "Tutorial", "Workshop", "Webinar"]
+        },
+        "topic": { "type": "string", "maxLength": 160 },
+        "libraryCollection": { "type": "string", "enum": ["standard", "corporate_training"] },
+        "certificateEligibility": { "type": "boolean" },
+        "reviewStatus": { "type": "string", "enum": ["Pending Review", "Approved", "Imported", "Rejected", "Duplicate", "Failed"] },
+        "discoveredAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "jobId", "title", "category", "youtubeChannelName", "courseType", "reviewStatus", "discoveredAt"]
+    },
+    "DiscoveryJob": {
+      "title": "DiscoveryJob",
+      "description": "YouTube Data API v3 batch discovery job execution ledger.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["idle", "running", "paused", "stopped", "completed", "error"] },
+        "mode": { "type": "string", "enum": ["batch", "test_20", "manual_search"] },
+        "discoveredCount": { "type": "number" },
+        "importedCount": { "type": "number" },
+        "duplicateCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "startedAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "status", "mode", "startedAt", "updatedAt"]
+    },
+    "SchoolStudentEnrollment": {
+      "title": "SchoolStudentEnrollment",
+      "description": "Student school education board, class (LKG-12), medium, stream, parental consent, and gamification state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentUid": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "studentEmail": { "type": "string", "maxLength": 120 },
+        "boardId": { "type": "string", "enum": ["KAR_STATE", "CBSE", "ICSE", "OTHER_STATE", "OTHER_RECOGNIZED"] },
+        "directoryBoardId": { "type": "string", "maxLength": 60 },
+        "directoryBoardName": { "type": "string", "maxLength": 160 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "academicYear": { "type": "string", "maxLength": 20 },
+        "curriculumVersionId": { "type": "string", "maxLength": 60 },
+        "medium": { "type": "string", "maxLength": 60 },
+        "stream": { "type": "string", "enum": ["General", "Science", "Commerce", "Arts", "Vocational"] },
+        "preferredLanguage": { "type": "string", "enum": ["English", "Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "Marathi", "Gujarati", "Bengali", "Odia", "Punjabi", "Assamese", "Urdu", "Sanskrit"] },
+        "parentalConsentGiven": { "type": "boolean" },
+        "parentEmail": { "type": "string", "maxLength": 120 },
+        "xpPoints": { "type": "number" },
+        "streakDays": { "type": "number" }
+      },
+      "required": ["id", "studentUid", "boardId", "classId", "academicYear", "medium", "preferredLanguage"]
+    },
+    "SchoolBoardDirectoryDoc": {
+      "title": "SchoolBoardDirectoryDoc",
+      "description": "Verified National, International, State and UT School Education Boards (LKG-12) directory record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "curriculumGroupId": { "type": "string", "enum": ["KAR_STATE", "CBSE", "ICSE", "OTHER_STATE", "OTHER_RECOGNIZED"] },
+        "category": { "type": "string", "enum": ["National", "International", "State", "Union Territory"] },
+        "stateOrUt": { "type": "string", "maxLength": 120 },
+        "officialName": { "type": "string", "maxLength": 240 },
+        "shortName": { "type": "string", "maxLength": 80 },
+        "secondaryBoardName": { "type": "string", "maxLength": 180 },
+        "seniorSecondaryBoardName": { "type": "string", "maxLength": 180 },
+        "scertBody": { "type": "string", "maxLength": 200 },
+        "affiliationMode": { "type": "string", "maxLength": 100 },
+        "hasSeparateStateBoard": { "type": "boolean" },
+        "gradeRangeSummary": { "type": "string", "maxLength": 160 },
+        "gradingSummary": { "type": "string", "maxLength": 400 },
+        "officialWebsite": { "type": "string", "maxLength": 300 },
+        "officialSyllabusUrl": { "type": "string", "maxLength": 300 },
+        "verificationStatus": { "type": "string", "enum": ["Verified", "Pending Admin Verification", "Needs Review"] },
+        "sourceNote": { "type": "string", "maxLength": 600 },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "curriculumGroupId", "category", "stateOrUt", "officialName", "shortName", "scertBody", "affiliationMode", "verificationStatus", "isActive", "updatedAt"]
+    },
+    "SchoolGradeFrameworkDoc": {
+      "title": "SchoolGradeFrameworkDoc",
+      "description": "Board-specific LKG-12 academic stage structure, grading bands, curriculum versions, and Class 11-12 streams.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "directoryBoardId": { "type": "string", "maxLength": 128 },
+        "boardShortName": { "type": "string", "maxLength": 100 },
+        "structurePattern": { "type": "string", "maxLength": 200 },
+        "gradingScaleName": { "type": "string", "maxLength": 160 },
+        "passingRule": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "directoryBoardId", "boardShortName", "structurePattern", "gradingScaleName", "passingRule", "updatedAt"]
+    },
+    "SchoolSubjectDoc": {
+      "title": "SchoolSubjectDoc",
+      "description": "Imported or curated board-specific school subject curriculum.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "boardId": { "type": "string", "maxLength": 40 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "stream": { "type": "string", "maxLength": 30 },
+        "code": { "type": "string", "maxLength": 40 },
+        "academicYear": { "type": "string", "maxLength": 20 }
+      },
+      "required": ["id", "boardId", "classId", "code"]
+    },
+    "SchoolConceptProgressDoc": {
+      "title": "SchoolConceptProgressDoc",
+      "description": "Concept-level mastery, time spent, and revision tracking for LKG-12 learners.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "boardId": { "type": "string", "maxLength": 40 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "subjectId": { "type": "string", "maxLength": 128 },
+        "conceptId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["Not Started", "In Progress", "Needs Revision", "Mastered"] },
+        "timeSpentSeconds": { "type": "number" }
+      },
+      "required": ["id", "studentId", "boardId", "classId", "subjectId", "conceptId", "status"]
+    },
+    "SchoolQuizAttemptDoc": {
+      "title": "SchoolQuizAttemptDoc",
+      "description": "Multilingual 8-format school quiz attempts with AI & editable teacher marks.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "boardId": { "type": "string", "maxLength": 40 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "subjectId": { "type": "string", "maxLength": 128 },
+        "quizMode": { "type": "string", "maxLength": 50 },
+        "percentage": { "type": "number" },
+        "pendingTeacherReview": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "boardId", "classId", "subjectId", "percentage", "submittedAt"]
+    },
+    "SchoolAssignmentDoc": {
+      "title": "SchoolAssignmentDoc",
+      "description": "Homework and project assignments published by teachers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "boardId": { "type": "string", "maxLength": 40 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "subjectId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "dueDate": { "type": "string", "maxLength": 40 },
+        "maxMarks": { "type": "number" }
+      },
+      "required": ["id", "boardId", "classId", "subjectId", "title", "dueDate"]
+    },
+    "SchoolSubmissionDoc": {
+      "title": "SchoolSubmissionDoc",
+      "description": "Student homework submissions and teacher evaluation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "submissionType": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Submitted", "Evaluated", "Corrections Requested"] }
+      },
+      "required": ["id", "assignmentId", "studentId", "submissionType", "status"]
+    },
+    "SchoolPresentationDoc": {
+      "title": "SchoolPresentationDoc",
+      "description": "Student presentations (slides, video, audio, experiment, group) and 7-criteria evaluation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "boardId": { "type": "string", "maxLength": 40 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "topicTitle": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["Submitted", "AI Reviewed", "Evaluated"] }
+      },
+      "required": ["id", "studentId", "boardId", "classId", "topicTitle", "status"]
+    },
+    "SchoolMarkEntryDoc": {
+      "title": "SchoolMarkEntryDoc",
+      "description": "Student examination and assessment marks across 10 categories.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "boardId": { "type": "string", "maxLength": 40 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "subjectName": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 40 },
+        "marksObtained": { "type": "number" },
+        "maxMarks": { "type": "number" }
+      },
+      "required": ["id", "studentId", "boardId", "classId", "subjectName", "category", "marksObtained", "maxMarks"]
+    },
+    "SchoolAttendanceDoc": {
+      "title": "SchoolAttendanceDoc",
+      "description": "Daily attendance and learning minutes record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "classId": { "type": "string", "maxLength": 10 },
+        "date": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["Present", "Absent", "Late", "Online Attended"] }
+      },
+      "required": ["id", "studentId", "classId", "date", "status"]
+    },
+    "SchoolRecordGeneric": {
+      "title": "SchoolRecordGeneric",
+      "description": "Timetable, examination schedule, live class, fee, announcement, or parent-teacher message record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id"]
+    },
+    "StudentLessonNote": {
+      "title": "StudentLessonNote",
+      "description": "Personal lesson notes authored by a student inside a course lesson.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "lessonId": { "type": "string", "maxLength": 128 },
+        "content": { "type": "string", "maxLength": 10000 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "courseId", "lessonId", "content"]
+    },
+    "StudentLessonBookmark": {
+      "title": "StudentLessonBookmark",
+      "description": "Bookmarked course lessons saved by a student.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "lessonId": { "type": "string", "maxLength": 128 },
+        "savedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "courseId", "lessonId"]
+    },
+    "SearchHistoryEntry": {
+      "title": "SearchHistoryEntry",
+      "description": "Query search log used for student history and admin analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "query": { "type": "string", "maxLength": 300 },
+        "searchedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "query", "searchedAt"]
+    },
+    "ConsentRecord": {
+      "title": "ConsentRecord",
+      "description": "DPDP Act and minor guardian consent ledger captured at student registration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 120 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "isMinor": { "type": "boolean" },
+        "dpdpConsentAccepted": { "type": "boolean" },
+        "recordedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "email", "fullName", "dpdpConsentAccepted", "recordedAt"]
+    },
+    "AiLearningPath": {
+      "title": "AiLearningPath",
+      "description": "AI-organized structured multi-module learning paths reviewed/saved by users or admins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "topic": { "type": "string", "maxLength": 200 },
+        "title": { "type": "string", "maxLength": 300 },
+        "language": { "type": "string", "maxLength": 60 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "topic", "title", "createdAt"]
+    },
+    "ContentReport": {
+      "title": "ContentReport",
+      "description": "Student/user moderation reports flagging inappropriate or broken content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["Submitted", "Under Review", "Resolved", "Dismissed"] },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "courseId", "reason", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/contact_messages/{id}": { "schema": { "$ref": "#/entities/ContactMessage" }, "description": "Contact form submissions" },
+    "/general_enquiries/{id}": { "schema": { "$ref": "#/entities/GeneralEnquiry" }, "description": "General corporate enquiries" },
+    "/software_enquiries/{id}": { "schema": { "$ref": "#/entities/SoftwareEnquiry" }, "description": "Software quotation enquiries" },
+    "/business_enquiries/{id}": { "schema": { "$ref": "#/entities/BusinessEnquiry" }, "description": "Commercial proposals" },
+    "/product_enquiries/{id}": { "schema": { "$ref": "#/entities/ProductEnquiry" }, "description": "Product purchase/trial enquiries" },
+    "/student_registrations/{id}": { "schema": { "$ref": "#/entities/StudentRegistration" }, "description": "Education student admissions" },
+    "/teacher_registrations/{id}": { "schema": { "$ref": "#/entities/TeacherRegistration" }, "description": "Faculty & mentor applications" },
+    "/job_applications/{id}": { "schema": { "$ref": "#/entities/JobApplication" }, "description": "Job opening applicants" },
+    "/internship_applications/{id}": { "schema": { "$ref": "#/entities/InternshipApplication" }, "description": "Internship applicants" },
+    "/professional_registrations/{id}": { "schema": { "$ref": "#/entities/ProfessionalRegistration" }, "description": "Senior expert network registrations" },
+    "/school_partnership_enquiries/{id}": { "schema": { "$ref": "#/entities/SchoolPartnerEnquiry" }, "description": "School and college institutional partnerships" },
+    "/ngo_partnership_enquiries/{id}": { "schema": { "$ref": "#/entities/NgoPartnerEnquiry" }, "description": "NGO and non-profit partnerships" },
+    "/general_work_enquiries/{id}": { "schema": { "$ref": "#/entities/GeneralWorkEnquiry" }, "description": "General collaboration and contractor proposals" },
+    "/hopenest_volunteers/{id}": { "schema": { "$ref": "#/entities/HopeNestVolunteer" }, "description": "HopeNest foundation volunteers" },
+    "/hopenest_donation_enquiries/{id}": { "schema": { "$ref": "#/entities/HopeNestDonation" }, "description": "HopeNest support and equipment enquiries" },
+    "/hopenest_participants/{id}": { "schema": { "$ref": "#/entities/HopeNestParticipant" }, "description": "HopeNest community participants" },
+    "/ngo_updates/{id}": { "schema": { "$ref": "#/entities/HopeNestUpdate" }, "description": "HopeNest field bulletins" },
+    "/blog_posts/{id}": { "schema": { "$ref": "#/entities/BlogPost" }, "description": "Knowledge centre and blog posts" },
+    "/branches/{id}": { "schema": { "$ref": "#/entities/BranchLocation" }, "description": "Branch offices" },
+    "/courses/{id}": { "schema": { "$ref": "#/entities/Course" }, "description": "Courses catalog records with pricing and curriculum" },
+    "/newsletter_subscribers/{id}": { "schema": { "$ref": "#/entities/NewsletterSubscriber" }, "description": "Newsletter email subscribers" },
+    "/admin_users/{uid}": { "schema": { "$ref": "#/entities/AdminUser" }, "description": "Authorized administrators and RBAC roles" },
+    "/activity_logs/{id}": { "schema": { "$ref": "#/entities/ActivityLog" }, "description": "Audit trails of admin operations" },
+    "/users/{uid}": { "schema": { "$ref": "#/entities/LmsUserProfile" }, "description": "Unified LMS portal user profiles" },
+    "/student_profiles/{uid}": { "schema": { "$ref": "#/entities/StudentProfile" }, "description": "Student LMS profiles" },
+    "/teacher_profiles/{uid}": { "schema": { "$ref": "#/entities/TeacherProfile" }, "description": "Teacher LMS profiles" },
+    "/parent_links/{id}": { "schema": { "$ref": "#/entities/ParentStudentLink" }, "description": "Parent to student links" },
+    "/course_enrollments/{id}": { "schema": { "$ref": "#/entities/CourseEnrollment" }, "description": "Course enrollments" },
+    "/course_modules/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Course modules edited or added by teachers/admins" },
+    "/lessons/{id}": { "schema": { "$ref": "#/entities/LessonDoc" }, "description": "Course lessons and materials" },
+    "/youtube_recommendations/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Cached Quinn AI video recommendations" },
+    "/video_learning_sessions/{id}": { "schema": { "$ref": "#/entities/VideoLearningSession" }, "description": "YouTube learning session telemetry" },
+    "/lesson_completions/{id}": { "schema": { "$ref": "#/entities/VideoLearningSession" }, "description": "Verified lesson completions" },
+    "/quizzes/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Lesson quiz configurations" },
+    "/quiz_questions/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Generated lesson verification question banks" },
+    "/quiz_attempts/{id}": { "schema": { "$ref": "#/entities/QuizAttempt" }, "description": "Student quiz attempts and results" },
+    "/quiz_responses/{id}": { "schema": { "$ref": "#/entities/QuizAttempt" }, "description": "Granular quiz question responses" },
+    "/projects/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Assigned practical project variations" },
+    "/project_submissions/{id}": { "schema": { "$ref": "#/entities/ProjectSubmission" }, "description": "Student practical project submissions" },
+    "/presentations/{id}": { "schema": { "$ref": "#/entities/StudentPresentation" }, "description": "Student presentation submissions and live schedules" },
+    "/teacher_evaluations/{id}": { "schema": { "$ref": "#/entities/TeacherEvaluation" }, "description": "Authorized teacher 6-criteria rubric evaluations" },
+    "/certificates/{certId}": { "schema": { "$ref": "#/entities/IssuedCertificate" }, "description": "Issued certificates for public QR verification" },
+    "/certificate_verifications/{id}": { "schema": { "$ref": "#/entities/IssuedCertificate" }, "description": "Public QR verification audit scans" },
+    "/notifications/{id}": { "schema": { "$ref": "#/entities/LmsNotification" }, "description": "LMS notifications across roles" },
+    "/student_progress/{id}": { "schema": { "$ref": "#/entities/StudentProgress" }, "description": "Aggregated 8-stage learning progress" },
+    "/lms_settings/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Global Quinn AI and YouTube LMS settings" },
+    "/certificate_templates/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Certificate design & accreditation templates" },
+    "/course_categories/{id}": { "schema": { "$ref": "#/entities/MarketplaceCategory" }, "description": "Course categories and subcategories with live counts" },
+    "/course_dedup_keys/{id}": { "schema": { "$ref": "#/entities/CourseDedupKey" }, "description": "Duplicate prevention index for YouTube videos and playlists" },
+    "/course_import_logs/{id}": { "schema": { "$ref": "#/entities/CourseImportLog" }, "description": "Batch course import audit history" },
+    "/marketplace_stats/{id}": { "schema": { "$ref": "#/entities/MarketplaceStats" }, "description": "Live calculated course marketplace counters" },
+    "/student_favorites/{id}": { "schema": { "$ref": "#/entities/StudentFavorite" }, "description": "Student saved favorite courses" },
+    "/discovered_courses/{id}": { "schema": { "$ref": "#/entities/DiscoveredCourse" }, "description": "Staged YouTube discovered courses awaiting review or import" },
+    "/discovery_jobs/{id}": { "schema": { "$ref": "#/entities/DiscoveryJob" }, "description": "Automated YouTube Data API v3 batch discovery job records" },
+    "/school_enrollments/{uid}": { "schema": { "$ref": "#/entities/SchoolStudentEnrollment" }, "description": "School LKG-12 student board, class, medium, stream and XP enrollments" },
+    "/school_subjects/{id}": { "schema": { "$ref": "#/entities/SchoolSubjectDoc" }, "description": "Imported and customized board-specific subjects & chapters" },
+    "/school_progress/{id}": { "schema": { "$ref": "#/entities/SchoolConceptProgressDoc" }, "description": "Student concept mastery progress" },
+    "/school_quiz_attempts/{id}": { "schema": { "$ref": "#/entities/SchoolQuizAttemptDoc" }, "description": "8-format school quiz attempts and marks" },
+    "/school_assignments/{id}": { "schema": { "$ref": "#/entities/SchoolAssignmentDoc" }, "description": "Teacher-assigned homework & assignments" },
+    "/school_submissions/{id}": { "schema": { "$ref": "#/entities/SchoolSubmissionDoc" }, "description": "Student homework submissions" },
+    "/school_presentations/{id}": { "schema": { "$ref": "#/entities/SchoolPresentationDoc" }, "description": "Student topic, video, audio & project presentations" },
+    "/school_marks/{id}": { "schema": { "$ref": "#/entities/SchoolMarkEntryDoc" }, "description": "Student marks across 10 examination categories" },
+    "/school_examinations/{id}": { "schema": { "$ref": "#/entities/SchoolRecordGeneric" }, "description": "Scheduled board and school examinations" },
+    "/school_attendance/{id}": { "schema": { "$ref": "#/entities/SchoolAttendanceDoc" }, "description": "Daily attendance & study time records" },
+    "/school_timetables/{id}": { "schema": { "$ref": "#/entities/SchoolRecordGeneric" }, "description": "Class timetables" },
+    "/school_live_classes/{id}": { "schema": { "$ref": "#/entities/SchoolRecordGeneric" }, "description": "Live classroom sessions and recordings" },
+    "/school_fees/{id}": { "schema": { "$ref": "#/entities/SchoolRecordGeneric" }, "description": "Student fee & scholarship status" },
+    "/school_messages/{id}": { "schema": { "$ref": "#/entities/SchoolRecordGeneric" }, "description": "Parent-teacher communication messages" },
+    "/school_announcements/{id}": { "schema": { "$ref": "#/entities/SchoolRecordGeneric" }, "description": "School & class announcements" },
+    "/school_boards/{id}": { "schema": { "$ref": "#/entities/SchoolBoardDirectoryDoc" }, "description": "All-India National, International, State and UT school education board directory" },
+    "/school_grade_frameworks/{id}": { "schema": { "$ref": "#/entities/SchoolGradeFrameworkDoc" }, "description": "Admin-verified or customized board grade structures and curriculum versions" },
+    "/student_notes/{id}": { "schema": { "$ref": "#/entities/StudentLessonNote" }, "description": "Student lesson notes per course and lesson" },
+    "/student_bookmarks/{id}": { "schema": { "$ref": "#/entities/StudentLessonBookmark" }, "description": "Student bookmarked lessons" },
+    "/search_history/{id}": { "schema": { "$ref": "#/entities/SearchHistoryEntry" }, "description": "Student and platform search query logs" },
+    "/consent_records/{id}": { "schema": { "$ref": "#/entities/ConsentRecord" }, "description": "DPDP Act and minor parental consent audit records" },
+    "/ai_learning_paths/{id}": { "schema": { "$ref": "#/entities/AiLearningPath" }, "description": "AI-organized structured multi-module learning paths" },
+    "/content_reports/{id}": { "schema": { "$ref": "#/entities/ContentReport" }, "description": "Reported videos or courses for admin moderation" }
+  }
+}

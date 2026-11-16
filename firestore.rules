@@ -1,0 +1,890 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Check if user is Super Admin or root administrator
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'akashrajnayak@gmail.com' ||
+        request.auth.token.email == 'admin@openframeitsolutions.com' ||
+        (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'Super Admin' &&
+         get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true)
+      );
+    }
+
+    // Check if user is any authenticated active Admin
+    function isAdmin() {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true
+      );
+    }
+
+    // Role-specific helpers
+    function hasRole(role) {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true &&
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == role
+      );
+    }
+
+    function isHRAdmin() {
+      return hasRole('HR Admin');
+    }
+
+    function isSalesAdmin() {
+      return hasRole('Sales Admin');
+    }
+
+    function isEducationAdmin() {
+      return hasRole('Education Admin');
+    }
+
+    function isHopeNestAdmin() {
+      return hasRole('HopeNest Admin');
+    }
+
+    function isContentAdmin() {
+      return hasRole('Content Admin');
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ====================================================
+    // Validation Helpers
+    // ====================================================
+
+    function isValidContactMessage(data) {
+      return data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+             data.emailAddress is string && data.emailAddress.size() <= 120 &&
+             data.message is string && data.message.size() >= 5 && data.message.size() <= 2500 &&
+             data.submittedAt is string && data.submittedAt.size() <= 40;
+    }
+
+    function isValidGeneralEnquiry(data) {
+      return data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+             data.emailAddress is string && data.emailAddress.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() <= 25 &&
+             data.city is string && data.city.size() <= 80 &&
+             data.state is string && data.state.size() <= 80 &&
+             data.subject is string && data.subject.size() <= 200 &&
+             data.message is string && data.message.size() >= 5 && data.message.size() <= 2500 &&
+             data.consentAccepted == true &&
+             data.submittedAt is string && data.submittedAt.size() <= 40;
+    }
+
+    function isValidSoftwareEnquiry(data) {
+      return data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+             data.emailAddress is string && data.emailAddress.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() <= 25 &&
+             data.requiredService is string && data.requiredService.size() <= 100 &&
+             data.projectDescription is string && data.projectDescription.size() >= 5 && data.projectDescription.size() <= 3500 &&
+             data.submittedAt is string && data.submittedAt.size() <= 40;
+    }
+
+    function isValidBusinessEnquiry(data) {
+      return data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+             data.organisation is string && data.organisation.size() <= 120 &&
+             data.emailAddress is string && data.emailAddress.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() <= 25 &&
+             data.businessRequirement is string && data.businessRequirement.size() <= 150 &&
+             data.message is string && data.message.size() >= 5 && data.message.size() <= 3500 &&
+             data.submittedAt is string && data.submittedAt.size() <= 40;
+    }
+
+    function isValidProductEnquiry(data) {
+      return data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+             data.emailAddress is string && data.emailAddress.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() <= 25 &&
+             data.productName is string && data.productName.size() <= 100 &&
+             data.message is string && data.message.size() <= 2500 &&
+             data.consentAccepted == true &&
+             data.submittedAt is string && data.submittedAt.size() <= 40;
+    }
+
+    function isValidSubscriber(data) {
+      return data.emailAddress is string && data.emailAddress.size() <= 120 &&
+             data.consentAccepted == true &&
+             data.subscribedAt is string && data.subscribedAt.size() <= 40;
+    }
+
+    function isValidBranch(data) {
+      return data.name is string && data.name.size() <= 120 &&
+             data.city is string && data.city.size() <= 80 &&
+             data.state is string && data.state.size() <= 80 &&
+             data.fullAddress is string && data.fullAddress.size() <= 300 &&
+             data.contactNumber is string && data.contactNumber.size() <= 40 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.officeHours is string && data.officeHours.size() <= 100 &&
+             data.isActive is bool;
+    }
+
+    function isValidCourse(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 300 &&
+             data.category is string && data.category.size() <= 120 &&
+             data.price is number && data.price >= 0;
+    }
+
+    // ====================================================
+    // Enquiries Collections (RBAC: Sales Admin, Super Admin)
+    // ====================================================
+
+    match /contact_messages/{id} {
+      allow create: if isValidId(id) && isValidContactMessage(incoming());
+      allow read, update, delete: if isSalesAdmin();
+    }
+
+    match /general_enquiries/{id} {
+      allow create: if isValidId(id) && isValidGeneralEnquiry(incoming());
+      allow read, update, delete: if isSalesAdmin();
+    }
+
+    match /software_enquiries/{id} {
+      allow create: if isValidId(id) && isValidSoftwareEnquiry(incoming());
+      allow read, update, delete: if isSalesAdmin();
+    }
+
+    match /business_enquiries/{id} {
+      allow create: if isValidId(id) && isValidBusinessEnquiry(incoming());
+      allow read, update, delete: if isSalesAdmin();
+    }
+
+    match /product_enquiries/{id} {
+      allow create: if isValidId(id) && isValidProductEnquiry(incoming());
+      allow read, update, delete: if isSalesAdmin();
+    }
+
+    // ====================================================
+    // LMS Role Helpers (Verified DB Lookups)
+    function isLmsTeacher() {
+      return isEducationAdmin() || isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
+      );
+    }
+
+    function isLmsEducatorOrAdmin() {
+      return isLmsTeacher() || isEducationAdmin() || isAdmin();
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isLinkedParent(studentUid) {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/parent_links/$(request.auth.uid + '_' + studentUid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         studentUid in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.linkedStudentIds)
+      );
+    }
+
+    function isParentAccount() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent';
+    }
+
+    // Registrations Collections (RBAC: Education / HR Admin + Self-lookup by verified email)
+    match /student_registrations/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow get: if isValidId(id) && (isEducationAdmin() || (isSignedIn() && resource.data.emailAddress == request.auth.token.email));
+      allow list: if isEducationAdmin() || isLmsTeacher() || (isSignedIn() && resource.data.emailAddress == request.auth.token.email);
+      allow update, delete: if isValidId(id) && isEducationAdmin();
+    }
+
+    match /teacher_registrations/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().email is string && incoming().consentAccepted == true;
+      allow get: if isValidId(id) && (isEducationAdmin() || isHRAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
+      allow list: if isEducationAdmin() || isHRAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow update, delete: if isValidId(id) && (isEducationAdmin() || isHRAdmin());
+    }
+
+    match /job_applications/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().email is string && incoming().phone is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHRAdmin();
+    }
+
+    match /internship_applications/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHRAdmin() || isEducationAdmin();
+    }
+
+    match /professional_registrations/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHRAdmin() || isSalesAdmin();
+    }
+
+    // ====================================================
+    // Partnerships Collections (RBAC: Sales Admin, Super Admin)
+    // ====================================================
+
+    match /school_partnership_enquiries/{id} {
+      allow create: if isValidId(id) && incoming().organizationName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isSalesAdmin() || isEducationAdmin();
+    }
+
+    match /ngo_partnership_enquiries/{id} {
+      allow create: if isValidId(id) && incoming().organizationName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isSalesAdmin() || isHopeNestAdmin();
+    }
+
+    match /general_work_enquiries/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHRAdmin() || isSalesAdmin();
+    }
+
+    // ====================================================
+    // HopeNest Foundation Collections (RBAC: HopeNest Admin)
+    // ====================================================
+
+    match /hopenest_volunteers/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHopeNestAdmin();
+    }
+
+    match /hopenest_donation_enquiries/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().emailAddress is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHopeNestAdmin();
+    }
+
+    match /hopenest_participants/{id} {
+      allow create: if isValidId(id) && incoming().fullName is string && incoming().consentAccepted == true;
+      allow read, update, delete: if isHopeNestAdmin();
+    }
+
+    match /ngo_updates/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isHopeNestAdmin();
+    }
+
+    // ====================================================
+    // Website Content & Settings (RBAC: Content Admin)
+    // ====================================================
+
+    match /blog_posts/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isContentAdmin();
+    }
+
+    match /announcements/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isContentAdmin();
+    }
+
+    match /branches/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isContentAdmin();
+    }
+
+    match /courses/{id} {
+      allow get: if isValidId(id) && (isContentAdmin() || isEducationAdmin() || isAdmin() || isLmsTeacher() || resource == null || resource.data.status == 'Published');
+      allow list: if isContentAdmin() || isEducationAdmin() || isAdmin() || isLmsTeacher() || resource.data.status == 'Published';
+      allow create, update: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      ) && isValidCourse(incoming());
+      allow delete: if isValidId(id) && (isContentAdmin() || isEducationAdmin() || isSuperAdmin());
+    }
+
+    match /products/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isContentAdmin();
+    }
+
+    match /website_settings/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isSuperAdmin();
+    }
+
+    match /newsletter_subscribers/{id} {
+      allow create: if isValidId(id) && isValidSubscriber(incoming());
+      allow read, update, delete: if isContentAdmin() || isSalesAdmin();
+    }
+
+    // ====================================================
+    // Administration (RBAC: Only Super Admin)
+    // ====================================================
+
+    match /admin_users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /activity_logs/{id} {
+      allow read: if isAdmin() || isLmsTeacher();
+      allow create: if isSignedIn() && isValidId(id);
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // ====================================================
+    // LMS COLLECTIONS (22+ Relational Entities with RBAC)
+    // ====================================================
+
+    match /users/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isLmsEducatorOrAdmin());
+      allow list: if isLmsEducatorOrAdmin();
+      allow create: if isValidId(uid) && isOwner(uid) &&
+        incoming().uid == request.auth.uid &&
+        incoming().email is string && incoming().email.size() <= 120 &&
+        incoming().displayName is string && incoming().displayName.size() <= 120 &&
+        incoming().role in ['student', 'teacher', 'parent'];
+      allow update: if isValidId(uid) && (
+        isAdmin() ||
+        (isOwner(uid) &&
+          incoming().uid == existing().uid &&
+          incoming().role in ['student', 'teacher', 'parent'])
+      );
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /student_profiles/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isLmsEducatorOrAdmin() || isLinkedParent(uid) || (isSignedIn() && resource.data.parentEmail == request.auth.token.email));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.parentEmail == request.auth.token.email || isParentAccount()));
+      allow create, update: if isValidId(uid) && (isOwner(uid) || isLmsEducatorOrAdmin()) &&
+        incoming().uid is string && incoming().uid.size() <= 128 &&
+        incoming().fullName is string && incoming().fullName.size() <= 120;
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /teacher_profiles/{uid} {
+      allow get: if isValidId(uid) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update: if isValidId(uid) && (isOwner(uid) || isEducationAdmin() || isAdmin()) &&
+        incoming().uid is string && incoming().uid.size() <= 128 &&
+        incoming().fullName is string && incoming().fullName.size() <= 120;
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /parent_links/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid)));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().parentUid == request.auth.uid || isAdmin()) &&
+        incoming().studentUid is string && incoming().studentUid.size() <= 128;
+      allow update, delete: if isValidId(id) && (isAdmin() || (isSignedIn() && resource.data.parentUid == request.auth.uid));
+    }
+
+    match /course_enrollments/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128;
+      allow update: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /course_modules/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /lessons/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /youtube_recommendations/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isValidId(id) && isSignedIn();
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /video_learning_sessions/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().videoId is string && incoming().videoId.size() <= 60;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /lesson_completions/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /quizzes/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /quiz_questions/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isValidId(id) && isSignedIn();
+      allow delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /quiz_attempts/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().percentageScore is number;
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /quiz_responses/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /projects/{id} {
+      allow get: if isValidId(id) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update: if isValidId(id) && isSignedIn();
+      allow delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /project_submissions/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().studentId == request.auth.uid &&
+        incoming().courseId is string && incoming().courseId.size() <= 128;
+      allow update: if isValidId(id) && (
+        isLmsEducatorOrAdmin() ||
+        (isSignedIn() && resource.data.studentId == request.auth.uid && existing().status != 'Approved')
+      );
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /presentations/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().studentId == request.auth.uid &&
+        incoming().courseId is string && incoming().courseId.size() <= 128;
+      allow update: if isValidId(id) && (
+        isLmsEducatorOrAdmin() ||
+        (isSignedIn() && resource.data.studentId == request.auth.uid)
+      );
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /teacher_evaluations/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(id) && isLmsEducatorOrAdmin() &&
+        incoming().studentId is string && incoming().studentId.size() <= 128 &&
+        incoming().totalScore is number;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /certificates/{certId} {
+      // Public single-document verification by certificateId; no private PII stored here
+      allow get: if isValidId(certId);
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(certId) && isLmsEducatorOrAdmin() &&
+        incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
+        incoming().studentId is string && incoming().studentId.size() <= 128;
+      allow delete: if isValidId(certId) && isAdmin();
+    }
+
+    match /certificate_verifications/{id} {
+      allow create: if isValidId(id) && incoming().certificateId is string && incoming().certificateId.size() <= 80;
+      allow read: if isAdmin() || isLmsTeacher();
+      allow update, delete: if false;
+    }
+
+    match /notifications/{id} {
+      allow get: if isValidId(id) && (isAdmin() || (isSignedIn() && (resource.data.recipientId == request.auth.uid || resource.data.recipientId == request.auth.token.email)));
+      allow list: if isAdmin() || (isSignedIn() && (resource.data.recipientId == request.auth.uid || resource.data.recipientId == request.auth.token.email));
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().recipientId is string && incoming().recipientId.size() <= 128 &&
+        incoming().title is string && incoming().title.size() <= 200;
+      allow update: if isValidId(id) && (
+        isAdmin() ||
+        (isSignedIn() && resource.data.recipientId == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['read']))
+      );
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /student_progress/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128;
+      allow update: if isValidId(id) && (
+        isLmsEducatorOrAdmin() ||
+        (isSignedIn() && resource.data.studentId == request.auth.uid &&
+          !incoming().diff(existing()).affectedKeys().hasAny(['teacherApproved', 'adminCertificateApproved', 'certificateIssued']))
+      );
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /lms_settings/{id} {
+      allow read: if isValidId(id) && isSignedIn();
+      allow create, update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /certificate_templates/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isAdmin();
+    }
+
+    // ====================================================
+    // SCALABLE COURSE MARKETPLACE COLLECTIONS
+    // ====================================================
+
+    match /course_categories/{id} {
+      allow get: if isValidId(id);
+      allow list: if true;
+      allow create, update, delete: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      );
+    }
+
+    match /course_dedup_keys/{id} {
+      allow get, list: if isContentAdmin() || isEducationAdmin() || isAdmin();
+      allow create, update, delete: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      );
+    }
+
+    match /course_import_logs/{id} {
+      allow get, list: if isContentAdmin() || isEducationAdmin() || isAdmin();
+      allow create, update: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      );
+      allow delete: if isValidId(id) && isSuperAdmin();
+    }
+
+    match /marketplace_stats/{id} {
+      allow get: if isValidId(id);
+      allow list: if isContentAdmin() || isEducationAdmin() || isAdmin();
+      allow create, update: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      );
+      allow delete: if false;
+    }
+
+    match /student_favorites/{id} {
+      allow get: if isValidId(id) && (
+        isLmsEducatorOrAdmin() ||
+        (isSignedIn() && (id.matches('^' + request.auth.uid + '_.*') || (resource != null && resource.data.studentId == request.auth.uid)))
+      );
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().studentId == request.auth.uid &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().courseTitle is string && incoming().courseTitle.size() <= 300;
+      allow update, delete: if isValidId(id) && (
+        isAdmin() ||
+        (isSignedIn() && resource.data.studentId == request.auth.uid)
+      );
+    }
+
+    match /discovered_courses/{id} {
+      allow get, list: if isContentAdmin() || isEducationAdmin() || isAdmin();
+      allow create, update: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      ) && incoming().id is string && incoming().id.size() <= 128
+        && incoming().title is string && incoming().title.size() >= 2 && incoming().title.size() <= 300
+        && incoming().reviewStatus in ['Pending Review', 'Approved', 'Imported', 'Rejected', 'Duplicate', 'Failed'];
+      allow delete: if isValidId(id) && (isContentAdmin() || isEducationAdmin() || isSuperAdmin());
+    }
+
+    match /discovery_jobs/{id} {
+      allow get, list: if isContentAdmin() || isEducationAdmin() || isAdmin();
+      allow create, update: if isValidId(id) && (
+        isContentAdmin() ||
+        isEducationAdmin() ||
+        isAdmin()
+      ) && incoming().id is string && incoming().id.size() <= 128
+        && incoming().status in ['idle', 'running', 'paused', 'stopped', 'completed', 'error'];
+      allow delete: if isValidId(id) && isSuperAdmin();
+    }
+
+    // ====================================================
+    // SCHOOL EDUCATION MANAGEMENT SYSTEM (LKG - 12TH STD)
+    // ====================================================
+
+    match /school_enrollments/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentUid == request.auth.uid || isLinkedParent(resource.data.studentUid) || resource.data.parentEmail == request.auth.token.email)));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentUid == request.auth.uid || isLinkedParent(resource.data.studentUid) || resource.data.parentEmail == request.auth.token.email));
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentUid == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().boardId is string && incoming().classId is string &&
+        (!('preferredLanguage' in incoming()) || incoming().preferredLanguage in [
+          'English', 'Kannada', 'Hindi', 'Tamil', 'Telugu', 'Malayalam',
+          'Marathi', 'Gujarati', 'Bengali', 'Odia', 'Punjabi', 'Assamese', 'Urdu', 'Sanskrit'
+        ]);
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_subjects/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /school_progress/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_quiz_attempts/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().percentage is number;
+      allow update: if isValidId(id) && isLmsEducatorOrAdmin();
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_assignments/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /school_submissions/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow update: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_presentations/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow update: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_marks/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(id) && isLmsEducatorOrAdmin();
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_examinations/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /school_attendance/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_timetables/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /school_live_classes/{id} {
+      allow read: if isValidId(id);
+      allow create, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+      allow update: if isValidId(id) && (
+        isLmsEducatorOrAdmin() ||
+        (isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['attendeeIds']))
+      );
+    }
+
+    match /school_fees/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isEducationAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin());
+    }
+
+    match /school_messages/{id} {
+      allow get: if isValidId(id) && (isAdmin() || (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid)));
+      allow list: if isAdmin() || (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.teacherUid == request.auth.uid));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().parentUid == request.auth.uid || incoming().teacherUid == request.auth.uid || isLmsEducatorOrAdmin());
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /school_announcements/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    function isValidSchoolBoardDoc(data) {
+      return data.keys().hasAll([
+               'id', 'curriculumGroupId', 'category', 'stateOrUt', 'officialName',
+               'shortName', 'scertBody', 'affiliationMode', 'hasSeparateStateBoard',
+               'subProgrammes', 'gradeRangeSummary', 'officialGradeLevels',
+               'supportedMediums', 'gradingSummary', 'officialWebsite',
+               'verificationStatus', 'sourceNote', 'isActive', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'id', 'curriculumGroupId', 'category', 'stateOrUt', 'officialName',
+               'shortName', 'secondaryBoardName', 'seniorSecondaryBoardName',
+               'scertBody', 'affiliationMode', 'hasSeparateStateBoard',
+               'subProgrammes', 'gradeRangeSummary', 'officialGradeLevels',
+               'supportedMediums', 'gradingSummary', 'officialWebsite',
+               'officialSyllabusUrl', 'verificationStatus', 'sourceNote',
+               'isActive', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() >= 2 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+             data.curriculumGroupId in ['KAR_STATE', 'CBSE', 'ICSE', 'OTHER_STATE', 'OTHER_RECOGNIZED'] &&
+             data.category in ['National', 'International', 'State', 'Union Territory'] &&
+             data.stateOrUt is string && data.stateOrUt.size() >= 2 && data.stateOrUt.size() <= 120 &&
+             data.officialName is string && data.officialName.size() >= 2 && data.officialName.size() <= 240 &&
+             data.shortName is string && data.shortName.size() >= 2 && data.shortName.size() <= 80 &&
+             (!('secondaryBoardName' in data) || (data.secondaryBoardName is string && data.secondaryBoardName.size() <= 180)) &&
+             (!('seniorSecondaryBoardName' in data) || (data.seniorSecondaryBoardName is string && data.seniorSecondaryBoardName.size() <= 180)) &&
+             data.scertBody is string && data.scertBody.size() <= 200 &&
+             data.affiliationMode is string && data.affiliationMode.size() <= 100 &&
+             data.hasSeparateStateBoard is bool &&
+             data.subProgrammes is list && data.subProgrammes.size() <= 20 &&
+             data.officialGradeLevels is list && data.officialGradeLevels.size() >= 1 && data.officialGradeLevels.size() <= 20 &&
+             data.supportedMediums is list && data.supportedMediums.size() >= 1 && data.supportedMediums.size() <= 30 &&
+             data.gradeRangeSummary is string && data.gradeRangeSummary.size() <= 160 &&
+             data.gradingSummary is string && data.gradingSummary.size() <= 400 &&
+             data.officialWebsite is string && data.officialWebsite.size() <= 300 &&
+             (!('officialSyllabusUrl' in data) || (data.officialSyllabusUrl is string && data.officialSyllabusUrl.size() <= 300)) &&
+             data.sourceNote is string && data.sourceNote.size() <= 600 &&
+             data.verificationStatus in ['Verified', 'Pending Admin Verification', 'Needs Review'] &&
+             data.isActive is bool &&
+             data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    match /school_boards/{id} {
+      allow get: if isValidId(id);
+      allow list: if true;
+      allow create, update: if isValidId(id) && (isAdmin() || isEducationAdmin()) && isValidSchoolBoardDoc(incoming()) && incoming().id == id;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    function isValidSchoolGradeFrameworkDoc(data) {
+      return data.keys().hasAll([
+               'id', 'directoryBoardId', 'boardShortName', 'structurePattern',
+               'gradingScaleName', 'passingRule', 'gradingBands',
+               'curriculumVersions', 'stages', 'streamStructure', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'id', 'directoryBoardId', 'boardShortName', 'structurePattern',
+               'gradingScaleName', 'passingRule', 'gradingBands',
+               'curriculumVersions', 'stages', 'streamStructure', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() >= 2 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+             data.directoryBoardId is string && data.directoryBoardId.size() >= 2 && data.directoryBoardId.size() <= 128 &&
+             data.boardShortName is string && data.boardShortName.size() >= 2 && data.boardShortName.size() <= 100 &&
+             data.structurePattern is string && data.structurePattern.size() <= 200 &&
+             data.gradingScaleName is string && data.gradingScaleName.size() <= 160 &&
+             data.passingRule is string && data.passingRule.size() <= 300 &&
+             data.gradingBands is list && data.gradingBands.size() >= 1 && data.gradingBands.size() <= 15 &&
+             data.curriculumVersions is list && data.curriculumVersions.size() >= 1 && data.curriculumVersions.size() <= 12 &&
+             data.stages is list && data.stages.size() >= 1 && data.stages.size() <= 20 &&
+             data.streamStructure is list && data.streamStructure.size() >= 1 && data.streamStructure.size() <= 10 &&
+             data.updatedAt is string && data.updatedAt.size() <= 50;
+    }
+
+    match /school_grade_frameworks/{id} {
+      allow get: if isValidId(id);
+      allow list: if true;
+      allow create, update: if isValidId(id) && (isAdmin() || isEducationAdmin()) && isValidSchoolGradeFrameworkDoc(incoming()) && incoming().id == id;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    // ====================================================
+    // UNIVERSAL AI LEARNING PLATFORM COLLECTIONS
+    // ====================================================
+
+    match /student_notes/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && incoming().studentId == request.auth.uid && incoming().courseId is string && incoming().lessonId is string && incoming().content is string && incoming().content.size() <= 10000;
+      allow update, delete: if isValidId(id) && (isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+    }
+
+    match /student_bookmarks/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && incoming().studentId == request.auth.uid && incoming().courseId is string && incoming().lessonId is string;
+      allow update, delete: if isValidId(id) && (isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+    }
+
+    match /search_history/{id} {
+      allow get, list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidId(id) && incoming().query is string && incoming().query.size() >= 1 && incoming().query.size() <= 300;
+      allow update, delete: if isValidId(id) && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+    }
+
+    match /consent_records/{id} {
+      allow get, list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow create: if isValidId(id) && incoming().email is string && incoming().fullName is string && incoming().dpdpConsentAccepted == true;
+      allow update, delete: if isValidId(id) && isSuperAdmin();
+    }
+
+    match /ai_learning_paths/{id} {
+      allow read: if isValidId(id);
+      allow create: if isValidId(id)
+        && incoming().topic is string && incoming().topic.size() >= 1 && incoming().topic.size() <= 200
+        && incoming().title is string && incoming().title.size() >= 1 && incoming().title.size() <= 300
+        && (!('approvedByAdmin' in incoming()) || incoming().approvedByAdmin == false || isLmsEducatorOrAdmin());
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin());
+    }
+
+    match /content_reports/{id} {
+      allow get, list: if isAdmin() || isEducationAdmin() || isContentAdmin() || (isSignedIn() && resource.data.reporterUid == request.auth.uid);
+      allow create: if isValidId(id) && incoming().courseId is string && incoming().reason is string && incoming().status == 'Submitted';
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin());
+    }
+
+    // Connection testing
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}
