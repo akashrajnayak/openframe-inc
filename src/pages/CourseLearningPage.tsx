@@ -44,6 +44,7 @@ import { quinnAiService } from '../services/quinnAiService';
 import { youtubeVideoService } from '../services/youtubeVideoService';
 import { lmsService } from '../services/lmsService';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../utils/searchIntelligence';
 import {
   MarketplaceCourse,
@@ -115,6 +116,9 @@ export const CourseLearningPage: React.FC = () => {
   const [activeLessonId, setActiveLessonId] = useState<string>('');
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [requiresEnrollment, setRequiresEnrollment] = useState(false);
+  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
+  const [workspaceNonce, setWorkspaceNonce] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>(queryTab || 'overview');
   const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
@@ -205,12 +209,16 @@ export const CourseLearningPage: React.FC = () => {
   const [savingNote, setSavingNote] = useState(false);
   const [lessonSummary, setLessonSummary] = useState<{ keyTakeaways: string[]; studyTips: string[]; disclaimer: string } | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [practiceQuestions, setPracticeQuestions] = useState<Array<{ question: string; hint: string; sampleAnswer: string; difficulty: string }> | null>(null);
+  const [practiceLoading, setPracticeLoading] = useState(false);
+  const [randomizeQuizOrder, setRandomizeQuizOrder] = useState(true);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState<'Broken Video' | 'Audio Issue' | 'Off-Topic' | 'Inappropriate' | 'Copyright Concern' | 'Other'>('Broken Video');
   const [reportDetails, setReportDetails] = useState('');
   const [submittingReport, setSubmittingReport] = useState(false);
   const [timedQuizMode, setTimedQuizMode] = useState(false);
   const [quizSecondsLeft, setQuizSecondsLeft] = useState(900);
+  const autoSubmittedQuizRef = useRef(false);
 
   const notify = (type: 'success' | 'error' | 'info', text: string) => {
     setStatusBanner({ type, text });
@@ -258,6 +266,31 @@ export const CourseLearningPage: React.FC = () => {
       if (!active) return;
       setRecommendedVideos(recs);
       if (recs[0]) setSelectedVideo(recs[0]);
+
+      // Gate paid courses strictly on verified paid/complimentary/scholarship enrollment (unless Teacher/Admin)
+      if (found.price > 0 && !isEducatorOrAdmin) {
+        if (!currentUser || !studentId) {
+          if (active) {
+            setRequiresEnrollment(true);
+            setLoading(false);
+          }
+          return;
+        }
+        const existingEnrollments = await lmsService.getStudentEnrollments(studentId);
+        const hasActivePaidEnrollment = existingEnrollments.some(
+          (en) =>
+            en.courseId === found.id &&
+            ['Paid', 'Complimentary', 'Scholarship'].includes(en.paymentStatus || '')
+        );
+        if (!hasActivePaidEnrollment) {
+          if (active) {
+            setRequiresEnrollment(true);
+            setLoading(false);
+          }
+          return;
+        }
+      }
+      if (active) setRequiresEnrollment(false);
 
       if (currentUser && studentId) {
         const { progress: prog } = await lmsService.enrollStudentInCourse(found, {
@@ -313,7 +346,7 @@ export const CourseLearningPage: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [courseIdParam, authLoading, currentUser?.uid]);
+  }, [courseIdParam, authLoading, currentUser?.uid, isEducatorOrAdmin, workspaceNonce]);
 
   const activeLesson = lessons.find((l) => l.id === activeLessonId) || lessons[0];
 
@@ -353,10 +386,20 @@ export const CourseLearningPage: React.FC = () => {
     }).catch(() => {});
   }, [studentId, courseIdParam]);
 
-  // Timed Quiz Countdown Timer
+  // Timed Quiz Countdown Timer (auto-submits cleanly at 0:00)
   useEffect(() => {
-    if (!timedQuizMode || activeTab !== 'quiz') return;
-    if (quizSecondsLeft <= 0) return;
+    if (!timedQuizMode || activeTab !== 'quiz') {
+      autoSubmittedQuizRef.current = false;
+      return;
+    }
+    if (quizSecondsLeft <= 0) {
+      if (!autoSubmittedQuizRef.current && !quizSubmitting && quizQuestions.length > 0 && currentUser) {
+        autoSubmittedQuizRef.current = true;
+        notify('info', 'Time expired — auto-submitting your verification quiz now.');
+        executeQuizSubmit();
+      }
+      return;
+    }
     const t = setInterval(() => {
       setQuizSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
@@ -439,6 +482,22 @@ export const CourseLearningPage: React.FC = () => {
       setLessonSummary(sum);
     } finally {
       setSummaryLoading(false);
+    }
+  };
+
+  const handleGeneratePracticeQuestions = async () => {
+    if (!course) return;
+    setPracticeLoading(true);
+    try {
+      const qs = await quinnAiService.generatePracticeQuestions({
+        courseTitle: course.title,
+        lessonTopic: activeLesson?.title || activeLesson?.topicName || course.title,
+        language: quinnLang,
+        objectives: activeLesson?.learningObjectives || course.learningObjectives,
+      });
+      setPracticeQuestions(qs);
+    } finally {
+      setPracticeLoading(false);
     }
   };
 
@@ -700,9 +759,19 @@ export const CourseLearningPage: React.FC = () => {
   };
 
   // Generate or load verification quiz
+  const shuffleQuestionsList = (items: QuizQuestion[]): QuizQuestion[] => {
+    const arr = [...items];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
   const handleStartOrLoadQuiz = async () => {
     if (!course) return;
     setQuizLoading(true);
+    autoSubmittedQuizRef.current = false;
     const cfg = quizConfig || (await lmsService.getQuizConfig(course.id, activeLesson?.id || `${course.id}_l_1_1`));
     const res = await quinnAiService.generateVerificationQuestions({
       courseTitle: course.title,
@@ -714,8 +783,9 @@ export const CourseLearningPage: React.FC = () => {
       intermediateCount: cfg.intermediateCount,
       advancedCount: cfg.advancedCount,
     });
-    setQuizQuestions(res.questions);
+    setQuizQuestions(randomizeQuizOrder ? shuffleQuestionsList(res.questions) : res.questions);
     setUserQuizAnswers({});
+    if (timedQuizMode) setQuizSecondsLeft(900);
     setQuizLoading(false);
   };
 
@@ -725,10 +795,11 @@ export const CourseLearningPage: React.FC = () => {
     }
   }, [activeTab, course?.id, activeLessonId]);
 
-  const handleQuizSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!course || !currentUser) {
-      navigate(`/portal?role=student&redirect=/learn/${courseIdParam}`);
+  const executeQuizSubmit = async () => {
+    if (!course || !currentUser || quizSubmitting) {
+      if (!currentUser) {
+        navigate(`/portal?role=student&redirect=/learn/${courseIdParam}`);
+      }
       return;
     }
     const maxRetakes = quizConfig?.maxRetakes ?? 5;
@@ -738,29 +809,38 @@ export const CourseLearningPage: React.FC = () => {
     }
 
     setQuizSubmitting(true);
-    const attempt = await quinnAiService.evaluateQuizAttempt({
-      questions: quizQuestions,
-      studentAnswers: userQuizAnswers,
-      studentId,
-      courseId: course.id,
-      lessonId: activeLesson?.id || `${course.id}_l_1_1`,
-      passingScorePercent: quizConfig?.passingScorePercent ?? 70,
-    });
-    attempt.attemptNumber = quizAttempts.length + 1;
-    attempt.studentName = studentName;
+    try {
+      const attempt = await quinnAiService.evaluateQuizAttempt({
+        questions: quizQuestions,
+        studentAnswers: userQuizAnswers,
+        studentId,
+        courseId: course.id,
+        lessonId: activeLesson?.id || `${course.id}_l_1_1`,
+        passingScorePercent: quizConfig?.passingScorePercent ?? 70,
+      });
+      attempt.attemptNumber = quizAttempts.length + 1;
+      attempt.studentName = studentName;
 
-    const updatedProg = await lmsService.saveQuizAttempt(attempt, course.title);
-    setProgress(updatedProg);
-    setLastQuizAttempt(attempt);
-    const allAttempts = await lmsService.getQuizAttempts(studentId, course.id);
-    setQuizAttempts(allAttempts);
-    setQuizSubmitting(false);
+      const updatedProg = await lmsService.saveQuizAttempt(attempt, course.title);
+      setProgress(updatedProg);
+      setLastQuizAttempt(attempt);
+      const allAttempts = await lmsService.getQuizAttempts(studentId, course.id);
+      setQuizAttempts(allAttempts);
+      setTimedQuizMode(false);
 
-    if (attempt.passed) {
-      notify('success', `Assessment passed (${attempt.percentageScore}%). Practical Project stage is now unlocked.`);
-    } else {
-      notify('error', `Scored ${attempt.percentageScore}%. Review Quinn AI explanations and revision topics before retaking.`);
+      if (attempt.passed) {
+        notify('success', `Assessment passed (${attempt.percentageScore}%). Practical Project stage is now unlocked.`);
+      } else {
+        notify('error', `Scored ${attempt.percentageScore}%. Review Quinn AI explanations and revision topics before retaking.`);
+      }
+    } finally {
+      setQuizSubmitting(false);
     }
+  };
+
+  const handleQuizSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeQuizSubmit();
   };
 
   // File upload for Practical Project
@@ -1035,6 +1115,70 @@ export const CourseLearningPage: React.FC = () => {
     );
   }
 
+  if (requiresEnrollment) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-6">
+        <div className="max-w-lg w-full bg-white border border-slate-200 rounded-2xl p-7 shadow-lg text-left space-y-5">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
+              <Lock className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">
+                Enrollment &amp; Checkout Required
+              </div>
+              <h1 className="text-lg font-bold text-[#18221F]">{course.title}</h1>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-600 leading-relaxed">
+            This course ({course.id}) is a paid OpenFrame programme (<strong className="text-slate-900 tabular-nums">₹{course.price.toLocaleString()}</strong>). Complete enrollment and payment verification to unlock all {modules.length} curriculum modules, practical project assessments, presentation reviews, and verified certification.
+          </p>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
+            <div>
+              <div className="font-semibold text-slate-900">{course.category} · {course.level}</div>
+              <div className="text-slate-500 mt-0.5">{course.duration} · {course.language || 'English'}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-base font-extrabold text-[#123D32] tabular-nums">₹{course.price.toLocaleString()}</div>
+              <div className="text-[11px] text-slate-500">One-time course fee</div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setEnrollModalOpen(true)}
+              className="flex-1 py-3 px-4 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white font-bold text-xs text-center transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Enroll &amp; Complete Checkout
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`/marketplace/${course.id}`)}
+              className="py-3 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
+            >
+              View Syllabus Details
+            </button>
+          </div>
+        </div>
+
+        <CourseEnrollmentModal
+          isOpen={enrollModalOpen}
+          onClose={() => setEnrollModalOpen(false)}
+          course={course}
+          onEnrolled={() => {
+            setEnrollModalOpen(false);
+            setRequiresEnrollment(false);
+            setWorkspaceNonce((n) => n + 1);
+            notify('success', 'Course unlocked! Welcome to your learning workspace.');
+          }}
+        />
+      </div>
+    );
+  }
+
   const quizPassed = Boolean(
     progress?.completedStages.includes('QUIZ_COMPLETION') || quizAttempts.some((a) => a.passed)
   );
@@ -1296,6 +1440,16 @@ export const CourseLearningPage: React.FC = () => {
 
               <button
                 type="button"
+                onClick={handleGeneratePracticeQuestions}
+                disabled={practiceLoading}
+                className="px-3 py-1.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-800 hover:bg-cyan-100 font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <HelpCircle className="w-3.5 h-3.5" />
+                <span>{practiceLoading ? 'Creating Qs...' : 'Practice Questions'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setReportModalOpen(true)}
                 className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-200 flex items-center gap-1 cursor-pointer"
                 title="Report broken video or issue"
@@ -1305,6 +1459,33 @@ export const CourseLearningPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {practiceQuestions && practiceQuestions.length > 0 && (
+            <div className="bg-cyan-50/70 border border-cyan-200 rounded-2xl p-4 sm:p-5 text-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-cyan-950 flex items-center gap-1.5">
+                  <HelpCircle className="w-4 h-4 text-cyan-700" />
+                  <span>Quinn AI Practice Questions ({quinnLang})</span>
+                </div>
+                <button type="button" onClick={() => setPracticeQuestions(null)} className="text-slate-500 hover:text-slate-800">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {practiceQuestions.map((pq, idx) => (
+                  <div key={idx} className="p-3 bg-white border border-cyan-200/80 rounded-xl space-y-1.5">
+                    <div className="text-[10px] font-bold uppercase text-cyan-700">Q{idx + 1} · {pq.difficulty}</div>
+                    <div className="font-semibold text-slate-900">{pq.question}</div>
+                    <div className="text-[11px] text-slate-500">Hint: {pq.hint}</div>
+                    <details className="text-[11px] text-emerald-800 pt-1">
+                      <summary className="cursor-pointer font-semibold">Show Sample Answer</summary>
+                      <p className="mt-1 text-slate-700">{pq.sampleAnswer}</p>
+                    </details>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {lessonSummary && (
             <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-4 sm:p-5 text-xs space-y-2">
@@ -1858,7 +2039,24 @@ export const CourseLearningPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      if (!timedQuizMode) setQuizSecondsLeft(900);
+                      setRandomizeQuizOrder((prev) => !prev);
+                      setQuizQuestions((qs) => shuffleQuestionsList(qs));
+                    }}
+                    className={`px-3 py-2 border rounded-xl text-xs font-semibold cursor-pointer ${
+                      randomizeQuizOrder
+                        ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {randomizeQuizOrder ? 'Randomized Order: ON' : 'Shuffle Questions'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!timedQuizMode) {
+                        autoSubmittedQuizRef.current = false;
+                        setQuizSecondsLeft(900);
+                      }
                       setTimedQuizMode((p) => !p);
                     }}
                     className={`px-3 py-2 border rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
@@ -2469,10 +2667,10 @@ export const CourseLearningPage: React.FC = () => {
                 {[
                   { label: '1. All mandatory video lessons completed', ok: eligibility.allMandatoryLessonsCompleted },
                   { label: '2. Required AI verification assessments completed', ok: eligibility.requiredAssessmentsCompleted },
-                  { label: '3. Minimum quiz passing marks achieved (≥70%)', ok: eligibility.minimumQuizCriteriaMet },
+                  { label: `3. Minimum quiz passing marks achieved (≥${quizConfig?.passingScorePercent ?? 70}%)`, ok: eligibility.minimumQuizCriteriaMet },
                   { label: '4. Practical project submitted & approved', ok: eligibility.projectSubmittedAndApproved },
                   { label: '5. Student presentation completed', ok: eligibility.presentationCompleted },
-                  { label: '6. Teacher final approval granted (≥70/100)', ok: eligibility.teacherFinalApprovalGranted },
+                  { label: `6. Teacher final approval granted (≥${quizConfig?.passingScorePercent ?? 70}/100)`, ok: eligibility.teacherFinalApprovalGranted },
                 ].map((gate) => (
                   <div
                     key={gate.label}
@@ -2548,6 +2746,10 @@ export const CourseLearningPage: React.FC = () => {
                   Complete all 6 requirements above to trigger automatic certificate issuance with a unique verification QR code.
                 </div>
               )}
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500">
+                OpenFrame Education Certificate Disclosure: Credentials verify course completion and faculty evaluation within OpenFrame Education&apos;s platform. They do not imply government accreditation, university degree equivalence, or third-party YouTube channel endorsement.
+              </div>
             </div>
           )}
         </main>

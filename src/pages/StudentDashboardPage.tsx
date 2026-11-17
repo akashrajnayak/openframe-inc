@@ -31,6 +31,8 @@ import {
   Plus,
   Shield,
   MessageSquare,
+  User,
+  Camera,
 } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, stripUndefinedDeep } from '../services/firebase';
@@ -43,6 +45,8 @@ import { getSchoolEnrollment } from '../services/schoolService';
 import { SCHOOL_BOARDS, SCHOOL_CLASSES } from '../data/schoolCurriculumData';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { StudentAnalytics20Charts } from '../components/student/StudentAnalytics20Charts';
+import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
+import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
 import {
   UNIVERSAL_12_CATEGORIES,
   SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES,
@@ -66,10 +70,18 @@ import {
   StudentLessonNote,
   StudentLessonBookmark,
   SearchHistoryEntry,
+  EducationCategoryCode,
+  QaSavedRecord,
+  AiLearningPath,
 } from '../types';
+import {
+  EDUCATION_CLASSIFICATION_CATEGORIES,
+  getAllProgrammesForCategory,
+} from '../data/educationClassificationData';
 
 type DashboardModuleId =
   | 'overview'
+  | 'profile'
   | 'courses'
   | 'learning'
   | 'continue'
@@ -88,21 +100,22 @@ type DashboardModuleId =
 
 const DASHBOARD_MODULES: Array<{ id: DashboardModuleId; label: string; icon: any }> = [
   { id: 'overview', label: '1. Overview & 8-Stage Tracker', icon: Compass },
-  { id: 'courses', label: '2. My Courses', icon: BookOpen },
-  { id: 'learning', label: '3. My Learning', icon: Play },
-  { id: 'continue', label: '4. Continue Learning', icon: Clock },
-  { id: 'completed', label: '5. Completed Courses', icon: CheckCircle2 },
-  { id: 'saved', label: '6. Saved Lessons & Favorites', icon: Bookmark },
-  { id: 'history', label: '7. Learning History', icon: History },
-  { id: 'recommended', label: '8. Recommended For You', icon: Sparkles },
-  { id: 'certificates', label: '9. My Certificates', icon: Award },
-  { id: 'assessments', label: '10. My Assessments', icon: HelpCircle },
-  { id: 'assignments', label: '11. My Assignments & Defense', icon: FileCheck },
-  { id: 'notes', label: '12. My Notes', icon: FileText },
-  { id: 'tutor', label: '13. Quinn AI Tutor', icon: MessageSquare },
-  { id: 'analytics', label: '14. Learning Analytics (20 Charts)', icon: BarChart3 },
-  { id: 'notifications', label: '15. Notifications', icon: Bell },
-  { id: 'settings', label: '16. Account & Privacy Settings', icon: Settings },
+  { id: 'profile', label: '2. Profile & Verification', icon: User },
+  { id: 'courses', label: '3. My Courses', icon: BookOpen },
+  { id: 'learning', label: '4. My Learning', icon: Play },
+  { id: 'continue', label: '5. Continue Learning', icon: Clock },
+  { id: 'completed', label: '6. Completed Courses', icon: CheckCircle2 },
+  { id: 'saved', label: '7. Saved Lessons & Favorites', icon: Bookmark },
+  { id: 'history', label: '8. Learning History', icon: History },
+  { id: 'recommended', label: '9. Recommended For You', icon: Sparkles },
+  { id: 'certificates', label: '10. My Certificates', icon: Award },
+  { id: 'assessments', label: '11. My Assessments', icon: HelpCircle },
+  { id: 'assignments', label: '12. My Assignments & Defense', icon: FileCheck },
+  { id: 'notes', label: '13. My Notes', icon: FileText },
+  { id: 'tutor', label: '14. Quinn AI Tutor', icon: MessageSquare },
+  { id: 'analytics', label: '15. Learning Analytics (20 Charts)', icon: BarChart3 },
+  { id: 'notifications', label: '16. Notifications', icon: Bell },
+  { id: 'settings', label: '17. Account & Privacy Settings', icon: Settings },
 ];
 
 const STAGES: Array<{ id: LearningStage; label: string; number: number; icon: any }> = [
@@ -120,7 +133,7 @@ const PERSONALIZATION_KEY = 'openframe_personalization_enabled_v1';
 
 export const StudentDashboardPage: React.FC = () => {
   const { navigate } = useRouter();
-  const { currentUser, lmsUser, studentProfile, loading: authLoading } = useAuth();
+  const { currentUser, lmsUser, studentProfile, logout, loading: authLoading } = useAuth();
 
   const [activeModule, setActiveModule] = useState<DashboardModuleId>('overview');
   const [progressList, setProgressList] = useState<StudentProgressRecord[]>([]);
@@ -134,6 +147,8 @@ export const StudentDashboardPage: React.FC = () => {
   const [recommendedCatalog, setRecommendedCatalog] = useState<MarketplaceCourse[]>([]);
   const [liveTotalCourses, setLiveTotalCourses] = useState<number>(15500);
   const [schoolEnrollment, setSchoolEnrollment] = useState<SchoolStudentEnrollment | null>(null);
+  const [savedQas, setSavedQas] = useState<QaSavedRecord[]>([]);
+  const [savedRoadmaps, setSavedRoadmaps] = useState<AiLearningPath[]>([]);
 
   const [extData, setExtData] = useState<{
     quizAttempts: QuizAttempt[];
@@ -184,11 +199,73 @@ export const StudentDashboardPage: React.FC = () => {
     },
   ]);
 
-  // Module 16 Account Preferences State
+  // Module 17 Account Preferences State
   const [prefLang, setPrefLang] = useState('English');
   const [prefCategories, setPrefCategories] = useState<string[]>([]);
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [prefsSavedMsg, setPrefsSavedMsg] = useState('');
+
+  // Module 2 Editable Student Profile & Verification State
+  const [profileForm, setProfileForm] = useState({
+    fullName: '',
+    mobileNumber: '',
+    whatsappNumber: '',
+    dob: '',
+    gender: '',
+    profilePhotoUrl: '',
+    country: 'India',
+    state: 'Karnataka',
+    district: '',
+    city: '',
+    houseNumber: '',
+    streetAddress: '',
+    pincode: '',
+    qualification: '',
+    institution: '',
+    preferredLanguage: 'English',
+    educationLevel: '' as '' | EducationCategoryCode,
+    degreeOrClass: '',
+    academicYear: '',
+    subjectsRaw: '',
+    skillsRaw: '',
+    interestsRaw: '',
+    careerAspirations: '',
+    learningFormatPreference: 'Mixed' as 'Video' | 'Structured Course' | 'Interactive' | 'Mixed',
+  });
+  const [uploadingProfilePhoto, setUploadingProfilePhoto] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSavedMsg, setProfileSavedMsg] = useState('');
+
+  useEffect(() => {
+    setProfileForm({
+      fullName: studentProfile?.fullName || lmsUser?.displayName || currentUser?.displayName || '',
+      mobileNumber: studentProfile?.mobileNumber || '',
+      whatsappNumber: studentProfile?.whatsappNumber || '',
+      dob: studentProfile?.dob || '',
+      gender: studentProfile?.gender || '',
+      profilePhotoUrl: studentProfile?.profilePhotoUrl || lmsUser?.photoURL || currentUser?.photoURL || '',
+      country: studentProfile?.country || 'India',
+      state: studentProfile?.state || 'Karnataka',
+      district: studentProfile?.district || '',
+      city: studentProfile?.city || '',
+      houseNumber: studentProfile?.houseNumber || '',
+      streetAddress: studentProfile?.streetAddress || '',
+      pincode: studentProfile?.pincode || '',
+      qualification: studentProfile?.qualification || '',
+      institution: studentProfile?.institution || '',
+      preferredLanguage: studentProfile?.preferredLanguage || 'English',
+      educationLevel: (studentProfile?.educationLevel as '' | EducationCategoryCode) || '',
+      degreeOrClass: studentProfile?.degreeOrClass || '',
+      academicYear: studentProfile?.academicYear || '',
+      subjectsRaw: (studentProfile?.subjects || []).join(', '),
+      skillsRaw: (studentProfile?.skills || []).join(', '),
+      interestsRaw: (studentProfile?.interests || []).join(', '),
+      careerAspirations: studentProfile?.careerAspirations || '',
+      learningFormatPreference: studentProfile?.learningFormatPreference || 'Mixed',
+    });
+    if (studentProfile?.preferredLanguage) setPrefLang(studentProfile.preferredLanguage);
+    if (studentProfile?.preferredCategories?.length) setPrefCategories(studentProfile.preferredCategories);
+  }, [studentProfile, lmsUser, currentUser]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -200,7 +277,7 @@ export const StudentDashboardPage: React.FC = () => {
     let active = true;
     async function loadDashboard() {
       setLoading(true);
-      const [allProg, enrs, certs, notifs, favs, stats, schEnr, ext, recRes] = await Promise.all([
+      const [allProg, enrs, certs, notifs, favs, stats, schEnr, ext, recRes, qaList, roadmaps] = await Promise.all([
         lmsService.getAllStudentProgress(currentUser!.uid),
         lmsService.getStudentEnrollments(currentUser!.uid),
         lmsService.getCertificatesForStudent(currentUser!.uid),
@@ -210,6 +287,8 @@ export const StudentDashboardPage: React.FC = () => {
         getSchoolEnrollment(currentUser!.uid).catch(() => null),
         lmsService.getStudentExtendedAnalyticsData(currentUser!.uid),
         marketplaceService.filterCourses({ tab: 'recommended', page: 1, pageSize: 12 }).catch(() => ({ courses: [] })),
+        lmsService.getQaHistory(currentUser!.uid, 25).catch(() => []),
+        lmsService.getAiLearningPaths(20).catch(() => []),
       ]);
 
       if (!active) return;
@@ -221,6 +300,8 @@ export const StudentDashboardPage: React.FC = () => {
       setSchoolEnrollment(schEnr);
       setExtData(ext);
       setRecommendedCatalog(recRes.courses || []);
+      setSavedQas(qaList);
+      setSavedRoadmaps(roadmaps.filter((r) => !r.createdByUid || r.createdByUid === currentUser!.uid));
 
       if (stats?.totalCoursesAvailable) {
         setLiveTotalCourses(stats.totalCoursesAvailable);
@@ -422,6 +503,81 @@ export const StudentDashboardPage: React.FC = () => {
     }
   };
 
+  const handleProfilePhotoUpload = async (file?: File) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setUploadingProfilePhoto(true);
+    setProfileSavedMsg('');
+    try {
+      const uploaded = await lmsService.uploadDeliverableFile(file, 'student-photos');
+      const url = uploaded.url;
+      setProfileForm((prev) => ({ ...prev, profilePhotoUrl: url }));
+      if (currentUser) {
+        await setDoc(
+          doc(db, 'student_profiles', currentUser.uid),
+          stripUndefinedDeep({
+            uid: currentUser.uid,
+            profilePhotoUrl: url,
+            updatedAt: new Date().toISOString(),
+          }),
+          { merge: true }
+        );
+      }
+      setProfileSavedMsg('Profile photo uploaded to Firebase Storage and synced.');
+    } catch {
+      setProfileSavedMsg('Photo upload encountered an error. You may also save a direct image URL.');
+    } finally {
+      setUploadingProfilePhoto(false);
+    }
+  };
+
+  const handleSaveStudentProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    setSavingProfile(true);
+    setProfileSavedMsg('');
+    try {
+      await setDoc(
+        doc(db, 'student_profiles', currentUser.uid),
+        stripUndefinedDeep({
+          uid: currentUser.uid,
+          email: currentUser.email || studentProfile?.email || '',
+          fullName: profileForm.fullName.trim() || displayName,
+          mobileNumber: profileForm.mobileNumber.trim(),
+          whatsappNumber: profileForm.whatsappNumber.trim() || undefined,
+          dob: profileForm.dob || undefined,
+          gender: profileForm.gender || undefined,
+          profilePhotoUrl: profileForm.profilePhotoUrl.trim() || undefined,
+          country: profileForm.country.trim() || 'India',
+          state: profileForm.state.trim() || undefined,
+          district: profileForm.district.trim() || undefined,
+          city: profileForm.city.trim() || undefined,
+          houseNumber: profileForm.houseNumber.trim() || undefined,
+          streetAddress: profileForm.streetAddress.trim() || undefined,
+          pincode: profileForm.pincode.trim() || undefined,
+          qualification: profileForm.qualification.trim() || undefined,
+          institution: profileForm.institution.trim() || undefined,
+          preferredLanguage: profileForm.preferredLanguage || 'English',
+          educationLevel: profileForm.educationLevel || undefined,
+          degreeOrClass: profileForm.degreeOrClass.trim() || undefined,
+          academicYear: profileForm.academicYear.trim() || undefined,
+          subjects: profileForm.subjectsRaw.split(',').map((s) => s.trim()).filter(Boolean),
+          skills: profileForm.skillsRaw.split(',').map((s) => s.trim()).filter(Boolean),
+          interests: profileForm.interestsRaw.split(',').map((s) => s.trim()).filter(Boolean),
+          careerAspirations: profileForm.careerAspirations.trim() || undefined,
+          learningFormatPreference: profileForm.learningFormatPreference || 'Mixed',
+          emailVerified: currentUser.emailVerified,
+          updatedAt: new Date().toISOString(),
+        }),
+        { merge: true }
+      );
+      setProfileSavedMsg('Student profile and KYC verification details saved to Firestore.');
+    } catch {
+      setProfileSavedMsg('Unable to sync profile to Firestore right now. Please try again.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const getStageStatus = (stageId: LearningStage): 'completed' | 'active' | 'failed' | 'locked' => {
     if (!activeProgress) return 'locked';
     if (activeProgress.failedStages?.includes(stageId)) return 'failed';
@@ -432,27 +588,27 @@ export const StudentDashboardPage: React.FC = () => {
 
   if (authLoading || loading) {
     return (
-      <div className="min-h-[70vh] bg-[#F8FAFC] flex items-center justify-center p-8">
-        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#F5F5F2] flex items-center justify-center p-8">
+        <div className="w-8 h-8 border-2 border-[#123D32] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   if (!currentUser) {
     return (
-      <div className="min-h-[75vh] bg-[#F8FAFC] flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+      <div className="min-h-screen bg-[#FAF7F2] flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-4 shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-[#123D32]/10 text-[#123D32] flex items-center justify-center mx-auto">
             <BookOpen className="w-6 h-6" />
           </div>
-          <h1 className="text-xl font-bold text-slate-900">Student Learning Portal</h1>
-          <p className="text-xs text-slate-600 leading-relaxed">
+          <h1 className="text-xl font-editorial font-semibold text-[#18221F]">Student Learning Portal</h1>
+          <p className="text-xs text-[#64748B] leading-relaxed">
             Sign in with your student account to access enrolled courses, Quinn AI YouTube lectures, verification quizzes, 20 real-time analytics charts, notes, and certificates.
           </p>
           <button
             type="button"
-            onClick={() => navigate('/portal?role=student&redirect=/student/dashboard')}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+            onClick={() => navigate('/portal/student?redirect=/student/dashboard')}
+            className="w-full py-3 bg-[#123D32] hover:bg-[#0D2E25] text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
             <span>Sign In to Student Portal</span>
             <ArrowRight className="w-4 h-4" />
@@ -466,21 +622,53 @@ export const StudentDashboardPage: React.FC = () => {
   const regNo = studentProfile?.registrationNumber || lmsUser?.registrationNumber || '';
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  const studentNavItems: WorkspaceNavItem[] = DASHBOARD_MODULES.map((m) => ({
+    id: m.id,
+    label: m.label,
+    icon: m.icon,
+    badge: m.id === 'notifications' ? unreadCount : undefined,
+  }));
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <SocialAppShell
+      roleLabel="Student"
+      userName={profileForm.fullName || displayName}
+      userEmail={currentUser.email || ''}
+      registrationId={regNo}
+      navItems={studentNavItems}
+      activeNavId={activeModule}
+      onSelectNav={(id) => setActiveModule(id as DashboardModuleId)}
+      notifications={notifications.map((n) => ({
+        id: n.id,
+        title: n.title,
+        message: n.message,
+        read: n.read,
+      }))}
+      onLogout={() => logout().then(() => navigate('/portal'))}
+      showRightRail={activeModule !== 'analytics'}
+    >
+      <div className="space-y-6">
         {/* Top Student Profile Banner */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-1.5">
-            <div className="text-xs font-medium text-blue-600">
-              OpenFrame Student Dashboard · {regNo}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 flex flex-col xl:flex-row xl:items-center justify-between gap-5">
+          <div className="flex items-start gap-4">
+            {(profileForm.profilePhotoUrl || studentProfile?.profilePhotoUrl) && (
+              <img
+                src={profileForm.profilePhotoUrl || studentProfile?.profilePhotoUrl}
+                alt={displayName}
+                className="w-14 h-14 rounded-2xl object-cover border border-slate-200 shrink-0 hidden sm:block"
+              />
+            )}
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#123D32]">
+                OpenFrame Student Workspace{regNo ? ` · ${regNo}` : ''}
+              </div>
+              <h1 className="text-2xl font-editorial font-semibold text-[#18221F] tracking-tight">
+                Welcome back, {profileForm.fullName || displayName}
+              </h1>
+              <p className="text-xs text-[#64748B] max-w-2xl">
+                Your 17-module AI learning hub: YouTube lecture discovery, Quinn AI tutor, verification quizzes, practical projects, real-time analytics, and verified credentials.
+              </p>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-              Welcome back, {displayName}
-            </h1>
-            <p className="text-xs text-slate-600 max-w-2xl">
-              Your 16-module AI learning hub: YouTube lecture discovery, Quinn AI tutor, verification quizzes, practical projects, real-time analytics, and verified credentials.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
@@ -488,34 +676,34 @@ export const StudentDashboardPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => navigate(`/learn/${activeProgress.courseId}`)}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors"
+                className="px-4 py-2.5 bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
               >
-                <span>Resume Active Course</span>
+                <span>Resume Course</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             )}
             <button
               type="button"
               onClick={() => navigate('/marketplace')}
-              className="px-5 py-2.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-xl transition-colors"
+              className="px-4 py-2.5 border border-slate-200 bg-white hover:bg-[#FAF7F2] text-[#18221F] text-xs font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
-              Browse Courses
+              Browse Catalog
             </button>
           </div>
         </div>
 
         {/* School Education (LKG - Class 12) Quick Workspace Card */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="text-xs font-semibold text-blue-600">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[#123D32]">
               School Education Portal (LKG – 12th Standard)
             </div>
-            <h2 className="text-sm font-bold text-slate-900">
+            <h2 className="text-sm font-bold text-[#18221F]">
               {schoolEnrollment
                 ? `${SCHOOL_CLASSES.find((c) => c.id === schoolEnrollment.classId)?.label || `Class ${schoolEnrollment.classId}`} · ${SCHOOL_BOARDS.find((b) => b.id === schoolEnrollment.boardId)?.shortName || schoolEnrollment.boardId}`
                 : 'Select Your Board, Class (LKG–12) & Multilingual School Syllabus'}
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-[#64748B]">
               {schoolEnrollment
                 ? `${schoolEnrollment.medium} · ${schoolEnrollment.preferredLanguage} AI Tutor · ${schoolEnrollment.xpPoints || 0} XP · ${schoolEnrollment.streakDays || 1}-day streak`
                 : 'Access Karnataka State Board, CBSE & ICSE chapter concepts, multilingual voice learning, 8-format quizzes & virtual labs.'}
@@ -530,69 +718,32 @@ export const StudentDashboardPage: React.FC = () => {
                   : '/school'
               )
             }
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors shrink-0 self-start sm:self-center whitespace-nowrap"
+            className="px-4 py-2.5 bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors shrink-0 self-start sm:self-center whitespace-nowrap cursor-pointer"
           >
             <span>{schoolEnrollment ? 'Open School Portal' : 'Explore School (LKG–12)'}</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* 16-Module Student Workspace Grid (Sidebar + Main Panel) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Navigation (Mobile Dropdown + Desktop Sidebar) */}
-          <aside className="lg:col-span-3 space-y-3">
-            <div className="lg:hidden bg-white border border-slate-200 rounded-2xl p-3">
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">
-                Student Workspace Module
-              </label>
-              <select
-                value={activeModule}
-                onChange={(e) => setActiveModule(e.target.value as DashboardModuleId)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
-              >
-                {DASHBOARD_MODULES.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+        {/* Mobile / Compact Quick Module Selector */}
+        <div className="lg:hidden bg-white border border-slate-200/80 rounded-2xl p-3">
+          <label className="block text-[11px] font-semibold text-[#64748B] mb-1.5">
+            Student Workspace Module
+          </label>
+          <select
+            value={activeModule}
+            onChange={(e) => setActiveModule(e.target.value as DashboardModuleId)}
+            className="w-full p-2.5 bg-[#FAF7F2] border border-slate-200 rounded-xl text-xs font-semibold text-[#18221F]"
+          >
+            {DASHBOARD_MODULES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
-            <div className="hidden lg:block bg-white border border-slate-200 rounded-3xl p-3 space-y-1">
-              <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                16 Learning Modules
-              </div>
-              {DASHBOARD_MODULES.map((m) => {
-                const Icon = m.icon;
-                const active = activeModule === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setActiveModule(m.id)}
-                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 transition-colors text-left ${
-                      active
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <Icon className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-sky-400' : 'text-slate-400'}`} />
-                      <span className="truncate">{m.label}</span>
-                    </span>
-                    {m.id === 'notifications' && unreadCount > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[10px] tabular-nums">
-                        {unreadCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
-
-          {/* Main Active Module Workspace */}
-          <main className="lg:col-span-9 space-y-6">
+        <div className="space-y-6">
             {/* MODULE 1: WELCOME & OVERVIEW */}
             {activeModule === 'overview' && (
               <div className="space-y-6">
@@ -758,28 +909,65 @@ export const StudentDashboardPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="bg-slate-900 text-white rounded-3xl p-6 space-y-4">
+                      <div className="bg-[#123D32] text-white rounded-3xl p-6 space-y-4">
                         <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-sky-400" />
+                          <Sparkles className="w-4 h-4 text-emerald-300" />
                           <h3 className="text-sm font-bold">Quinn AI Performance</h3>
                         </div>
                         <div className="p-3.5 bg-white/10 rounded-2xl">
-                          <div className="text-xs text-slate-300">Skill Development Index</div>
+                          <div className="text-xs text-emerald-100">Skill Development Index</div>
                           <div className="text-2xl font-bold mt-1 tabular-nums">
                             {performance?.skillDevelopmentScore || 0}%
                           </div>
                         </div>
                         {performance && (
                           <div className="text-xs space-y-2">
-                            <div className="text-sky-300 font-semibold flex items-center gap-1.5">
+                            <div className="text-emerald-200 font-semibold flex items-center gap-1.5">
                               <TrendingUp className="w-3.5 h-3.5" />
                               <span>Focus Recommendation</span>
                             </div>
-                            <p className="text-slate-200 leading-relaxed">
+                            <p className="text-emerald-50/90 leading-relaxed">
                               {performance.personalizedRecommendation}
                             </p>
                           </div>
                         )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="bg-white border border-slate-200/80 rounded-3xl p-5">
+                        <DonutRingChart
+                          percent={activeProgress?.overallProgressPercent || 0}
+                          label="Active Course Completion"
+                          sublabel={`${activeProgress?.completedStages.length || 0} of 8 certification stages completed`}
+                          color="#123D32"
+                        />
+                      </div>
+                      <div className="bg-white border border-slate-200/80 rounded-3xl p-5">
+                        <div className="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-3">
+                          Course Milestones Breakdown
+                        </div>
+                        <MiniBarChart
+                          items={[
+                            {
+                              label: 'Videos Verified',
+                              value: activeProgress?.videoSessionsCount || activeProgress?.completedLessonIds.length || 0,
+                              color: '#2563EB',
+                            },
+                            {
+                              label: 'Quiz Average (%)',
+                              value: activeProgress?.quizAveragePercent || 0,
+                              maxValue: 100,
+                              suffix: '%',
+                              color: '#123D32',
+                            },
+                            {
+                              label: 'Earned Certificates',
+                              value: certificates.length,
+                              color: '#059669',
+                            },
+                          ]}
+                        />
                       </div>
                     </div>
                   </>
@@ -787,7 +975,326 @@ export const StudentDashboardPage: React.FC = () => {
               </div>
             )}
 
-            {/* MODULE 2: MY COURSES */}
+            {/* MODULE 2: STUDENT PROFILE, PHOTO & KYC VERIFICATION */}
+            {activeModule === 'profile' && (
+              <form onSubmit={handleSaveStudentProfile} className="bg-white border border-slate-200 rounded-3xl p-6 space-y-6 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                  <div className="flex items-center gap-4">
+                    {profileForm.profilePhotoUrl ? (
+                      <img
+                        src={profileForm.profilePhotoUrl}
+                        alt={profileForm.fullName || displayName}
+                        className="w-16 h-16 rounded-2xl object-cover border border-slate-200 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                        <Camera className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Student Profile &amp; Verification</h2>
+                      <p className="text-slate-500 mt-0.5">
+                        Reg ID: <span className="font-mono font-semibold text-slate-800">{regNo || 'Pending Sync'}</span> · {currentUser.email}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${currentUser.emailVerified ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                          {currentUser.emailVerified ? 'Email Verified' : 'Email Verification Pending'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${profileForm.mobileNumber ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+                          {profileForm.mobileNumber ? 'Mobile On Record' : 'Mobile Not Added'}
+                        </span>
+                        {studentProfile?.isMinor && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-purple-50 border-purple-200 text-purple-800">
+                            Minor · Guardian Linked ({studentProfile.parentName || 'Recorded'})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <label className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold cursor-pointer inline-flex items-center gap-1.5 self-start sm:self-center shrink-0">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{uploadingProfilePhoto ? 'Uploading...' : 'Upload Photo'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={uploadingProfilePhoto}
+                      onChange={(e) => handleProfilePhotoUpload(e.target.files?.[0])}
+                    />
+                  </label>
+                </div>
+
+                {profileSavedMsg && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-medium">
+                    {profileSavedMsg}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Full Legal Name</label>
+                    <input
+                      type="text"
+                      value={profileForm.fullName}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, fullName: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Mobile Number</label>
+                    <input
+                      type="tel"
+                      value={profileForm.mobileNumber}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, mobileNumber: e.target.value }))}
+                      placeholder="10-digit mobile"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">WhatsApp Number</label>
+                    <input
+                      type="tel"
+                      value={profileForm.whatsappNumber}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, whatsappNumber: e.target.value }))}
+                      placeholder="Optional WhatsApp number"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={profileForm.dob}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, dob: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Gender</label>
+                    <select
+                      value={profileForm.gender}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, gender: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    >
+                      <option value="">Prefer not to say</option>
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                      <option value="Non-Binary / Other">Non-Binary / Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Preferred Language</label>
+                    <select
+                      value={profileForm.preferredLanguage}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, preferredLanguage: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    >
+                      {SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES.filter((l) => l.code !== 'auto').map((l) => (
+                        <option key={l.code} value={l.label}>{l.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">House / Door No.</label>
+                    <input
+                      type="text"
+                      value={profileForm.houseNumber}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, houseNumber: e.target.value }))}
+                      placeholder="#42-B"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">Street Address / Locality</label>
+                    <input
+                      type="text"
+                      value={profileForm.streetAddress}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, streetAddress: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">City / Town</label>
+                    <input
+                      type="text"
+                      value={profileForm.city}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, city: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">District</label>
+                    <input
+                      type="text"
+                      value={profileForm.district}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, district: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">State / PIN Code</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={profileForm.state}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, state: e.target.value }))}
+                        placeholder="State"
+                        className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      />
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={profileForm.pincode}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, pincode: e.target.value.replace(/\D/g, '') }))}
+                        placeholder="PIN"
+                        className="w-24 p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Qualification / Class</label>
+                    <input
+                      type="text"
+                      value={profileForm.qualification}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, qualification: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">School / College / Organization (Optional)</label>
+                    <input
+                      type="text"
+                      value={profileForm.institution}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, institution: e.target.value }))}
+                      placeholder="Self-Paced Learner"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {/* Personalized Education Classification Profile (Categories A–J) */}
+                <div className="pt-4 border-t border-slate-100 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#123D32]">Educational Classification &amp; Personalization Profile</h3>
+                    <p className="text-[11px] text-slate-500">
+                      Used alongside your live search intent to rank degree-aligned and skill-aligned OpenFrame recommendations.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Education Level (A–J)</label>
+                      <select
+                        value={profileForm.educationLevel}
+                        onChange={(e) =>
+                          setProfileForm((p) => ({
+                            ...p,
+                            educationLevel: e.target.value as '' | EducationCategoryCode,
+                            degreeOrClass: '',
+                          }))
+                        }
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      >
+                        <option value="">Select Education Level</option>
+                        {EDUCATION_CLASSIFICATION_CATEGORIES.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.code}. {c.shortTitle}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Degree / Class / Programme</label>
+                      <select
+                        value={profileForm.degreeOrClass}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, degreeOrClass: e.target.value }))}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      >
+                        <option value="">Select or customize below</option>
+                        {(profileForm.educationLevel
+                          ? getAllProgrammesForCategory(profileForm.educationLevel)
+                          : EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))
+                        )
+                          .slice(0, 80)
+                          .map((deg) => (
+                            <option key={deg} value={deg}>{deg}</option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Academic Year / Semester</label>
+                      <input
+                        type="text"
+                        value={profileForm.academicYear}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, academicYear: e.target.value }))}
+                        placeholder="e.g. 2nd Year / Sem 4 / Working"
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Core Subjects (comma-separated)</label>
+                      <input
+                        type="text"
+                        value={profileForm.subjectsRaw}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, subjectsRaw: e.target.value }))}
+                        placeholder="e.g. Accounting, Python, Economics"
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Target Skills (comma-separated)</label>
+                      <input
+                        type="text"
+                        value={profileForm.skillsRaw}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, skillsRaw: e.target.value }))}
+                        placeholder="e.g. Digital Marketing, Excel, AI"
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Preferred Format</label>
+                      <select
+                        value={profileForm.learningFormatPreference}
+                        onChange={(e) =>
+                          setProfileForm((p) => ({
+                            ...p,
+                            learningFormatPreference: e.target.value as 'Video' | 'Structured Course' | 'Interactive' | 'Mixed',
+                          }))
+                        }
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      >
+                        <option value="Mixed">Mixed (Courses + YouTube Lectures)</option>
+                        <option value="Structured Course">Structured OpenFrame Courses</option>
+                        <option value="Video">Video-First YouTube Lectures</option>
+                        <option value="Interactive">Interactive Q&amp;A + Practice</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <label className="block font-semibold text-slate-700 mb-1">Career Aspirations &amp; Learning Goals</label>
+                      <input
+                        type="text"
+                        value={profileForm.careerAspirations}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, careerAspirations: e.target.value }))}
+                        placeholder="e.g. Transition into Growth Marketing & Analytics or prepare for Postgraduate Research"
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <span className="text-slate-500">DPDP Act 2023 Compliant · No Aadhaar/PAN collected</span>
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold disabled:opacity-50"
+                  >
+                    {savingProfile ? 'Saving Profile...' : 'Save Student Profile'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* MODULE 3: MY COURSES */}
             {activeModule === 'courses' && (
               <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
@@ -1043,6 +1550,99 @@ export const StudentDashboardPage: React.FC = () => {
                                 Details
                               </button>
                             </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Saved Q&A Notebook */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <HelpCircle className="w-4 h-4 text-[#2563EB]" />
+                      <span>Saved Q&amp;A Answers ({savedQas.length})</span>
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/qa')}
+                      className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                    >
+                      Ask New Question →
+                    </button>
+                  </div>
+                  {savedQas.length === 0 ? (
+                    <p className="text-xs text-slate-500">No Q&amp;A notes saved yet. Ask any topic question on Ask Q&amp;A and save it here.</p>
+                  ) : (
+                    <div className="space-y-2.5 text-xs">
+                      {savedQas.map((qa) => (
+                        <div key={qa.id} className="p-3.5 border border-slate-200 rounded-2xl flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <div className="font-bold text-slate-900">{qa.question}</div>
+                            <p className="text-slate-600 line-clamp-2">{qa.answer}</p>
+                            <div className="text-[11px] text-slate-400">
+                              Saved {new Date(qa.savedAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/qa?q=${encodeURIComponent(qa.question)}`)}
+                              className="px-3 py-1.5 bg-slate-900 text-white rounded-lg font-semibold cursor-pointer"
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await lmsService.deleteQaEntry(qa.id);
+                                setSavedQas((prev) => prev.filter((item) => item.id !== qa.id));
+                              }}
+                              className="p-1.5 border border-slate-200 rounded-lg text-slate-500 hover:text-rose-600 cursor-pointer"
+                              title="Delete Q&A entry"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Saved Visual Learning Roadmaps */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-[#123D32]" />
+                      <span>Saved Learning Roadmaps ({savedRoadmaps.length})</span>
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/marketplace?view=roadmap')}
+                      className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                    >
+                      Build Roadmap →
+                    </button>
+                  </div>
+                  {savedRoadmaps.length === 0 ? (
+                    <p className="text-xs text-slate-500">No learning roadmaps saved yet. Generate and save an 8-stage roadmap from Course Discovery.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      {savedRoadmaps.map((rm) => (
+                        <div key={rm.id} className="p-4 border border-slate-200 rounded-2xl space-y-2">
+                          <div className="font-bold text-slate-900">{rm.title}</div>
+                          <p className="text-slate-600 line-clamp-2">{rm.overview}</p>
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[11px] text-slate-500">{rm.modules?.length || 0} stages</span>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/marketplace?q=${encodeURIComponent(rm.topic)}&view=roadmap`)}
+                              className="px-3 py-1.5 bg-[#123D32] text-white rounded-lg font-semibold cursor-pointer"
+                            >
+                              Resume Roadmap
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -1619,9 +2219,8 @@ export const StudentDashboardPage: React.FC = () => {
                 </div>
               </form>
             )}
-          </main>
         </div>
       </div>
-    </div>
+    </SocialAppShell>
   );
 };

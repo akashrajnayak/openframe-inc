@@ -10,7 +10,7 @@ import {
   logoutAdmin,
   resetAdminPassword,
   syncLmsUserProfile,
-  SUPER_ADMIN_EMAILS
+  SUPER_ADMIN_EMAILS,
 } from '../services/firebase';
 import {
   AdminUser,
@@ -18,8 +18,30 @@ import {
   LmsUserProfile,
   LmsUserRole,
   StudentProfile,
-  TeacherProfile
+  TeacherProfile,
 } from '../types';
+
+export function getAuthorizedDashboardPath(role: LmsUserRole): string {
+  switch (role) {
+    case 'admin':
+      return '/admin/dashboard';
+    case 'institution_admin':
+      return '/partner/school/dashboard';
+    case 'ngo_partner':
+      return '/ngo/dashboard';
+    case 'field_executive':
+      return '/field/dashboard';
+    case 'professional':
+      return '/professional/dashboard';
+    case 'teacher':
+      return '/teacher/dashboard';
+    case 'parent':
+      return '/parent/dashboard';
+    case 'student':
+    default:
+      return '/student/dashboard';
+  }
+}
 
 interface AuthContextType {
   currentUser: User | null;
@@ -28,21 +50,28 @@ interface AuthContextType {
   studentProfile: StudentProfile | null;
   teacherProfile: TeacherProfile | null;
   portalRole: LmsUserRole;
+  authorizedDashboardPath: string;
   loading: boolean;
+  authError: string | null;
+  clearAuthError: () => void;
   role: AdminRole | null;
   isSuperAdmin: boolean;
   hasRoleAccess: (requiredRole: AdminRole) => boolean;
-  loginGoogle: () => Promise<void>;
-  loginEmail: (email: string, pass: string) => Promise<void>;
-  loginPortalGoogle: (preferredRole?: LmsUserRole) => Promise<LmsUserProfile>;
-  loginPortalEmail: (email: string, pass: string, preferredRole?: LmsUserRole) => Promise<LmsUserProfile>;
+  loginGoogle: (rememberMe?: boolean) => Promise<void>;
+  loginEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
+  loginPortalGoogle: (expectedRole?: LmsUserRole, rememberMe?: boolean) => Promise<LmsUserProfile>;
+  loginPortalEmail: (email: string, pass: string, expectedRole?: LmsUserRole, rememberMe?: boolean) => Promise<LmsUserProfile>;
   registerPortalEmail: (
     name: string,
     email: string,
     pass: string,
-    preferredRole: LmsUserRole,
-    extra?: { specialization?: string; parentStudentEmail?: string }
+    selectedRole: LmsUserRole,
+    extra?: {
+      specialization?: string;
+      parentStudentEmail?: string;
+    }
   ) => Promise<LmsUserProfile>;
+  refreshUserProfile: (expectedRole?: LmsUserRole) => Promise<LmsUserProfile | null>;
   switchPortalRole: (newRole: LmsUserRole) => void;
   logout: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
@@ -58,8 +87,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [teacherProfile, setTeacherProfile] = useState<TeacherProfile | null>(null);
   const [portalRole, setPortalRole] = useState<LmsUserRole>('student');
   const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const hydrateUserState = async (user: User, preferredRole?: LmsUserRole) => {
+  const clearAuthError = () => setAuthError(null);
+
+  const hydrateUserState = async (
+    user: User,
+    expectedRole?: LmsUserRole
+  ): Promise<LmsUserProfile> => {
     const email = (user.email || '').toLowerCase();
     const isSuper = SUPER_ADMIN_EMAILS.includes(email);
 
@@ -67,13 +102,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!adminRec && isSuper) {
       adminRec = await ensureAdminRecord(user);
     }
-    setAdminProfile(adminRec);
 
-    const synced = await syncLmsUserProfile(user, preferredRole);
+    if (adminRec && adminRec.isActive === false) {
+      throw new Error('Your administrator account has been disabled. Contact root administration.');
+    }
+
+    const synced = await syncLmsUserProfile(user, expectedRole);
+
+    setAdminProfile(adminRec);
     setLmsUser(synced.userProfile);
     setStudentProfile(synced.studentProfile);
     setTeacherProfile(synced.teacherProfile);
-    setPortalRole(preferredRole || synced.userProfile.role);
+    setPortalRole(synced.userProfile.role);
+    setAuthError(null);
     return synced.userProfile;
   };
 
@@ -83,8 +124,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user) {
         try {
           await hydrateUserState(user);
-        } catch (err) {
-          console.warn('Failed to hydrate user profiles:', err);
+        } catch (err: any) {
+          console.warn('Session restoration blocked:', err?.message || err);
+          setAuthError(err?.message || 'Unable to restore session.');
+          await logoutAdmin().catch(() => {});
+          setCurrentUser(null);
+          setAdminProfile(null);
+          setLmsUser(null);
+          setStudentProfile(null);
+          setTeacherProfile(null);
         }
       } else {
         setAdminProfile(null);
@@ -99,81 +147,158 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  const loginGoogle = async () => {
-    const user = await loginWithGoogle();
-    const profile = await ensureAdminRecord(user);
-    setAdminProfile(profile);
-    await hydrateUserState(user);
+  const loginGoogle = async (rememberMe = true) => {
+    setAuthError(null);
+    const user = await loginWithGoogle(rememberMe);
+    try {
+      const profile = await ensureAdminRecord(user);
+      setAdminProfile(profile);
+      await hydrateUserState(user, 'admin');
+    } catch (err: any) {
+      await logoutAdmin().catch(() => {});
+      setCurrentUser(null);
+      setAdminProfile(null);
+      setLmsUser(null);
+      setAuthError(err?.message || 'Administrator authentication denied.');
+      throw err;
+    }
   };
 
-  const loginEmail = async (email: string, pass: string) => {
-    const user = await loginWithEmail(email, pass);
-    const profile = await ensureAdminRecord(user);
-    setAdminProfile(profile);
-    await hydrateUserState(user);
+  const loginEmail = async (email: string, pass: string, rememberMe = true) => {
+    setAuthError(null);
+    const user = await loginWithEmail(email, pass, rememberMe);
+    try {
+      const profile = await ensureAdminRecord(user);
+      setAdminProfile(profile);
+      await hydrateUserState(user, 'admin');
+    } catch (err: any) {
+      await logoutAdmin().catch(() => {});
+      setCurrentUser(null);
+      setAdminProfile(null);
+      setLmsUser(null);
+      setAuthError(err?.message || 'Administrator authentication denied.');
+      throw err;
+    }
   };
 
-  const loginPortalGoogle = async (preferredRole?: LmsUserRole): Promise<LmsUserProfile> => {
-    const user = await loginWithGoogle();
-    return hydrateUserState(user, preferredRole);
+  const loginPortalGoogle = async (expectedRole?: LmsUserRole, rememberMe = true): Promise<LmsUserProfile> => {
+    setAuthError(null);
+    const user = await loginWithGoogle(rememberMe);
+    try {
+      return await hydrateUserState(user, expectedRole);
+    } catch (err: any) {
+      await logoutAdmin().catch(() => {});
+      setCurrentUser(null);
+      setAdminProfile(null);
+      setLmsUser(null);
+      setStudentProfile(null);
+      setTeacherProfile(null);
+      setAuthError(err?.message || 'Access denied for this portal.');
+      throw err;
+    }
   };
 
   const loginPortalEmail = async (
     email: string,
     pass: string,
-    preferredRole?: LmsUserRole
+    expectedRole?: LmsUserRole,
+    rememberMe = true
   ): Promise<LmsUserProfile> => {
-    const user = await loginWithEmail(email, pass);
-    return hydrateUserState(user, preferredRole);
+    setAuthError(null);
+    const user = await loginWithEmail(email, pass, rememberMe);
+    try {
+      return await hydrateUserState(user, expectedRole);
+    } catch (err: any) {
+      await logoutAdmin().catch(() => {});
+      setCurrentUser(null);
+      setAdminProfile(null);
+      setLmsUser(null);
+      setStudentProfile(null);
+      setTeacherProfile(null);
+      setAuthError(err?.message || 'Access denied for this portal.');
+      throw err;
+    }
   };
 
   const registerPortalEmail = async (
     name: string,
     email: string,
     pass: string,
-    preferredRole: LmsUserRole,
-    extra?: { specialization?: string; parentStudentEmail?: string }
+    selectedRole: LmsUserRole,
+    extra?: {
+      specialization?: string;
+      parentStudentEmail?: string;
+    }
   ): Promise<LmsUserProfile> => {
+    setAuthError(null);
+    if (selectedRole === 'admin') {
+      throw new Error('Administrator accounts cannot be created via self-registration.');
+    }
     const user = await registerPortalAccountWithEmail(name, email, pass);
-    const synced = await syncLmsUserProfile(user, preferredRole, {
-      displayName: name,
-      specialization: extra?.specialization,
-      parentStudentEmail: extra?.parentStudentEmail,
-    });
-    setLmsUser(synced.userProfile);
-    setStudentProfile(synced.studentProfile);
-    setTeacherProfile(synced.teacherProfile);
-    setPortalRole(synced.userProfile.role);
-    return synced.userProfile;
+    try {
+      const synced = await syncLmsUserProfile(user, selectedRole, {
+        displayName: name,
+        specialization: extra?.specialization,
+        parentStudentEmail: extra?.parentStudentEmail,
+      });
+      setLmsUser(synced.userProfile);
+      setStudentProfile(synced.studentProfile);
+      setTeacherProfile(synced.teacherProfile);
+      setPortalRole(synced.userProfile.role);
+      return synced.userProfile;
+    } catch (err: any) {
+      await logoutAdmin().catch(() => {});
+      setAuthError(err?.message || 'Account registration blocked.');
+      throw err;
+    }
+  };
+
+  const refreshUserProfile = async (expectedRole?: LmsUserRole): Promise<LmsUserProfile | null> => {
+    if (!auth.currentUser) return null;
+    try {
+      return await hydrateUserState(auth.currentUser, expectedRole);
+    } catch (err: any) {
+      await logoutAdmin().catch(() => {});
+      setAuthError(err?.message || 'Session validation failed.');
+      throw err;
+    }
   };
 
   const switchPortalRole = (newRole: LmsUserRole) => {
-    setPortalRole(newRole);
+    if (lmsUser && (lmsUser.role === newRole || lmsUser.roles?.includes(newRole))) {
+      setPortalRole(newRole);
+    }
   };
 
   const logout = async () => {
+    setAuthError(null);
     await logoutAdmin();
     setCurrentUser(null);
     setAdminProfile(null);
     setLmsUser(null);
     setStudentProfile(null);
     setTeacherProfile(null);
+    setPortalRole('student');
   };
 
   const sendPasswordReset = async (email: string) => {
     await resetAdminPassword(email);
   };
 
-  const isSuperAdmin =
+  const isSuperAdmin = Boolean(
     adminProfile?.role === 'Super Admin' ||
-    currentUser?.email?.toLowerCase() === 'akashrajnayak@gmail.com' ||
-    currentUser?.email?.toLowerCase() === 'admin@openframeitsolutions.com';
+      lmsUser?.role === 'admin' ||
+      currentUser?.email?.toLowerCase() === 'akashrajnayak@gmail.com' ||
+      currentUser?.email?.toLowerCase() === 'admin@openframeitsolutions.com'
+  );
 
   const hasRoleAccess = (requiredRole: AdminRole): boolean => {
     if (isSuperAdmin) return true;
     if (!adminProfile || !adminProfile.isActive) return false;
     return adminProfile.role === requiredRole;
   };
+
+  const authorizedDashboardPath = getAuthorizedDashboardPath(lmsUser?.role || portalRole);
 
   return (
     <AuthContext.Provider
@@ -184,7 +309,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         studentProfile,
         teacherProfile,
         portalRole,
+        authorizedDashboardPath,
         loading,
+        authError,
+        clearAuthError,
         role: adminProfile?.role || null,
         isSuperAdmin,
         hasRoleAccess,
@@ -193,6 +321,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginPortalGoogle,
         loginPortalEmail,
         registerPortalEmail,
+        refreshUserProfile,
         switchPortalRole,
         logout,
         sendPasswordReset,

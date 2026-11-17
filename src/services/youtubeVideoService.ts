@@ -292,34 +292,129 @@ export const MASTER_YOUTUBE_LIBRARY: ExtendedYouTubeVideo[] = [
 
 export class YouTubeVideoService {
   /**
-   * Educational video search via backend curated index
+   * Live YouTube Data API v3 search with pagination & filters (returns honest error state if unconfigured/failed)
    */
   async searchYouTubeApi(
     query: string,
-    category = '',
-    maxResults = 6
-  ): Promise<{ source: string; videos: YouTubeVideoRecommendation[] }> {
+    categoryOrOptions:
+      | string
+      | {
+          category?: string;
+          language?: string;
+          duration?: 'any' | 'short' | 'medium' | 'long';
+          publishedAfter?: string;
+          channelId?: string;
+          pageToken?: string;
+          searchType?: 'video' | 'playlist';
+          maxResults?: number;
+        } = '',
+    maxResultsArg = 12
+  ): Promise<{
+    ok: boolean;
+    source: string;
+    videos: YouTubeVideoRecommendation[];
+    nextPageToken?: string;
+    prevPageToken?: string;
+    totalResults?: number;
+    detectedLanguage?: string;
+    filtersBroadened?: boolean;
+    broadenNote?: string;
+    error?: string;
+    errorCode?: string;
+  }> {
+    const opts =
+      typeof categoryOrOptions === 'string'
+        ? { category: categoryOrOptions, maxResults: maxResultsArg }
+        : categoryOrOptions;
+
     try {
       const res = await fetch('/api/youtube/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, category, maxResults }),
+        body: JSON.stringify({
+          query,
+          category: opts.category || '',
+          language: opts.language || '',
+          duration: opts.duration || 'any',
+          publishedAfter: opts.publishedAfter || '',
+          channelId: opts.channelId || '',
+          pageToken: opts.pageToken || '',
+          searchType: opts.searchType || 'video',
+          maxResults: opts.maxResults || maxResultsArg,
+        }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok !== false) {
         return {
-          source: data.source || 'curated_library',
+          ok: true,
+          source: data.source || 'youtube_data_api',
           videos: Array.isArray(data.videos) ? data.videos : [],
+          nextPageToken: data.nextPageToken,
+          prevPageToken: data.prevPageToken,
+          totalResults: data.totalResults,
+          detectedLanguage: data.detectedLanguage,
+          filtersBroadened: Boolean(data.filtersBroadened),
+          broadenNote: data.broadenNote,
         };
       }
-    } catch (err) {
-      console.warn('Video search endpoint unavailable, falling back to local index:', err);
+      return {
+        ok: false,
+        source: data.source || 'youtube_api_error',
+        videos: [],
+        detectedLanguage: data.detectedLanguage,
+        error: data.error || `YouTube search failed (HTTP ${res.status}).`,
+        errorCode: data.errorCode || 'YOUTUBE_SEARCH_FAILED',
+      };
+    } catch (err: any) {
+      return {
+        ok: false,
+        source: 'youtube_network_error',
+        videos: [],
+        error: err?.message || 'Unable to reach YouTube Data API search endpoint.',
+        errorCode: 'YOUTUBE_NETWORK_ERROR',
+      };
     }
+  }
 
-    return {
-      source: 'curated_library',
-      videos: this.searchVideos(query, category || 'All'),
-    };
+  async fetchVideoDetails(videoId: string): Promise<{
+    ok: boolean;
+    source?: string;
+    video?: YouTubeVideoRecommendation;
+    warning?: string;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`/api/youtube/video-details/${encodeURIComponent(videoId)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.video) {
+        return { ok: true, source: data.source, video: data.video, warning: data.warning };
+      }
+      return { ok: false, error: data.error || 'Video details unavailable.' };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || 'Network error fetching video details.' };
+    }
+  }
+
+  async fetchRelatedResources(params: {
+    query: string;
+    excludeVideoId?: string;
+    language?: string;
+    maxResults?: number;
+  }): Promise<{ ok: boolean; videos: YouTubeVideoRecommendation[]; error?: string }> {
+    try {
+      const res = await fetch('/api/youtube/related-resources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok !== false) {
+        return { ok: true, videos: Array.isArray(data.videos) ? data.videos : [] };
+      }
+      return { ok: false, videos: [], error: data.error || 'Unable to fetch related YouTube resources.' };
+    } catch (err: any) {
+      return { ok: false, videos: [], error: err?.message || 'Network error fetching related resources.' };
+    }
   }
 
   async getYouTubeApiStatus(): Promise<{ apiKeyConfigured: boolean; mode: string }> {
@@ -331,7 +426,7 @@ export class YouTubeVideoService {
     }
     return {
       apiKeyConfigured: false,
-      mode: 'Quinn AI Curated Academic Index',
+      mode: 'YouTube Data API v3',
     };
   }
 

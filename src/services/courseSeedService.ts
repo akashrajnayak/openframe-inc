@@ -7,20 +7,7 @@ import { MarketplaceCourse } from '../types';
  * with unique IDs, titles, descriptions, categories, and pricing.
  */
 export async function generateInitial100Courses(): Promise<MarketplaceCourse[]> {
-  try {
-    // Attempt to load from batch_1.json in public data
-    const response = await fetch('/data/batch_1.json');
-    if (response.ok) {
-      const data: MarketplaceCourse[] = await response.json();
-      if (Array.isArray(data) && data.length >= 100) {
-        return data.slice(0, 100);
-      }
-    }
-  } catch (err) {
-    console.warn('Could not fetch /data/batch_1.json via browser fetch, generating fallback:', err);
-  }
-
-  // Programmatic generator fallback for 100 course records
+  // Programmatic generator for 100 course records
   const CATEGORIES = [
     'Artificial Intelligence', 'Generative AI', 'Machine Learning', 'Deep Learning', 'Data Science',
     'Data Analytics', 'Python Programming', 'Java Programming', 'C Programming', 'C++ Programming',

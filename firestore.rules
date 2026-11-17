@@ -15,8 +15,10 @@ service cloud.firestore {
     // Check if user is Super Admin or root administrator
     function isSuperAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'akashrajnayak@gmail.com' ||
-        request.auth.token.email == 'admin@openframeitsolutions.com' ||
+        (request.auth.token.email_verified == true && (
+          request.auth.token.email == 'akashrajnayak@gmail.com' ||
+          request.auth.token.email == 'admin@openframeitsolutions.com'
+        )) ||
         (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'Super Admin' &&
          get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.isActive == true)
@@ -351,16 +353,27 @@ service cloud.firestore {
     match /users/{uid} {
       allow get: if isValidId(uid) && (isOwner(uid) || isLmsEducatorOrAdmin());
       allow list: if isLmsEducatorOrAdmin();
-      allow create: if isValidId(uid) && isOwner(uid) &&
-        incoming().uid == request.auth.uid &&
-        incoming().email is string && incoming().email.size() <= 120 &&
-        incoming().displayName is string && incoming().displayName.size() <= 120 &&
-        incoming().role in ['student', 'teacher', 'parent'];
+      allow create: if isValidId(uid) && (
+        isAdmin() ||
+        (isOwner(uid) &&
+          incoming().uid == request.auth.uid &&
+          incoming().email is string && incoming().email.size() <= 120 &&
+          incoming().displayName is string && incoming().displayName.size() <= 120 &&
+          incoming().role in ['student', 'teacher', 'parent', 'institution_admin', 'field_executive', 'ngo_partner', 'professional'] &&
+          incoming().roles is list && incoming().roles.size() >= 1 && incoming().roles.size() <= 2 &&
+          (!('status' in incoming()) || incoming().status == 'active'))
+      );
       allow update: if isValidId(uid) && (
         isAdmin() ||
         (isOwner(uid) &&
           incoming().uid == existing().uid &&
-          incoming().role in ['student', 'teacher', 'parent'])
+          incoming().role == existing().role &&
+          incoming().roles == existing().roles &&
+          (!('status' in existing()) || incoming().status == existing().status) &&
+          (!('approvalStatus' in existing()) || incoming().approvalStatus == existing().approvalStatus) &&
+          incoming().createdAt == existing().createdAt &&
+          (!('institutionId' in existing()) || existing().institutionId == null || existing().institutionId == '' || incoming().institutionId == existing().institutionId) &&
+          incoming().role in ['student', 'teacher', 'parent', 'institution_admin', 'field_executive', 'ngo_partner', 'professional'])
       );
       allow delete: if isValidId(uid) && isAdmin();
     }
@@ -394,12 +407,26 @@ service cloud.firestore {
 
     match /course_enrollments/{id} {
       allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
-      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
       allow create: if isValidId(id) && isSignedIn() &&
         (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
-        incoming().courseId is string && incoming().courseId.size() <= 128;
-      allow update: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
-      allow delete: if isValidId(id) && isAdmin();
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().status in ['Submitted', 'Pending Verification', 'Verified', 'Pending Payment', 'Payment Completed', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Completed', 'Suspended'] &&
+        (!('paymentStatus' in incoming()) || incoming().paymentStatus != 'Paid' || isSuperAdmin() || (
+          incoming().razorpayPaymentId is string &&
+          incoming().razorpayPaymentId.size() >= 6 &&
+          incoming().verifiedServerSide == true
+        ));
+      allow update: if isValidId(id) && (
+        isSuperAdmin() ||
+        (
+          (isLmsEducatorOrAdmin() || (isSignedIn() && existing().studentId == request.auth.uid)) &&
+          !incoming().diff(existing()).affectedKeys().hasAny(['paymentStatus', 'feeAmount', 'razorpayOrderId', 'razorpayPaymentId', 'verifiedServerSide']) &&
+          incoming().studentId == existing().studentId &&
+          incoming().courseId == existing().courseId
+        )
+      );
+      allow delete: if isValidId(id) && isSuperAdmin();
     }
 
     match /course_modules/{id} {
@@ -511,7 +538,15 @@ service cloud.firestore {
       // Public single-document verification by certificateId; no private PII stored here
       allow get: if isValidId(certId);
       allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
-      allow create, update: if isValidId(certId) && isLmsEducatorOrAdmin() &&
+      allow create: if isValidId(certId) && (
+        isLmsEducatorOrAdmin() ||
+        (isSignedIn() &&
+          incoming().studentId == request.auth.uid &&
+          incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
+          incoming().courseId is string && incoming().courseId.size() <= 128 &&
+          incoming().status in ['Issued', 'VERIFIED'])
+      );
+      allow update: if isValidId(certId) && isLmsEducatorOrAdmin() &&
         incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
         incoming().studentId is string && incoming().studentId.size() <= 128;
       allow delete: if isValidId(certId) && isAdmin();
@@ -521,6 +556,27 @@ service cloud.firestore {
       allow create: if isValidId(id) && incoming().certificateId is string && incoming().certificateId.size() <= 80;
       allow read: if isAdmin() || isLmsTeacher();
       allow update, delete: if false;
+    }
+
+    match /certificate_verification/{certId} {
+      // Minimal public QR verification lookup; zero private contact PII allowed
+      allow get: if isValidId(certId);
+      allow list: if isLmsEducatorOrAdmin() || isEducationAdmin() || isAdmin();
+      allow create, update: if isValidId(certId) &&
+        incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
+        !('studentEmail' in incoming()) &&
+        !('studentPhone' in incoming()) &&
+        !('mobileNumber' in incoming()) &&
+        !('address' in incoming()) &&
+        !('parentMobile' in incoming()) &&
+        (
+          isLmsEducatorOrAdmin() ||
+          isEducationAdmin() ||
+          isAdmin() ||
+          (isSignedIn() && incoming().institutionId is string && isApprovedInstitutionOwner(incoming().institutionId)) ||
+          (isSignedIn() && incoming().studentId == request.auth.uid && incoming().courseId is string)
+        );
+      allow delete: if isValidId(certId) && isAdmin();
     }
 
     match /notifications/{id} {
@@ -880,6 +936,766 @@ service cloud.firestore {
       allow get, list: if isAdmin() || isEducationAdmin() || isContentAdmin() || (isSignedIn() && resource.data.reporterUid == request.auth.uid);
       allow create: if isValidId(id) && incoming().courseId is string && incoming().reason is string && incoming().status == 'Submitted';
       allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin());
+    }
+
+    // ====================================================
+    // QUINN AI UNIVERSAL VIDEO LEARNING ECOSYSTEM COLLECTIONS
+    // ====================================================
+
+    match /parent_guardians/{id} {
+      allow get, list: if isEducationAdmin() || isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create, update: if isValidId(id) &&
+        incoming().studentId is string && incoming().studentId.size() <= 128 &&
+        incoming().guardianName is string && incoming().guardianName.size() <= 120 &&
+        incoming().guardianConsentAccepted == true &&
+        (isEducationAdmin() || isAdmin() || !isSignedIn() || incoming().studentId == request.auth.uid || incoming().studentEmail == request.auth.token.email);
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /addresses/{id} {
+      allow get, list: if isEducationAdmin() || isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create, update: if isValidId(id) &&
+        incoming().studentId is string && incoming().studentId.size() <= 128 &&
+        incoming().country is string && incoming().country.size() <= 80 &&
+        incoming().houseNumber is string && incoming().houseNumber.size() <= 60;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /enrollments/{id} {
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
+      allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128;
+      allow update: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /course_lessons/{id} {
+      allow read: if isValidId(id);
+      allow create, update, delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /youtube_videos/{id} {
+      allow get, list: if isValidId(id);
+      allow create, update: if isValidId(id) &&
+        incoming().videoId is string && incoming().videoId.size() <= 60 &&
+        incoming().title is string && incoming().title.size() <= 300 &&
+        incoming().status in ['Active', 'Removed'];
+      allow delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin());
+    }
+
+    match /youtube_channels/{id} {
+      allow get, list: if isValidId(id);
+      allow create, update: if isValidId(id) &&
+        incoming().channelId is string && incoming().channelId.size() <= 80 &&
+        incoming().channelTitle is string && incoming().channelTitle.size() <= 160;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /quinn_ai_organizers/{id} {
+      allow get, list: if isValidId(id);
+      allow create: if isValidId(id) &&
+        incoming().organizerId is string && incoming().organizerId.size() <= 128 &&
+        incoming().videoId is string && incoming().videoId.size() <= 60 &&
+        incoming().courseTitle is string && incoming().courseTitle.size() <= 300;
+      allow update: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() || isContentAdmin() || isLmsTeacher() || isSignedIn()
+      );
+      allow delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin());
+    }
+
+    match /learning_resources/{id} {
+      allow get, list: if isValidId(id);
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().moduleId is string && incoming().moduleId.size() <= 128 &&
+        incoming().videoId is string && incoming().videoId.size() <= 60 &&
+        incoming().status in ['Active', 'Removed'];
+      allow update, delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() || isContentAdmin() || isLmsTeacher() ||
+        (isSignedIn() && resource.data.addedByUid == request.auth.uid)
+      );
+    }
+
+    match /lesson_progress/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().lessonId is string && incoming().lessonId.size() <= 128 &&
+        incoming().completed is bool;
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /learning_history/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().studyMinutes is number;
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /assessments/{id} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        incoming().courseId is string && incoming().courseId.size() <= 128;
+      allow delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /assessment_questions/{id} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isValidId(id) && isSignedIn();
+      allow delete: if isValidId(id) && isLmsEducatorOrAdmin();
+    }
+
+    match /assessment_attempts/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
+        incoming().courseId is string && incoming().courseId.size() <= 128 &&
+        incoming().percentageScore is number;
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /learning_analytics/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /ai_conversations/{id} {
+      allow get, list: if isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin());
+      allow delete: if isValidId(id) && (isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid));
+    }
+
+    match /audit_logs/{id} {
+      allow get, list: if isAdmin() || isLmsTeacher();
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().action is string && incoming().action.size() <= 120;
+      allow update, delete: if false;
+    }
+
+    // ====================================================
+    // MULTI-TENANT 7-PORTAL INSTITUTION, FIELD & NGO RULES
+    // ====================================================
+
+    function isInstitutionOwner(institutionId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/institutions/$(institutionId)) &&
+        get(/databases/$(database)/documents/institutions/$(institutionId)).data.adminUid == request.auth.uid;
+    }
+
+    function isApprovedInstitutionOwner(institutionId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/institutions/$(institutionId)) &&
+        get(/databases/$(database)/documents/institutions/$(institutionId)).data.adminUid == request.auth.uid &&
+        get(/databases/$(database)/documents/institutions/$(institutionId)).data.verificationStatus == 'Approved';
+    }
+
+    function isAssignedSchoolTeacher(data) {
+      return isSignedIn() &&
+        'assignedTeacherUids' in data &&
+        data.assignedTeacherUids is list &&
+        request.auth.uid in data.assignedTeacherUids;
+    }
+
+    match /institutions/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && (resource.data.adminUid == request.auth.uid || isAssignedSchoolTeacher(resource.data)))
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (
+        isSignedIn() && (
+          resource.data.adminUid == request.auth.uid ||
+          (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+        )
+      );
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().adminUid == request.auth.uid &&
+        incoming().name is string && incoming().name.size() >= 2 && incoming().name.size() <= 200 &&
+        incoming().registrationNumber is string && incoming().registrationNumber.size() <= 100 &&
+        incoming().verificationStatus in ['Draft', 'Submitted', 'Pending Approval'];
+      allow update: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().adminUid == request.auth.uid &&
+          incoming().adminUid == existing().adminUid &&
+          (!('schoolCode' in existing()) || existing().schoolCode == '' || incoming().schoolCode == existing().schoolCode) &&
+          (
+            incoming().verificationStatus == existing().verificationStatus ||
+            (existing().verificationStatus in ['Draft', 'More Information Required', 'Rejected'] &&
+              incoming().verificationStatus == 'Submitted')
+          ))
+      );
+      allow delete: if isValidId(id) && isSuperAdmin();
+    }
+
+    match /departments/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isEducationAdmin() || isInstitutionOwner(resource.data.institutionId));
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.institutionAdminUid == request.auth.uid);
+      allow create: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() &&
+        incoming().institutionAdminUid == request.auth.uid &&
+        isApprovedInstitutionOwner(incoming().institutionId)
+      ));
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)
+      ));
+    }
+
+    match /classes/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (
+        isSignedIn() && (
+          resource.data.institutionAdminUid == request.auth.uid ||
+          (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+        )
+      );
+      allow create: if isValidId(id) &&
+        incoming().id == id &&
+        incoming().institutionId is string && incoming().institutionId.size() <= 128 &&
+        incoming().className is string && incoming().className.size() >= 1 && incoming().className.size() <= 80 &&
+        (isAdmin() || isEducationAdmin() || (
+          isSignedIn() &&
+          incoming().institutionAdminUid == request.auth.uid &&
+          isApprovedInstitutionOwner(incoming().institutionId)
+        ));
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)
+      ));
+    }
+
+    match /subjects/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isEducationAdmin() || isInstitutionOwner(resource.data.institutionId) || isAssignedSchoolTeacher(resource.data));
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (resource.data.institutionAdminUid == request.auth.uid || (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)));
+      allow create: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() &&
+        incoming().institutionAdminUid == request.auth.uid &&
+        isApprovedInstitutionOwner(incoming().institutionId)
+      ));
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)
+      ));
+    }
+
+    match /institution_staff/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        (isSignedIn() && resource.data.staffUid == request.auth.uid)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (
+        isSignedIn() && (
+          resource.data.institutionAdminUid == request.auth.uid ||
+          resource.data.staffUid == request.auth.uid
+        )
+      );
+      allow create: if isValidId(id) &&
+        incoming().id == id &&
+        incoming().fullName is string && incoming().fullName.size() >= 2 && incoming().fullName.size() <= 120 &&
+        (isAdmin() || isEducationAdmin() || (
+          isSignedIn() &&
+          incoming().institutionAdminUid == request.auth.uid &&
+          isApprovedInstitutionOwner(incoming().institutionId)
+        ));
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)
+      ));
+    }
+
+    match /institution_students/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && (resource.data.studentUid == request.auth.uid || isLinkedParent(resource.data.studentUid)))
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (
+        isSignedIn() && (
+          resource.data.institutionAdminUid == request.auth.uid ||
+          resource.data.studentUid == request.auth.uid ||
+          (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+        )
+      );
+      allow create: if isValidId(id) &&
+        incoming().id == id &&
+        incoming().fullName is string && incoming().fullName.size() >= 2 && incoming().fullName.size() <= 120 &&
+        (isAdmin() || isEducationAdmin() || (
+          isSignedIn() &&
+          incoming().institutionAdminUid == request.auth.uid &&
+          isApprovedInstitutionOwner(incoming().institutionId)
+        ));
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || (
+        isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)
+      ));
+    }
+
+    match /attendance/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() || isLmsEducatorOrAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && (resource.data.personId == request.auth.uid || isLinkedParent(resource.data.personId)))
+      );
+      allow list: if isAdmin() || isEducationAdmin() || isLmsEducatorOrAdmin() || (
+        isSignedIn() && (
+          resource.data.institutionAdminUid == request.auth.uid ||
+          resource.data.personId == request.auth.uid ||
+          isLinkedParent(resource.data.personId) ||
+          (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+        )
+      );
+      allow create: if isValidId(id) && isSignedIn() && (
+        isAdmin() || isEducationAdmin() || isLmsTeacher() ||
+        incoming().personId == request.auth.uid ||
+        (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId)) ||
+        isAssignedSchoolTeacher(incoming())
+      );
+      allow update, delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)) ||
+        isAssignedSchoolTeacher(existing())
+      );
+    }
+
+    match /examinations/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.institutionId == resource.data.institutionId)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+      ));
+      allow create: if isValidId(id) && isSignedIn() && (
+        isAdmin() || isEducationAdmin() ||
+        (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId))
+      );
+      allow update, delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId))
+      );
+    }
+
+    match /results/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)))
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        resource.data.studentId == request.auth.uid ||
+        isLinkedParent(resource.data.studentId) ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+      ));
+      allow create: if isValidId(id) && isSignedIn() && (
+        isAdmin() || isEducationAdmin() || isLmsTeacher() ||
+        (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId))
+      );
+      allow update, delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId))
+      );
+    }
+
+    match /assignments/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.institutionAdminUid == request.auth.uid || resource.data.teacherUid == request.auth.uid || resource.data.courseId is string)));
+      allow list: if isAdmin() || isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.institutionAdminUid == request.auth.uid || resource.data.teacherUid == request.auth.uid || isParentAccount()));
+      allow create: if isValidId(id) && isSignedIn() &&
+        (isAdmin() || isLmsTeacher() || (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId)));
+      allow update, delete: if isValidId(id) && (isAdmin() || (isSignedIn() && (existing().teacherUid == request.auth.uid || existing().institutionAdminUid == request.auth.uid)));
+    }
+
+    match /payments/{id} {
+      // Strictly isolated from school teachers; only Super Admin, Education Admin (read), School Admin Owner, or paying User/Parent
+      allow get: if isValidId(id) && (
+        isSuperAdmin() || isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && (resource.data.institutionAdminUid == request.auth.uid || resource.data.userId == request.auth.uid || isLinkedParent(resource.data.userId)))
+      );
+      allow list: if isSuperAdmin() || isAdmin() || isEducationAdmin() || (
+        isSignedIn() && (resource.data.institutionAdminUid == request.auth.uid || resource.data.userId == request.auth.uid)
+      );
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().amount is number && incoming().amount >= 0 &&
+        (
+          isSuperAdmin() ||
+          (incoming().userId == request.auth.uid && (!('status' in incoming()) || incoming().status != 'Paid' || (incoming().razorpayPaymentId is string && incoming().razorpayPaymentId.size() >= 6))) ||
+          (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId))
+        );
+      allow update, delete: if isValidId(id) && (
+        isSuperAdmin() ||
+        (isSignedIn() && existing().institutionId is string && existing().institutionId.size() > 0 && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId))
+      );
+    }
+
+    match /subscriptions/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.institutionAdminUid == request.auth.uid));
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.institutionAdminUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() &&
+        (isAdmin() || isEducationAdmin() || (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId)));
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin());
+    }
+
+    match /field_executives/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || isOwner(uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(uid) && isSignedIn() && isOwner(uid) && incoming().uid == request.auth.uid;
+      allow update: if isValidId(uid) && (isAdmin() || (isOwner(uid) && incoming().uid == existing().uid));
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /school_visits/{id} {
+      allow get: if isValidId(id) && (isAdmin() || (isSignedIn() && resource.data.executiveUid == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.executiveUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && incoming().executiveUid == request.auth.uid;
+      allow update: if isValidId(id) && (isAdmin() || (isSignedIn() && existing().executiveUid == request.auth.uid));
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /ngo_partners/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || isHopeNestAdmin() || isOwner(uid));
+      allow list: if isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(uid) && isSignedIn() && isOwner(uid) && incoming().uid == request.auth.uid;
+      allow update: if isValidId(uid) && (isAdmin() || isHopeNestAdmin() || (isOwner(uid) && incoming().verificationStatus == existing().verificationStatus));
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /ngo_programmes/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.partnerUid == request.auth.uid));
+      allow list: if isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.partnerUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && (isAdmin() || isHopeNestAdmin() || incoming().partnerUid == request.auth.uid);
+      allow update, delete: if isValidId(id) && (isAdmin() || isHopeNestAdmin() || (isSignedIn() && existing().partnerUid == request.auth.uid));
+    }
+
+    match /ngo_volunteers/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.partnerUid == request.auth.uid));
+      allow list: if isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.partnerUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && (isAdmin() || isHopeNestAdmin() || incoming().partnerUid == request.auth.uid);
+      allow update, delete: if isValidId(id) && (isAdmin() || isHopeNestAdmin() || (isSignedIn() && existing().partnerUid == request.auth.uid));
+    }
+
+    match /ngo_beneficiaries/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.partnerUid == request.auth.uid));
+      allow list: if isAdmin() || isHopeNestAdmin() || (isSignedIn() && resource.data.partnerUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && (isAdmin() || isHopeNestAdmin() || incoming().partnerUid == request.auth.uid);
+      allow update, delete: if isValidId(id) && (isAdmin() || isHopeNestAdmin() || (isSignedIn() && existing().partnerUid == request.auth.uid));
+    }
+
+    match /iq_eq_sq_assessments/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)))
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        resource.data.studentId == request.auth.uid ||
+        isLinkedParent(resource.data.studentId) ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+      ));
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().dimension in ['IQ', 'EQ', 'SQ'] &&
+        incoming().percentage is number && incoming().percentage >= 0 && incoming().percentage <= 100 &&
+        (
+          isAdmin() || isEducationAdmin() ||
+          incoming().studentId == request.auth.uid ||
+          (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId)) ||
+          isAssignedSchoolTeacher(incoming())
+        );
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin());
+    }
+
+    match /school_assessment_assignments/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && resource.data.targetStudentUids is list && request.auth.uid in resource.data.targetStudentUids)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids) ||
+        (resource.data.targetStudentUids is list && request.auth.uid in resource.data.targetStudentUids)
+      ));
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().dimension in ['IQ', 'EQ', 'SQ'] &&
+        (
+          isAdmin() || isEducationAdmin() ||
+          (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId)) ||
+          isAssignedSchoolTeacher(incoming())
+        );
+      allow update, delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId)) ||
+        isAssignedSchoolTeacher(existing())
+      );
+    }
+
+    match /school_program_enrollments/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && resource.data.studentUid == request.auth.uid)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        resource.data.studentUid == request.auth.uid ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+      ));
+      allow create, update: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().status in ['Enrolled', 'In Progress', 'Completed', 'Withdrawn'] &&
+        (
+          isAdmin() || isEducationAdmin() ||
+          (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId)) ||
+          isAssignedSchoolTeacher(incoming())
+        );
+      allow delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId))
+      );
+    }
+
+    match /school_partner_certificates/{certId} {
+      allow get: if isValidId(certId) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data) ||
+        (isSignedIn() && resource.data.studentUid == request.auth.uid)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        resource.data.studentUid == request.auth.uid ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+      ));
+      allow create: if isValidId(certId) && isSignedIn() &&
+        incoming().certificateId == certId &&
+        incoming().status in ['Issued', 'Revoked', 'Corrected'] &&
+        (
+          isAdmin() || isEducationAdmin() ||
+          (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId))
+        );
+      allow update: if isValidId(certId) && isSignedIn() &&
+        incoming().certificateId == existing().certificateId &&
+        incoming().institutionId == existing().institutionId &&
+        incoming().status in ['Issued', 'Revoked', 'Corrected'] &&
+        (
+          isAdmin() || isEducationAdmin() ||
+          (existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId))
+        );
+      allow delete: if isValidId(certId) && isSuperAdmin();
+    }
+
+    match /school_partner_announcements/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId) ||
+        isAssignedSchoolTeacher(resource.data)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && (
+        resource.data.institutionAdminUid == request.auth.uid ||
+        (resource.data.assignedTeacherUids is list && request.auth.uid in resource.data.assignedTeacherUids)
+      ));
+      allow create, update: if isValidId(id) && isSignedIn() && (
+        isAdmin() || isEducationAdmin() ||
+        (incoming().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(incoming().institutionId))
+      );
+      allow delete: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && existing().institutionAdminUid == request.auth.uid && isApprovedInstitutionOwner(existing().institutionId))
+      );
+    }
+
+    match /school_partner_audit_logs/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        isInstitutionOwner(resource.data.institutionId)
+      );
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.institutionAdminUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().actorUid == request.auth.uid &&
+        incoming().action is string && incoming().action.size() <= 120 &&
+        (
+          isAdmin() || isEducationAdmin() ||
+          incoming().institutionAdminUid == request.auth.uid ||
+          isAssignedSchoolTeacher(incoming())
+        );
+      allow update, delete: if false;
+    }
+
+    // ====================================================
+    // LIVE CLASSROOMS, REMINDERS, COMMERCE & AI COPILOT
+    // ====================================================
+
+    match /unified_live_classes/{id} {
+      allow get, list: if isValidId(id) && isSignedIn();
+      allow create: if isValidId(id) && isSignedIn() &&
+        (isAdmin() || isLmsEducatorOrAdmin() || incoming().teacherUid == request.auth.uid) &&
+        incoming().provider in ['Zoom', 'Google Meet'] &&
+        incoming().title is string && incoming().title.size() >= 2 && incoming().title.size() <= 200;
+      allow update: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() ||
+        (isSignedIn() && (
+          existing().teacherUid == request.auth.uid ||
+          (existing().institutionId is string && isInstitutionOwner(existing().institutionId))
+        ))
+      );
+      allow delete: if isValidId(id) && (isAdmin() || (isSignedIn() && existing().teacherUid == request.auth.uid));
+    }
+
+    match /live_class_attendance/{id} {
+      allow get, list: if isAdmin() || isLmsEducatorOrAdmin() || (isSignedIn() && (
+        resource.data.studentId == request.auth.uid ||
+        resource.data.teacherUid == request.auth.uid ||
+        isLinkedParent(resource.data.studentId) ||
+        (resource.data.institutionId is string && isInstitutionOwner(resource.data.institutionId))
+      ));
+      allow create, update: if isValidId(id) && isSignedIn() && (
+        isAdmin() || isLmsTeacher() ||
+        incoming().studentId == request.auth.uid ||
+        incoming().teacherUid == request.auth.uid
+      ) && incoming().status in ['Present', 'Late', 'Partially Attended', 'Absent'];
+      allow delete: if isValidId(id) && isAdmin();
+    }
+
+    match /notification_deliveries/{id} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && (
+        isAdmin() || isLmsTeacher() || incoming().userId == request.auth.uid
+      );
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /user_notification_preferences/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || isOwner(uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create, update: if isValidId(uid) && isSignedIn() && (isOwner(uid) || isAdmin()) && incoming().userId == uid;
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /admin_notification_settings/{id} {
+      allow get, list: if isValidId(id) && isSignedIn();
+      allow create, update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /coupons/{id} {
+      allow get, list: if isValidId(id) && isSignedIn();
+      allow create, delete: if isValidId(id) && isAdmin();
+      allow update: if isValidId(id) && (
+        isAdmin() ||
+        (isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'updatedAt']))
+      );
+    }
+
+    match /gst_invoices/{id} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && (isAdmin() || incoming().userId == request.auth.uid);
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /affiliates/{uid} {
+      allow get, list: if isAdmin() || isSignedIn();
+      allow create: if isValidId(uid) && isSignedIn() && (isAdmin() || (isOwner(uid) && incoming().uid == uid));
+      allow update: if isValidId(uid) && (
+        isAdmin() ||
+        isOwner(uid) ||
+        (isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['totalReferrals', 'totalEarnedInr', 'pendingPayoutInr', 'updatedAt']))
+      );
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /commissions/{id} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.affiliateUid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && (isAdmin() || incoming().sourceUserId == request.auth.uid);
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /payouts/{id} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.recipientUid == request.auth.uid);
+      allow create, update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /refunds/{id} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() && incoming().userId == request.auth.uid;
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /generated_question_papers/{id} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.teacherUid == request.auth.uid);
+      allow create, update: if isValidId(id) && isSignedIn() && (isAdmin() || incoming().teacherUid == request.auth.uid);
+      allow delete: if isValidId(id) && (isAdmin() || (isSignedIn() && existing().teacherUid == request.auth.uid));
+    }
+
+    // ====================================================
+    // EDUCATION TAXONOMY, Q&A HISTORY & DISCOVERY ANALYTICS
+    // ====================================================
+
+    match /education_taxonomy/{id} {
+      allow get, list: if isValidId(id);
+      allow create, update: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin()) &&
+        incoming().id == id &&
+        incoming().categoryCode in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'] &&
+        (!('levelNumber' in incoming()) || (incoming().levelNumber is number && incoming().levelNumber >= 1 && incoming().levelNumber <= 10)) &&
+        (!('displayOrder' in incoming()) || incoming().displayOrder is number) &&
+        incoming().itemType in ['qualification', 'degree', 'stream', 'subject', 'specialization'] &&
+        incoming().name is string && incoming().name.size() >= 1 && incoming().name.size() <= 160 &&
+        incoming().isActive is bool;
+      allow delete: if isValidId(id) && (isAdmin() || isEducationAdmin() || isContentAdmin());
+    }
+
+    match /course_requests/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.requesterUid == request.auth.uid));
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.requesterUid == request.auth.uid);
+      allow create: if isValidId(id) &&
+        incoming().id == id &&
+        incoming().requestedTopic is string && incoming().requestedTopic.size() >= 2 && incoming().requestedTopic.size() <= 240 &&
+        incoming().requesterName is string && incoming().requesterName.size() >= 2 && incoming().requesterName.size() <= 120 &&
+        incoming().requesterEmail is string && incoming().requesterEmail.size() >= 5 && incoming().requesterEmail.size() <= 120 &&
+        incoming().status == 'Requested' &&
+        incoming().createdAt is string;
+      allow update, delete: if isValidId(id) && (isAdmin() || isEducationAdmin());
+    }
+
+    match /qa_history/{id} {
+      allow get, list: if isAdmin() || isLmsEducatorOrAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().studentId == request.auth.uid &&
+        incoming().question is string && incoming().question.size() >= 2 && incoming().question.size() <= 600 &&
+        incoming().answer is string && incoming().answer.size() >= 2 && incoming().answer.size() <= 6000;
+      allow update: if isValidId(id) && isSignedIn() &&
+        (isAdmin() || (existing().studentId == request.auth.uid && incoming().studentId == request.auth.uid));
+      allow delete: if isValidId(id) && isSignedIn() &&
+        (isAdmin() || existing().studentId == request.auth.uid);
+    }
+
+    match /recommendation_analytics/{id} {
+      allow get, list: if isAdmin() || isEducationAdmin();
+      allow create: if isValidId(id) &&
+        incoming().id == id &&
+        incoming().eventType in ['search', 'course_impression', 'course_enroll_click', 'youtube_watch', 'qa_ask', 'roadmap_save'] &&
+        incoming().query is string && incoming().query.size() <= 250 &&
+        incoming().createdAt is string;
+      allow update, delete: if false;
     }
 
     // Connection testing

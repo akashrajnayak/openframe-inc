@@ -80,14 +80,14 @@ class QwenAiService {
       {
         id: 'msg-welcome-001',
         sender: 'qwen',
-        text: `Hello! I am **Qwen AI** (also known as Quinn AI), your dedicated intelligent Academic & Career Assistant at OpenFrame IT Solutions and OpenFrame Education.
+        text: `Hello! I am **Quinn AI**, your dedicated intelligent Academic & Career Assistant at OpenFrame Education and OpenFrame IT Solutions.
 
 I can help you:
-1. **Explore 15,500+ Courses** across 110+ specialized categories (AI, Corporate Management & Employee Skill Development, Robotics, Full-Stack, Cloud, Data Science, etc.).
+1. **Explore 15,500+ Courses** across 110+ specialized categories (AI, Corporate Management & Employee Skill Development, Excel, Robotics, Full-Stack, Cloud, Data Science, Academic K–12, etc.).
 2. **Schedule 1-on-1 Academic Counseling** to finalize your customized curriculum, fee structure, and scholarships.
-3. **Stream Curated YouTube Video Lectures** from MIT, Stanford, Harvard, and Corporate Training Partners directly on our site.
+3. **Stream Curated YouTube Video Lectures** from world-class educators and universities directly on our site.
 4. **Discover Enterprise IT Solutions** (Custom Software, Cloud ERP, Mobile Apps, Cybersecurity).
-5. **Generate Customized Study Roadmaps & Quizzes**.
+5. **Generate Customized Study Roadmaps, Summaries & Quizzes**.
 
 How can I assist your learning or technology goals today?`,
         timestamp: new Date().toISOString(),
@@ -124,11 +124,44 @@ How can I assist your learning or technology goals today?`,
    */
   async generateResponse(userInput: string): Promise<ChatMessage> {
     const q = userInput.trim().toLowerCase();
-    const id = `msg-qwen-${Date.now()}`;
+    const id = `msg-quinn-${Date.now()}`;
     const timestamp = new Date().toISOString();
 
-    // Simulate natural AI thinking delay (350ms - 750ms)
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    // Try live Gemini AI backend first while preserving rich contextual action prompts
+    try {
+      const apiRes = await fetch('/api/quinn/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userInput,
+          courseTitle: 'OpenFrame Education Universal Catalog (15,500+ Courses)',
+          lessonTopic: 'Universal Academic Guidance & Course Discovery',
+          language: 'English',
+          capabilityMode: 'chat',
+        }),
+      });
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        if (data?.reply && data.source !== 'structured_offline_tutor' && data.source !== 'contextual_fallback') {
+          const wantsVideos = q.includes('youtube') || q.includes('video') || q.includes('lecture');
+          const wantsFee = q.includes('fee') || q.includes('price') || q.includes('counsel') || q.includes('admission');
+          return {
+            id,
+            sender: 'qwen',
+            text: data.reply,
+            timestamp,
+            videoSuggestions: wantsVideos ? youtubeVideoService.getAllLibrary().slice(0, 4) : undefined,
+            actionPrompt: wantsFee
+              ? { type: 'expert_call', label: 'Apply for 1-on-1 Expert Call (Pop-up Form)' }
+              : wantsVideos
+              ? { type: 'learn', label: 'Launch Video Player Pop-Up' }
+              : { type: 'browse_courses', label: 'Explore 15,500+ Courses Catalog' },
+          };
+        }
+      }
+    } catch {
+      // Fall through cleanly to offline domain-grounded fallback
+    }
 
     // 1. Fee / Pricing / Payment queries
     if (
@@ -273,7 +306,7 @@ Click below to launch the video player modal right inside the page!`,
         sender: 'qwen',
         text: `### Customized 4-Week Learning Roadmap (AI & Full-Stack Track)
 
-Here is a structured, project-driven roadmap recommended by Qwen AI:
+Here is a structured, project-driven roadmap recommended by Quinn AI:
 
 #### **Week 1: Core Fundamentals & Python Programming**
 - **Topics**: Clean syntax, data structures, list comprehensions, OOP principles, Git version control.
@@ -363,7 +396,7 @@ Key Initiatives:
     return {
       id,
       sender: 'qwen',
-      text: `### Qwen AI Academic & Technical Analysis
+      text: `### Quinn AI Academic & Technical Analysis
 
 Thank you for your question regarding **"${userInput}"**.
 

@@ -2,58 +2,58 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, Link } from '../router/RouterContext';
 import {
   ArrowRight,
-  Code2,
   GraduationCap,
-  Layers,
   HeartHandshake,
   CheckCircle2,
   ChevronRight,
   ShieldCheck,
-  Server,
-  Database,
-  Cloud,
-  Cpu,
-  Smartphone,
-  ExternalLink,
-  MapPin,
-  Mail,
-  Phone,
   Briefcase,
   BookOpen,
   Users,
   Sparkles,
   Award,
   Play,
-  Tv,
-  Video,
-  PhoneCall,
   Bot,
-  Brain,
   Search,
-  Globe
+  Globe,
+  Compass,
+  Video,
+  School,
+  TrendingUp,
+  Layers,
 } from 'lucide-react';
-import {
-  initialSolutions,
-  initialEducationPrograms,
-  initialProducts,
-  initialBlogPosts,
-  initialCareerOpenings,
-  initialLocations,
-} from '../data/initialData';
-import { storageService } from '../services/storageService';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db, submitGeneralEnquiryToFirestore } from '../services/firebase';
+import { storageService } from '../services/storageService';
 import { StudentRegistrationModal } from '../components/common/StudentRegistrationModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
+import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { HomepageSchoolSection } from '../components/school/HomepageSchoolSection';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { marketplaceService } from '../services/marketplaceService';
-import { HomepageSchoolSection } from '../components/school/HomepageSchoolSection';
-import { MarketplaceAutocompleteSuggestion } from '../types';
+import { initialBlogPosts } from '../data/initialData';
+import { MarketplaceAutocompleteSuggestion, MarketplaceCourse } from '../types';
 import {
   PDF_HERO_EXAMPLE_QUERIES,
+  POPULAR_SEARCH_TOPICS,
   SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES,
-  UNIVERSAL_12_CATEGORIES,
+  getRecentSearches,
+  saveRecentSearch,
+  normalizeAndExpandQuery,
 } from '../utils/searchIntelligence';
+import { EDUCATION_CLASSIFICATION_CATEGORIES } from '../data/educationClassificationData';
+
+import heroDeskImg from '../assets/images/hero_editorial_desk_1794913769362.jpg';
+import quinnWorkspaceImg from '../assets/images/quinn_ai_workspace_1794913771452.jpg';
+import communityEditorialImg from '../assets/images/community_learning_editorial_1794913770856.jpg';
+
+const FEATURED_FILTERS = [
+  { id: 'all', label: 'All Programmes', categoryGroup: undefined },
+  { id: 'tech', label: 'Technology & AI', categoryGroup: 'Technology' },
+  { id: 'business', label: 'Business & Finance', categoryGroup: 'Business' },
+  { id: 'academics', label: 'School & Academics', categoryGroup: 'Academics' },
+  { id: 'skills', label: 'Languages & Career', categoryGroup: 'Life Skills' },
+];
 
 export const HomePage: React.FC = () => {
   const { navigate } = useRouter();
@@ -65,11 +65,20 @@ export const HomePage: React.FC = () => {
   const [videoPlaylist, setVideoPlaylist] = useState<ExtendedYouTubeVideo[]>([]);
   const [liveCourseCount, setLiveCourseCount] = useState<number | null>(null);
 
+  // Featured Learning Programmes (Real marketplace data)
+  const [featuredFilter, setFeaturedFilter] = useState<string>('all');
+  const [featuredCourses, setFeaturedCourses] = useState<MarketplaceCourse[]>([]);
+  const [loadingFeatured, setLoadingFeatured] = useState<boolean>(true);
+
+  // Live Announcements for Community section (real Firestore fallback to curated blog)
+  const [liveAnnouncements, setLiveAnnouncements] = useState<Array<{ id: string; title: string; summary: string; date: string; path: string }>>([]);
+
   // Universal Hero Search Bar state
   const [heroSearchQuery, setHeroSearchQuery] = useState('');
   const [heroLanguage, setHeroLanguage] = useState('Auto-Detect Language');
   const [heroSuggestions, setHeroSuggestions] = useState<MarketplaceAutocompleteSuggestion[]>([]);
   const [heroSearchFocused, setHeroSearchFocused] = useState(false);
+  const [heroRecentSearches] = useState<string[]>(() => getRecentSearches());
 
   useEffect(() => {
     const q = heroSearchQuery.trim();
@@ -92,20 +101,82 @@ export const HomePage: React.FC = () => {
     };
   }, [heroSearchQuery]);
 
-  const handleHeroSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const params = new URLSearchParams();
-    if (heroSearchQuery.trim()) params.set('q', heroSearchQuery.trim());
-    if (heroLanguage && heroLanguage !== 'Auto-Detect Language') {
-      params.set('lang', heroLanguage.replace(/\s*\(.*\)$/, ''));
-    }
-    setHeroSearchFocused(false);
-    navigate(`/marketplace${params.toString() ? `?${params.toString()}` : ''}`);
-  };
+  // Fetch real featured courses from marketplaceService
+  useEffect(() => {
+    let active = true;
+    setLoadingFeatured(true);
+    const selectedTab = FEATURED_FILTERS.find((f) => f.id === featuredFilter);
+    marketplaceService
+      .filterCourses({
+        page: 1,
+        pageSize: 6,
+        sortBy: 'popular',
+        categoryGroup: selectedTab?.categoryGroup,
+      })
+      .then((res) => {
+        if (active) {
+          setFeaturedCourses(res.courses || []);
+          setLoadingFeatured(false);
+        }
+      })
+      .catch(() => {
+        if (active) setLoadingFeatured(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [featuredFilter]);
+
+  // Fetch real live announcements (falling back cleanly to published editorial blog posts)
+  useEffect(() => {
+    let active = true;
+    getDocs(query(collection(db, 'announcements'), orderBy('createdAt', 'desc'), limit(3)))
+      .then((snap) => {
+        if (!active) return;
+        const docs = snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
+          .filter((item) => item.title);
+        if (docs.length > 0) {
+          setLiveAnnouncements(
+            docs.map((item) => ({
+              id: item.id,
+              title: item.title,
+              summary: item.message || item.description || 'Platform update from OpenFrame Education.',
+              date: item.createdAt ? String(item.createdAt).slice(0, 10) : 'Recent',
+              path: '/marketplace',
+            }))
+          );
+        } else {
+          setLiveAnnouncements(
+            initialBlogPosts.slice(0, 3).map((post) => ({
+              id: post.id,
+              title: post.title,
+              summary: post.excerpt,
+              date: post.publishedDate,
+              path: '/blog',
+            }))
+          );
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setLiveAnnouncements(
+          initialBlogPosts.slice(0, 3).map((post) => ({
+            id: post.id,
+            title: post.title,
+            summary: post.excerpt,
+            date: post.publishedDate,
+            path: '/blog',
+          }))
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
-
     const refreshCounter = () => {
       marketplaceService
         .getLiveMarketplaceCounters(true)
@@ -121,36 +192,37 @@ export const HomePage: React.FC = () => {
 
     const unsubStats = onSnapshot(
       doc(db, 'marketplace_stats', 'global'),
-      () => {
-        refreshCounter();
-      },
-      (err) => {
-        console.warn('Marketplace stats listener fallback:', err);
-      }
+      () => refreshCounter(),
+      () => {}
     );
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        refreshCounter();
-      }
-    };
-    window.addEventListener('focus', refreshCounter);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
     return () => {
       active = false;
       unsubStats();
-      window.removeEventListener('focus', refreshCounter);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
   }, []);
+
+  const [selectedEduCode, setSelectedEduCode] = useState<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'>('G');
+
+  const handleHeroSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanQ = heroSearchQuery.trim();
+    if (cleanQ) saveRecentSearch(cleanQ);
+    const params = new URLSearchParams();
+    if (cleanQ) params.set('q', cleanQ);
+    if (heroLanguage && heroLanguage !== 'Auto-Detect Language') {
+      params.set('lang', heroLanguage.replace(/\s*\(.*\)$/, ''));
+    }
+    setHeroSearchFocused(false);
+    navigate(`/marketplace${params.toString() ? `?${params.toString()}` : ''}`);
+  };
 
   // Consultation quick capture state
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
-    division: 'IT Solutions' as const,
+    division: 'Education' as const,
     subject: '',
     message: '',
   });
@@ -180,7 +252,7 @@ export const HomePage: React.FC = () => {
       message: formData.message,
       consentAccepted: true,
       submittedAt: new Date().toISOString(),
-      status: 'New'
+      status: 'New',
     }).catch(() => {});
 
     setFormSubmitted(true);
@@ -188,414 +260,678 @@ export const HomePage: React.FC = () => {
       name: '',
       email: '',
       phone: '',
-      division: 'IT Solutions',
+      division: 'Education',
       subject: '',
       message: '',
     });
   };
 
+  const servicesList = [
+    {
+      title: 'Online Video Courses',
+      desc: 'Structured lectures in technology, academics, communication, and finance curated in 11+ languages.',
+      icon: Video,
+      path: '/marketplace',
+      actionLabel: 'Explore Library',
+    },
+    {
+      title: 'Structured Learning Pathways',
+      desc: 'Guided 8-stage mastery track from video lessons and verification quizzes to capstone defense.',
+      icon: Compass,
+      path: '/education',
+      actionLabel: 'View Pathways',
+    },
+    {
+      title: 'Live Classes & Workshops',
+      desc: 'Interactive faculty sessions, practical problem-solving labs, and peer project reviews.',
+      icon: Users,
+      path: '/school',
+      actionLabel: 'Explore Cohorts',
+    },
+    {
+      title: 'Certification Programmes',
+      desc: 'Rubric-evaluated, QR-verifiable digital certificates backed by authentic assessment.',
+      icon: Award,
+      path: '/verify-certificate',
+      actionLabel: 'Verify Credentials',
+    },
+    {
+      title: 'School & College Partnerships',
+      desc: 'Complete campus portal for LKG–12 schools, IQ/EQ/SQ diagnostics, attendance, and fee records.',
+      icon: School,
+      path: '/partner/school',
+      actionLabel: 'Partner With Us',
+    },
+  ];
+
+  const howSteps = [
+    {
+      num: '01',
+      title: 'Choose Your Goal',
+      desc: 'Select school foundations, career upskilling, or certification tracks tailored to your aspirations.',
+      icon: Compass,
+    },
+    {
+      num: '02',
+      title: 'Discover Courses',
+      desc: 'Search across thousands of curated video lessons and multilingual playlists with Quinn AI.',
+      icon: Search,
+    },
+    {
+      num: '03',
+      title: 'Learn Step-by-Step',
+      desc: 'Watch lectures on-site, take verification quizzes, and complete guided practical projects.',
+      icon: BookOpen,
+    },
+    {
+      num: '04',
+      title: 'Track Progress',
+      desc: 'Follow visual mastery analytics, earn faculty feedback, and unlock verified credentials.',
+      icon: TrendingUp,
+    },
+  ];
+
+  const audienceCards = [
+    {
+      title: 'Students',
+      desc: 'Interactive video courses, AI mentorship, school syllabus mastery, and verified certificates.',
+      icon: GraduationCap,
+      accent: 'bg-[#2563EB]',
+      path: '/portal/student',
+      cta: 'Student Portal',
+    },
+    {
+      title: 'Teachers',
+      desc: 'Manage classes, grade projects on transparent rubrics, and configure custom quizzes.',
+      icon: BookOpen,
+      accent: 'bg-[#123D32]',
+      path: '/portal/teacher',
+      cta: 'Teacher Portal',
+    },
+    {
+      title: 'Parents',
+      desc: 'Clear visibility into daily study activity, assessment scores, attendance, and fee receipts.',
+      icon: Users,
+      accent: 'bg-teal-700',
+      path: '/portal/parent',
+      cta: 'Parent Portal',
+    },
+    {
+      title: 'Schools & Institutions',
+      desc: 'Dedicated multi-tenant campus portal for LKG–12 classrooms, teachers, and accreditation.',
+      icon: School,
+      accent: 'bg-[#14213D]',
+      path: '/partner/school',
+      cta: 'School Portal',
+    },
+    {
+      title: 'NGO & Impact Partners',
+      desc: 'Collaborate on digital literacy drives, HopeNest outreach, volunteer tracking, and learners.',
+      icon: HeartHandshake,
+      accent: 'bg-emerald-700',
+      path: '/portal/ngo',
+      cta: 'NGO Portal',
+    },
+    {
+      title: 'Working Professionals',
+      desc: 'Accelerate leadership, AI, Excel, and engineering readiness without pausing your career.',
+      icon: Briefcase,
+      accent: 'bg-indigo-700',
+      path: '/portal/professional',
+      cta: 'Professional Portal',
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-[#FAF7F2] text-[#18221F] flex flex-col">
       {/* ========================================================= */}
-      {/* 1. HERO SECTION                                           */}
+      {/* B. HERO SECTION + SMART AI SEARCH ENGINE                  */}
       {/* ========================================================= */}
-      <section className="relative bg-gradient-to-b from-[#071326] via-[#0B1930] to-[#0D234A] text-white pt-16 pb-28 sm:pb-36 overflow-hidden">
-        {/* Subtle geometric grid backdrop */}
-        <div
-          className="absolute inset-0 opacity-10 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle at 1px 1px, #38BDF8 1px, transparent 0)`,
-            backgroundSize: '32px 32px',
-          }}
-        />
+      <section className="relative bg-[#FAF7F2] pt-10 sm:pt-14 pb-28 sm:pb-36 border-b border-slate-200/70">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
+            {/* Left Column: Editorial Headline, Dual CTAs & Smart AI Course Search */}
+            <div className="lg:col-span-6 space-y-6">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                OpenFrame Education · Technology &amp; Learning Ecosystem
+              </div>
 
-        {/* Ambient light glow behind headline */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-blue-600/15 blur-[120px] rounded-full pointer-events-none" />
+              <h1 className="text-4xl sm:text-5xl lg:text-[56px] font-editorial font-semibold text-[#18221F] leading-[1.08] tracking-tight text-balance">
+                Education That Opens{' '}
+                <span className="italic text-[#123D32]">Every Possibility.</span>
+              </h1>
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-4xl mx-auto text-center space-y-6">
-            
-            {/* Tagline Badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-900/40 border border-blue-700/40 text-sky-300 text-xs font-semibold tracking-wider uppercase">
-              <span className="w-2 h-2 rounded-full bg-sky-400"></span>
-              Technology | Education | Innovation
-            </div>
+              <p className="text-base sm:text-lg text-[#64748B] leading-relaxed max-w-xl text-pretty">
+                Discover structured video courses, guided skill tracks, AI tutoring, and institutional learning — thoughtfully crafted for students, teachers, parents, schools, and lifelong learners.
+              </p>
 
-            {/* Main Headline */}
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-heading font-extrabold text-white tracking-tight leading-[1.15] text-balance">
-              Empowering Businesses.{' '}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-blue-200 to-indigo-300">
-                Transforming Education.
-              </span>{' '}
-              Building a Digital Future.
-            </h1>
-
-            {/* Supporting Description */}
-            <p className="text-base sm:text-lg text-slate-300 max-w-3xl mx-auto font-normal leading-relaxed text-pretty">
-              OpenFrame IT Solutions Private Limited delivers technology-driven solutions, software development, digital platforms, education and skill development initiatives.
-            </p>
-
-            {/* Universal AI Course Search Bar */}
-            <div className="max-w-3xl mx-auto pt-2 relative text-left">
-              <form
-                onSubmit={handleHeroSearchSubmit}
-                className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white/10 backdrop-blur-md border border-blue-400/35 rounded-2xl p-2 shadow-2xl shadow-black/30"
-              >
-                <div className="flex items-center gap-2.5 flex-1 px-3 py-1.5 bg-slate-950/60 rounded-xl border border-white/10">
-                  <Search className="w-4 h-4 text-sky-400 shrink-0" />
-                  <input
-                    type="text"
-                    value={heroSearchQuery}
-                    onChange={(e) => setHeroSearchQuery(e.target.value)}
-                    onFocus={() => setHeroSearchFocused(true)}
-                    onBlur={() => setTimeout(() => setHeroSearchFocused(false), 180)}
-                    placeholder="What do you want to learn today?"
-                    aria-label="Universal AI Course Search"
-                    className="w-full bg-transparent text-sm text-white placeholder-slate-400 focus:outline-none"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-950/60 rounded-xl border border-white/10 sm:w-52">
-                  <Globe className="w-4 h-4 text-sky-400 shrink-0" />
-                  <select
-                    value={heroLanguage}
-                    onChange={(e) => setHeroLanguage(e.target.value)}
-                    aria-label="Preferred learning language"
-                    className="w-full bg-transparent text-xs font-medium text-slate-200 focus:outline-none cursor-pointer"
-                  >
-                    {SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES.map((lang) => (
-                      <option key={lang.code} value={lang.label} className="bg-slate-900 text-white">
-                        {lang.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0"
+              {/* Smart AI Course Search Bar (Preserved & Styled in Light Editorial Craft) */}
+              <div className="relative pt-1">
+                <form
+                  onSubmit={handleHeroSearchSubmit}
+                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white border border-slate-200 rounded-2xl p-2 shadow-lg shadow-slate-900/5"
                 >
-                  <span>Search Courses</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </form>
+                  <div className="flex items-center gap-2.5 flex-1 px-3 py-1.5">
+                    <Search className="w-4 h-4 text-[#123D32] shrink-0" />
+                    <input
+                      type="text"
+                      value={heroSearchQuery}
+                      onChange={(e) => setHeroSearchQuery(e.target.value)}
+                      onFocus={() => setHeroSearchFocused(true)}
+                      onBlur={() => setTimeout(() => setHeroSearchFocused(false), 180)}
+                      placeholder="What do you want to learn today?"
+                      aria-label="Universal AI Course Search"
+                      className="w-full bg-transparent text-sm text-[#18221F] placeholder-slate-400 focus:outline-none"
+                    />
+                  </div>
 
-              {heroSearchFocused && heroSuggestions.length > 0 && (
-                <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-40 overflow-hidden divide-y divide-slate-800">
-                  {heroSuggestions.map((item, idx) => (
-                    <button
-                      key={`${item.type}-${item.label}-${idx}`}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setHeroSearchFocused(false);
-                        if (item.type === 'course' && item.id) {
-                          navigate(`/marketplace/${item.id}`);
-                        } else {
-                          const qp = new URLSearchParams();
-                          qp.set('q', item.label);
-                          if (heroLanguage !== 'Auto-Detect Language') {
-                            qp.set('lang', heroLanguage.replace(/\s*\(.*\)$/, ''));
-                          }
-                          navigate(`/marketplace?${qp.toString()}`);
-                        }
-                      }}
-                      className="w-full px-4 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 text-xs text-slate-200 cursor-pointer"
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-[#F5F5F2] rounded-xl sm:w-44">
+                    <Globe className="w-3.5 h-3.5 text-[#123D32] shrink-0" />
+                    <select
+                      value={heroLanguage}
+                      onChange={(e) => setHeroLanguage(e.target.value)}
+                      aria-label="Preferred learning language"
+                      className="w-full bg-transparent text-xs font-medium text-[#18221F] focus:outline-none cursor-pointer"
                     >
-                      <span className="font-medium truncate">{item.label}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-sky-400 shrink-0">
-                        {item.type}
-                      </span>
+                      {SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES.map((lang) => (
+                        <option key={lang.code} value={lang.label}>
+                          {lang.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <span>Search</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </form>
+
+                {/* Autocomplete Dropdown */}
+                {heroSearchFocused && (heroSuggestions.length > 0 || heroSearchQuery.trim().length < 2) && (
+                  <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-2xl z-40 overflow-hidden divide-y divide-slate-100 max-h-80 overflow-y-auto">
+                    {heroSearchQuery.trim().length >= 2 && normalizeAndExpandQuery(heroSearchQuery).correctionHint && (
+                      <div className="px-4 py-2 bg-[#FAF7F2] text-[11px] text-[#123D32] font-medium">
+                        {normalizeAndExpandQuery(heroSearchQuery).correctionHint}
+                      </div>
+                    )}
+
+                    {heroSuggestions.length > 0 ? (
+                      heroSuggestions.map((item, idx) => (
+                        <button
+                          key={`${item.type}-${item.label}-${idx}`}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setHeroSearchFocused(false);
+                            if (item.type === 'course' && item.id) {
+                              navigate(`/marketplace/${item.id}`);
+                            } else {
+                              const qp = new URLSearchParams();
+                              qp.set('q', item.label);
+                              if (heroLanguage !== 'Auto-Detect Language') {
+                                qp.set('lang', heroLanguage.replace(/\s*\(.*\)$/, ''));
+                              }
+                              navigate(`/marketplace?${qp.toString()}`);
+                            }
+                          }}
+                          className="w-full px-4 py-2.5 text-left hover:bg-[#FAF7F2] flex items-center justify-between gap-2 text-xs text-[#18221F] cursor-pointer"
+                        >
+                          <span className="font-medium truncate">{item.label}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-[#2563EB] font-semibold shrink-0">
+                            {item.type}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="p-4 space-y-3">
+                        {heroRecentSearches.length > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
+                              Recently Searched
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {heroRecentSearches.slice(0, 5).map((rs) => (
+                                <button
+                                  key={rs}
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setHeroSearchFocused(false);
+                                    navigate(`/marketplace?q=${encodeURIComponent(rs)}`);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-[#F5F5F2] hover:bg-slate-200 text-[11px] text-[#18221F] cursor-pointer"
+                                >
+                                  {rs}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-[#123D32]">
+                            Popular Learning Topics
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {POPULAR_SEARCH_TOPICS.slice(0, 6).map((topic) => (
+                              <button
+                                key={topic}
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setHeroSearchFocused(false);
+                                  navigate(`/marketplace?q=${encodeURIComponent(topic)}`);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-[#FAF7F2] hover:bg-[#123D32] hover:text-white border border-slate-200 text-[11px] text-[#18221F] transition-colors cursor-pointer"
+                              >
+                                {topic}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Quick clickable topic shortcuts */}
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-[#64748B]">
+                  <span className="font-semibold text-[#18221F] mr-1">Try:</span>
+                  {PDF_HERO_EXAMPLE_QUERIES.slice(0, 6).map((topic) => (
+                    <button
+                      key={topic}
+                      type="button"
+                      onClick={() => navigate(`/marketplace?q=${encodeURIComponent(topic)}`)}
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#123D32] hover:text-white border border-slate-200 text-[#18221F] transition-colors cursor-pointer"
+                    >
+                      {topic}
                     </button>
                   ))}
                 </div>
-              )}
+              </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
-                {PDF_HERO_EXAMPLE_QUERIES.map((topic) => (
-                  <button
-                    key={topic}
-                    type="button"
-                    onClick={() => {
-                      const qp = new URLSearchParams({ q: topic });
-                      if (heroLanguage !== 'Auto-Detect Language') {
-                        qp.set('lang', heroLanguage.replace(/\s*\(.*\)$/, ''));
-                      }
-                      navigate(`/marketplace?${qp.toString()}`);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-sky-500/25 border border-white/15 hover:border-sky-400/50 text-[11px] font-medium text-slate-200 transition-colors cursor-pointer"
-                  >
-                    {topic}
-                  </button>
-                ))}
+              {/* Dual Action Buttons */}
+              <div className="pt-2 flex flex-wrap items-center gap-3">
+                <Link
+                  to="/marketplace"
+                  className="px-6 py-3.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-600/20 flex items-center gap-2 transition-all whitespace-nowrap"
+                >
+                  <span className="tabular-nums">
+                    {liveCourseCount !== null
+                      ? `Explore ${liveCourseCount.toLocaleString()}+ Courses`
+                      : 'Explore Courses'}
+                  </span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+
+                <Link
+                  to="/portal"
+                  className="px-6 py-3.5 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-sm font-semibold flex items-center gap-2 transition-all whitespace-nowrap"
+                >
+                  <span>Login / Get Started</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => navigate(heroSearchQuery.trim() ? `/qa?q=${encodeURIComponent(heroSearchQuery.trim())}` : '/qa')}
+                  className="px-4 py-3.5 rounded-xl bg-white hover:bg-[#F5F5F2] border border-slate-300 text-[#123D32] text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Ask Quinn Q&amp;A
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsRegModalOpen(true)}
+                  className="px-4 py-3.5 rounded-xl bg-white hover:bg-[#F5F5F2] border border-slate-300 text-[#18221F] text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Apply for Admission
+                </button>
               </div>
             </div>
 
-            {/* Prominent Primary Call-To-Action Buttons */}
-            <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3.5 sm:gap-4 max-w-3xl mx-auto">
-              <Link
-                to="/marketplace"
-                className="w-full sm:w-auto px-7 py-4 rounded-xl text-sm sm:text-base font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 hover:from-blue-500 hover:to-sky-400 shadow-xl shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] active:scale-[0.99] transition-all flex items-center justify-center gap-2 group text-center"
-              >
-                <Sparkles className="w-5 h-5 text-amber-300" />
-                <span className="tabular-nums">
-                  {liveCourseCount !== null
-                    ? `Explore ${liveCourseCount.toLocaleString()} Courses & AI LMS`
-                    : 'Explore Course Marketplace & AI LMS'}
-                </span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
-
-              <Link
-                to="/it-solutions"
-                className="w-full sm:w-auto px-6 py-4 rounded-xl text-sm sm:text-base font-bold text-white bg-[#0F2042] hover:bg-[#152a55] border border-blue-500/40 hover:border-sky-400/60 shadow-lg shadow-black/20 hover:scale-[1.01] transition-all flex items-center justify-center gap-2 text-center"
-              >
-                <Cpu className="w-5 h-5 text-sky-400" />
-                <span>Enterprise IT Solutions</span>
-              </Link>
-
-              <Link
-                to="/chatbot"
-                className="w-full sm:w-auto px-6 py-4 rounded-xl text-sm sm:text-base font-bold text-white bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 border border-cyan-400/40 shadow-lg shadow-cyan-500/20 hover:scale-[1.01] transition-all flex items-center justify-center gap-2 text-center"
-              >
-                <Bot className="w-5 h-5 text-cyan-200" />
-                <span>Chat with Quinn AI</span>
-              </Link>
-
-              <Link
-                to="/contact"
-                className="w-full sm:w-auto px-6 py-4 rounded-xl text-sm sm:text-base font-semibold text-slate-200 bg-white/10 hover:bg-white/20 border border-white/20 hover:text-white backdrop-blur-md transition-all flex items-center justify-center gap-2 text-center"
-              >
-                <Phone className="w-4 h-4 text-sky-300" />
-                <span>Get in Touch</span>
-              </Link>
+            {/* Right Column: Large Framed Editorial Hero Photograph */}
+            <div className="lg:col-span-6">
+              <div className="relative rounded-3xl overflow-hidden shadow-2xl shadow-slate-900/10 border border-slate-200/80 bg-white">
+                <img
+                  src={heroDeskImg}
+                  alt="Warm sunlit study desk with laptop displaying OpenFrame learning interface"
+                  className="w-full h-[360px] sm:h-[440px] object-cover"
+                />
+                <div className="bg-white px-6 py-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100">
+                  <div>
+                    <div className="text-xs font-semibold text-[#123D32] uppercase tracking-wider">
+                      Unified Learning Platform
+                    </div>
+                    <div className="text-sm font-semibold text-[#18221F]">
+                      12 Universal Categories · 8 Dedicated Portals
+                    </div>
+                  </div>
+                  <Link
+                    to="/chatbot"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-blue-800 whitespace-nowrap"
+                  >
+                    <Bot className="w-4 h-4" />
+                    <span>Ask Quinn AI Mentor</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
             </div>
-
-            {/* Quick Interactive Portal Access Buttons */}
-            <div className="pt-3 flex flex-wrap items-center justify-center gap-2 max-w-4xl mx-auto">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">Direct Access:</span>
-
-              <button
-                onClick={() => setIsRegModalOpen(true)}
-                className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <GraduationCap className="w-3.5 h-3.5 text-cyan-200" />
-                <span>Apply for Admission (Pop-up)</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  const all = youtubeVideoService.getAllLibrary();
-                  setSelectedVideo(all[0] || null);
-                  setVideoPlaylist(all);
-                  setIsVideoModalOpen(true);
-                }}
-                className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-gradient-to-r from-blue-700 via-indigo-600 to-sky-600 hover:from-blue-600 hover:to-sky-500 border border-sky-400/30 shadow-md shadow-blue-900/30 transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <Play className="w-3 h-3 fill-sky-200 text-sky-200" />
-                <span>Play YouTube Lectures On Site</span>
-              </button>
-              
-              <Link
-                to="/school"
-                className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 border border-indigo-400/50 transition-all flex items-center gap-1.5 shadow-sm"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-sky-200" />
-                <span>School Education (LKG–12)</span>
-              </Link>
-
-              <Link
-                to="/chatbot"
-                className="px-3 py-1.5 rounded-full text-xs font-bold text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Bot className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Quinn AI Chatbot</span>
-              </Link>
-
-              <Link
-                to="/learn/OF-AI-001"
-                className="px-3 py-1.5 rounded-full text-xs font-semibold text-sky-300 bg-blue-950/80 hover:bg-blue-900 border border-blue-700/50 hover:border-sky-400/80 transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Play className="w-3 h-3 fill-current text-sky-400" />
-                <span>Quinn AI Course Learning</span>
-              </Link>
-
-              <Link
-                to="/animation-course"
-                className="px-3.5 py-1.5 rounded-full text-xs font-bold text-cyan-200 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-400/50 hover:border-cyan-400 transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Layers className="w-3.5 h-3.5 text-cyan-300" />
-                <span>Swift UI Animations &amp; Charts (ZIP)</span>
-              </Link>
-
-              <Link
-                to="/student/dashboard"
-                className="px-3 py-1.5 rounded-full text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/50 hover:border-emerald-400/80 transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Student Portal (8 Stages)</span>
-              </Link>
-
-              <Link
-                to="/teacher/dashboard"
-                className="px-3 py-1.5 rounded-full text-xs font-semibold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-700/50 hover:border-indigo-400/80 transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Users className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Teacher Evaluation Portal</span>
-              </Link>
-
-              <Link
-                to="/verify-certificate/OF-CERT-2026-8812"
-                className="px-3 py-1.5 rounded-full text-xs font-semibold text-amber-300 bg-amber-950/60 hover:bg-amber-900 border border-amber-700/50 hover:border-amber-400/80 transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Award className="w-3.5 h-3.5 text-amber-400" />
-                <span>Verify Certificate</span>
-              </Link>
-
-              <Link
-                to="/work-with-us"
-                className="px-3 py-1.5 rounded-full text-xs font-semibold text-slate-300 bg-slate-800/80 hover:bg-slate-700 border border-slate-600/50 hover:text-white transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Briefcase className="w-3.5 h-3.5 text-slate-400" />
-                <span>Work With Us</span>
-              </Link>
-            </div>
-
           </div>
         </div>
       </section>
 
       {/* ========================================================= */}
-      {/* OVERLAPPING PILLARS STRIP (Inspired by Reference Design)   */}
+      {/* FLOATING 3-PILLAR STRIP (Reference Design Overlap Card)   */}
       {/* ========================================================= */}
-      <div className="relative -mt-16 sm:-mt-20 z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="relative -mt-16 sm:-mt-20 z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
-          <div className="bg-white rounded-xl p-6 shadow-xl shadow-slate-900/5 border border-slate-200/80 hover:border-blue-300 transition-all group">
-            <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-              <Cpu className="w-6 h-6" />
+          <Link
+            to="/school"
+            className="bg-white rounded-2xl p-6 shadow-xl shadow-slate-900/5 border border-slate-200/80 hover:border-[#123D32] transition-all group flex flex-col justify-between"
+          >
+            <div>
+              <div className="w-11 h-11 rounded-xl bg-[#FAF7F2] text-[#123D32] flex items-center justify-center mb-4">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <h2 className="font-heading font-bold text-lg text-[#18221F] group-hover:text-[#123D32]">
+                School &amp; Academic Foundations
+              </h2>
+              <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
+                Complete LKG to Class 12 learning across CBSE, ICSE, and State boards with interactive notes, virtual labs, and multilingual study guides.
+              </p>
             </div>
-            <h3 className="font-heading font-bold text-lg text-slate-900">
-              Enterprise IT & Software
-            </h3>
-            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-              Custom software engineering, cloud architecture, resilient data pipelines, and scalable web and mobile business platforms.
-            </p>
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-[11px] font-medium text-slate-500">6 Core Practice Areas</span>
-              <Link to="/it-solutions" className="text-xs font-semibold text-blue-600 group-hover:text-blue-700 flex items-center gap-1">
-                <span>Discover</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#123D32]">
+              <span>Explore School Hub</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white rounded-xl p-6 shadow-xl shadow-slate-900/5 border border-slate-200/80 hover:border-sky-300 transition-all group">
-            <div className="w-12 h-12 rounded-lg bg-sky-50 flex items-center justify-center text-sky-600 mb-4 group-hover:bg-sky-600 group-hover:text-white transition-colors">
-              <GraduationCap className="w-6 h-6" />
+          <Link
+            to="/marketplace"
+            className="bg-white rounded-2xl p-6 shadow-xl shadow-slate-900/5 border border-slate-200/80 hover:border-[#2563EB] transition-all group flex flex-col justify-between"
+          >
+            <div>
+              <div className="w-11 h-11 rounded-xl bg-blue-50 text-[#2563EB] flex items-center justify-center mb-4">
+                <GraduationCap className="w-5 h-5" />
+              </div>
+              <h2 className="font-heading font-bold text-lg text-[#18221F] group-hover:text-[#2563EB]">
+                Career, AI &amp; Skill Tracks
+              </h2>
+              <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
+                Curated video courses across AI, Excel, Coding, Graphic Design, Finance, and Communication with structured verification quizzes.
+              </p>
             </div>
-            <h3 className="font-heading font-bold text-lg text-slate-900">
-              Education & Skill Training
-            </h3>
-            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-              Professional software fellowships, cloud engineering bootcamps, and institutional tech laboratory curriculum enablement.
-            </p>
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-[11px] font-medium text-slate-500">Industry-Aligned Pedagogy</span>
-              <Link to="/education" className="text-xs font-semibold text-sky-600 group-hover:text-sky-700 flex items-center gap-1">
-                <span>Programs</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#2563EB]">
+              <span>Browse Marketplace</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white rounded-xl p-6 shadow-xl shadow-slate-900/5 border border-slate-200/80 hover:border-indigo-300 transition-all group">
-            <div className="w-12 h-12 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 mb-4 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <Layers className="w-6 h-6" />
+          <Link
+            to="/it-solutions"
+            className="bg-white rounded-2xl p-6 shadow-xl shadow-slate-900/5 border border-slate-200/80 hover:border-[#14213D] transition-all group flex flex-col justify-between"
+          >
+            <div>
+              <div className="w-11 h-11 rounded-xl bg-slate-100 text-[#14213D] flex items-center justify-center mb-4">
+                <Layers className="w-5 h-5" />
+              </div>
+              <h2 className="font-heading font-bold text-lg text-[#18221F] group-hover:text-[#14213D]">
+                Enterprise Software &amp; Platforms
+              </h2>
+              <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
+                Custom enterprise engineering, CoreERP, EduLMS campus management systems, and verifiable QR certificate infrastructure.
+              </p>
             </div>
-            <h3 className="font-heading font-bold text-lg text-slate-900">
-              Proprietary Digital Products
-            </h3>
-            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-              Modular enterprise suites including OpenFrame CoreERP, EduLMS academic portal, CloudPulse monitor, and CollabFlow dispatch.
-            </p>
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-[11px] font-medium text-slate-500">4 Enterprise Platforms</span>
-              <Link to="/products" className="text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 flex items-center gap-1">
-                <span>View Suites</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#14213D]">
+              <span>Enterprise Capabilities</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </div>
-          </div>
-
+          </Link>
         </div>
       </div>
 
       {/* ========================================================= */}
-      {/* UNIVERSAL 12 CATEGORIES (A-L) & AI DISCOVERY SECTIONS    */}
+      {/* C. SERVICES SECTION (5 Core Educational Offerings)        */}
       {/* ========================================================= */}
-      <section className="py-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-14">
-        {/* 1. 12 Popular Universal Categories Grid (A-L) */}
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Universal AI Course Catalog</span>
-              <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-                12 Popular Learning Categories (A–L)
+      <section className="py-20 bg-[#FAF7F2]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+          <div className="max-w-2xl space-y-3">
+            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+              Platform Capabilities
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F] leading-tight">
+              Everything You Need to Learn, Grow and Succeed.
+            </h2>
+            <p className="text-sm sm:text-base text-[#64748B] leading-relaxed">
+              Five integrated pillars designed to transform curiosity into verified practical capability.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+            {servicesList.map((svc) => {
+              const Icon = svc.icon;
+              return (
+                <Link
+                  key={svc.title}
+                  to={svc.path}
+                  className="bg-white rounded-2xl p-6 border border-slate-200/80 hover:border-[#123D32] hover:shadow-md transition-all flex flex-col justify-between gap-5 group"
+                >
+                  <div className="space-y-4">
+                    <div className="w-10 h-10 rounded-xl bg-[#F5F5F2] text-[#123D32] group-hover:bg-[#123D32] group-hover:text-white flex items-center justify-center transition-colors">
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-heading font-bold text-base text-[#18221F]">
+                        {svc.title}
+                      </h3>
+                      <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
+                        {svc.desc}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs font-semibold text-[#2563EB] flex items-center gap-1">
+                    <span>{svc.actionLabel}</span>
+                    <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================= */}
+      {/* C2. COMPLETE EDUCATION CLASSIFICATION (LKG TO PHD & SKILLS) */}
+      {/* ========================================================= */}
+      <section className="py-16 bg-white border-t border-slate-200/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+            <div className="max-w-2xl space-y-2">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                Universal Education Taxonomy · Categories A–J
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F]">
+                From Early Childhood (LKG) to Doctoral Research &amp; Career Skills
               </h2>
-              <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl">
-                Explore structured video lectures, verification quizzes, and guided practical projects across technology, academics, finance, languages, and vocational tracks.
+              <p className="text-sm text-[#64748B]">
+                Select any qualification, degree programme, school grade, or skill track for instant personalized recommendations.
               </p>
             </div>
             <Link
               to="/marketplace"
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 shrink-0"
+              className="text-xs font-semibold text-[#2563EB] hover:underline flex items-center gap-1 whitespace-nowrap"
             >
-              <span>Browse Full Catalog</span>
+              <span>Open Intelligent Discovery Workspace</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {UNIVERSAL_12_CATEGORIES.map((cat) => (
-              <Link
-                key={cat.code}
-                to={`/marketplace?group=${encodeURIComponent(cat.domainGroup)}&q=${encodeURIComponent(cat.featuredQueries[0] || '')}`}
-                className="bg-white rounded-xl p-4 border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
-                      Track {cat.code}
-                    </span>
-                    <span className="text-[11px] font-medium text-slate-500">{cat.domainGroup}</span>
+          <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+            {EDUCATION_CLASSIFICATION_CATEGORIES.map((cat) => {
+              const active = selectedEduCode === cat.code;
+              return (
+                <button
+                  key={cat.code}
+                  type="button"
+                  onClick={() => setSelectedEduCode(cat.code)}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    active
+                      ? 'bg-[#123D32] text-white border-[#123D32] shadow-sm'
+                      : 'bg-[#FAF7F2] text-[#18221F] border-slate-200 hover:border-[#123D32]'
+                  }`}
+                >
+                  <div className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'text-emerald-200' : 'text-[#123D32]'}`}>
+                    Cat {cat.code}
                   </div>
-                  <h3 className="font-heading font-bold text-sm text-slate-900 group-hover:text-blue-700 transition-colors">
-                    {cat.name}
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-1.5 line-clamp-2">{cat.description}</p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-semibold text-blue-600">
-                  <span>Explore {cat.featuredQueries[0]}</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                </div>
-              </Link>
-            ))}
+                  <div className="text-xs font-semibold mt-0.5 line-clamp-2">{cat.shortTitle}</div>
+                </button>
+              );
+            })}
           </div>
-        </div>
 
-        {/* 2. Curated YouTube Educational Video Showcase */}
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-rose-600">On-Site Video Learning</span>
-              <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-                Curated Educational YouTube Lectures
+          {(() => {
+            const activeCat = EDUCATION_CLASSIFICATION_CATEGORIES.find((c) => c.code === selectedEduCode) || EDUCATION_CLASSIFICATION_CATEGORIES[0];
+            return (
+              <div className="bg-[#FAF7F2] border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-editorial text-2xl font-bold text-[#18221F]">
+                      Category {activeCat.code}: {activeCat.title}
+                    </h3>
+                    <p className="text-sm text-[#64748B] mt-1">{activeCat.description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/marketplace?level=${activeCat.code}`)}
+                    className="px-5 py-2.5 bg-[#2563EB] text-white text-xs font-semibold rounded-xl hover:bg-blue-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Explore All {activeCat.shortTitle}
+                  </button>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                    Supported Programmes, Classes &amp; Degrees
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {activeCat.programmes.slice(0, 24).map((prog) => (
+                      <button
+                        key={prog}
+                        type="button"
+                        onClick={() => navigate(`/marketplace?level=${activeCat.code}&degree=${encodeURIComponent(prog)}&q=${encodeURIComponent(prog)}`)}
+                        className="px-3 py-1.5 bg-white border border-slate-200 hover:border-[#123D32] hover:text-[#123D32] rounded-lg text-xs font-medium text-[#18221F] transition-colors cursor-pointer"
+                      >
+                        {prog}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      </section>
+
+      {/* ========================================================= */}
+      {/* D. FEATURED LEARNING PROGRAMMES (Live Marketplace Data)   */}
+      {/* ========================================================= */}
+      <section className="py-20 bg-[#F5F5F2] border-y border-slate-200/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                Curated Course Marketplace
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F]">
+                Featured Learning Programmes
               </h2>
-              <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl">
-                Watch public educational lectures directly on OpenFrame with channel attribution, structured study notes, and companion quizzes.
+              <p className="text-sm text-[#64748B]">
+                Real programmes loaded from the OpenFrame catalog with structured syllabi, YouTube video playlists, and assessment tracks.
               </p>
             </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {FEATURED_FILTERS.map((tab) => {
+                const isSelected = featuredFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setFeaturedFilter(tab.id)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      isSelected
+                        ? 'bg-[#123D32] text-white'
+                        : 'bg-white text-[#18221F] border border-slate-200 hover:border-[#123D32]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {loadingFeatured ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="bg-white rounded-2xl h-80 border border-slate-200 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {featuredCourses.map((course) => (
+                <div
+                  key={course.id}
+                  className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between group"
+                >
+                  <div>
+                    <Link to={`/marketplace/${course.id}`} className="block relative aspect-video bg-slate-100 overflow-hidden">
+                      <CourseThumbnail
+                        src={course.thumbnailUrl || course.imageUrl}
+                        alt={course.title}
+                        category={course.category}
+                        categoryGroup={course.categoryGroup}
+                        youtubeVideoId={course.youtubeVideoId}
+                        className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-300"
+                      />
+                    </Link>
+                    <div className="p-6 space-y-2.5">
+                      <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[#123D32]">
+                        <span className="truncate">{course.category}</span>
+                        <span className="text-[#64748B] shrink-0">{course.level}</span>
+                      </div>
+                      <h3 className="font-heading font-bold text-base text-[#18221F] line-clamp-2 group-hover:text-[#2563EB] transition-colors">
+                        <Link to={`/marketplace/${course.id}`}>{course.title}</Link>
+                      </h3>
+                      <p className="text-xs text-[#64748B] line-clamp-2 leading-relaxed">
+                        {course.shortDesc}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="px-6 py-4 bg-[#FAF7F2]/60 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <div className="font-semibold text-[#18221F] tabular-nums">
+                      {course.isFree || course.price === 0 ? 'Free Access' : `₹${course.price.toLocaleString('en-IN')}`}
+                      <span className="text-[#64748B] font-normal ml-2">· {course.duration}</span>
+                    </div>
+                    <Link
+                      to={`/marketplace/${course.id}`}
+                      className="font-semibold text-[#2563EB] hover:text-blue-800 flex items-center gap-1 whitespace-nowrap"
+                    >
+                      <span>View Course</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
             <button
               type="button"
               onClick={() => {
@@ -604,957 +940,459 @@ export const HomePage: React.FC = () => {
                 setVideoPlaylist(all);
                 setIsVideoModalOpen(true);
               }}
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer shrink-0"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-[#123D32] hover:underline cursor-pointer"
             >
-              <span>Open Video Library</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <Play className="w-4 h-4 fill-current" />
+              <span>Watch Featured YouTube Educational Lectures On-Site</span>
             </button>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {youtubeVideoService.getAllLibrary().slice(0, 4).map((vid) => (
-              <button
-                key={vid.id}
-                type="button"
-                onClick={() => {
-                  const all = youtubeVideoService.getAllLibrary();
-                  setSelectedVideo(vid);
-                  setVideoPlaylist(all);
-                  setIsVideoModalOpen(true);
-                }}
-                className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:border-blue-400 hover:shadow-md transition-all text-left group cursor-pointer flex flex-col"
-              >
-                <div className="relative aspect-video bg-slate-900 overflow-hidden">
-                  <img
-                    src={vid.thumbnailUrl || vid.thumbnail}
-                    alt={vid.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    loading="lazy"
-                  />
-                  <div className="absolute inset-0 bg-slate-950/30 flex items-center justify-center">
-                    <div className="w-11 h-11 rounded-full bg-white/95 text-blue-700 flex items-center justify-center shadow-lg">
-                      <Play className="w-5 h-5 fill-current ml-0.5" />
-                    </div>
-                  </div>
-                  <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-slate-950/80 text-white text-[10px] font-semibold">
-                    {vid.duration}
-                  </span>
-                </div>
-                <div className="p-4 flex-1 flex flex-col justify-between space-y-2">
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-semibold text-blue-600">{vid.subjectCategory}</div>
-                    <h3 className="font-heading font-bold text-sm text-slate-900 line-clamp-2 group-hover:text-blue-700">
-                      {vid.title}
-                    </h3>
-                  </div>
-                  <div className="text-[11px] text-slate-500 font-medium pt-2 border-t border-slate-100">
-                    Channel: {vid.channelTitle}
-                  </div>
-                </div>
-              </button>
-            ))}
+            <Link
+              to="/marketplace"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#14213D] hover:bg-slate-900 text-white text-xs font-semibold transition-colors whitespace-nowrap"
+            >
+              <span>Browse Full Course Catalog</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         </div>
+      </section>
 
-        {/* 3. Quinn AI Personal Tutor & Certificate Verification Showcase */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-gradient-to-br from-[#071326] to-[#11274E] text-white rounded-2xl p-6 sm:p-8 border border-blue-800/60 flex flex-col justify-between space-y-5">
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
-                <Bot className="w-4 h-4" />
-                <span>Quinn AI Personal Learning Mentor</span>
-              </div>
-              <h3 className="text-xl sm:text-2xl font-heading font-bold text-white">
-                Multilingual Tutoring, Excel Formula Help &amp; Interview Prep
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                Get step-by-step concept breakdowns, practice mock tests, study plans, and lesson revision summaries across 11+ Indian &amp; global languages.
-              </p>
+      {/* ========================================================= */}
+      {/* E. HOW OPENFRAME WORKS (4 Connected Step Architecture)     */}
+      {/* ========================================================= */}
+      <section className="py-20 bg-[#FAF7F2]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+          <div className="text-center max-w-2xl mx-auto space-y-3">
+            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+              Simple Guided Progression
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                to="/chatbot"
-                className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1.5"
-              >
-                <Bot className="w-4 h-4" />
-                <span>Launch Quinn AI Tutor</span>
-              </Link>
-              <Link
-                to="/student/dashboard"
-                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold flex items-center gap-1.5"
-              >
-                <GraduationCap className="w-4 h-4 text-sky-300" />
-                <span>Student 8-Stage Portal</span>
-              </Link>
-            </div>
+            <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F]">
+              How OpenFrame Works
+            </h2>
+            <p className="text-sm text-[#64748B]">
+              A calm, verifiable workflow guiding every learner from first search to recognized certification.
+            </p>
           </div>
 
-          <div className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xs flex flex-col justify-between space-y-5">
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700">
-                <ShieldCheck className="w-4 h-4" />
-                <span>Verifiable Credentials &amp; Rubric Defense</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {howSteps.map((step, idx) => {
+              const Icon = step.icon;
+              return (
+                <div
+                  key={step.num}
+                  className="bg-white rounded-2xl p-6 border border-slate-200/80 relative flex flex-col justify-between gap-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="w-11 h-11 rounded-2xl bg-[#123D32] text-white flex items-center justify-center">
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <span className="font-editorial text-2xl font-semibold text-slate-300 tabular-nums">
+                      {step.num}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="font-heading font-bold text-base text-[#18221F]">
+                      {step.title}
+                    </h3>
+                    <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
+                      {step.desc}
+                    </p>
+                  </div>
+                  {idx < howSteps.length - 1 && (
+                    <div className="hidden lg:flex items-center text-xs font-semibold text-[#123D32]">
+                      <span>Next step →</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================= */}
+      {/* F. QUINN AI INTERACTIVE SHOWCASE                          */}
+      {/* ========================================================= */}
+      <section className="py-20 bg-white border-y border-slate-200/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
+            <div className="lg:col-span-6 space-y-6">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                Quinn AI Personal Tutor
               </div>
-              <h3 className="text-xl sm:text-2xl font-heading font-bold text-slate-900">
-                6-Condition Verification &amp; QR Certificate Registry
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Every OpenFrame certificate requires video completion, passing scores on a 15-question verification quiz, capstone submission, presentation defense, and faculty rubric evaluation.
+              <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F] leading-tight">
+                Meet Quinn AI, Your Intelligent Learning Companion.
+              </h2>
+              <p className="text-sm sm:text-base text-[#64748B] leading-relaxed">
+                Ask concept questions, get step-by-step Excel formulas, review code, prepare for school or technical exams, and build structured weekly study guides in over 11 languages.
               </p>
+
+              <div className="space-y-3 text-xs sm:text-sm text-[#18221F]">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-[#123D32] shrink-0 mt-0.5" />
+                  <span>Interactive topic breakdowns across school, technical, and business subjects</span>
+                </div>
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-[#123D32] shrink-0 mt-0.5" />
+                  <span>Direct mock quizzes and study plans synced with your learning track</span>
+                </div>
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-[#123D32] shrink-0 mt-0.5" />
+                  <span>Always ready across web and mobile inside every course workspace</span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <Link
+                  to="/chatbot"
+                  className="px-6 py-3.5 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>Start Chatting With Quinn AI</span>
+                </Link>
+                <Link
+                  to="/verify-certificate"
+                  className="px-5 py-3.5 rounded-xl bg-[#FAF7F2] hover:bg-[#F5F5F2] border border-slate-200 text-[#18221F] text-sm font-semibold inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+                >
+                  <ShieldCheck className="w-4 h-4 text-[#123D32]" />
+                  <span>Verify Certificate</span>
+                </Link>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                to="/verify-certificate/OF-CERT-2026-8812"
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5"
-              >
-                <Award className="w-4 h-4 text-amber-300" />
-                <span>Verify Certificate ID</span>
-              </Link>
-              <Link
-                to="/student/register"
-                className="px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold flex items-center gap-1.5"
-              >
-                <span>7-Step Student Admission</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+
+            <div className="lg:col-span-6">
+              <div className="rounded-3xl overflow-hidden shadow-xl border border-slate-200 bg-[#FAF7F2]">
+                <img
+                  src={quinnWorkspaceImg}
+                  alt="Quinn AI personal mentor laptop workspace"
+                  className="w-full h-[340px] sm:h-[420px] object-cover"
+                />
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       {/* ========================================================= */}
-      {/* SCHOOL EDUCATION (LKG – CLASS 12)                         */}
+      {/* SCHOOL EDUCATION SYSTEM (LKG – CLASS 12)                  */}
       {/* ========================================================= */}
       <HomepageSchoolSection />
 
       {/* ========================================================= */}
-      {/* 2. ABOUT OPENFRAME                                        */}
+      {/* G. BUILT FOR EVERYONE (6 Audience Cards)                  */}
       {/* ========================================================= */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-          
-          <div className="space-y-5">
-            <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-600">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-              Corporate Profile
-            </div>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-heading font-bold text-slate-900 leading-tight">
-              About OpenFrame IT Solutions
-            </h2>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              OpenFrame IT Solutions Private Limited is an Indian technology and education enterprise headquartered in Bengaluru. We operate with a dual focus: architecting mission-critical digital systems for commercial enterprises, and empowering students and working professionals with industry-aligned technological proficiencies.
-            </p>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Our engineering philosophy emphasizes architectural integrity, maintainable code standards, and transparent delivery. Rather than generic abstractions, we provide direct, accountable technical capability across enterprise software, cloud infrastructure, and practical skill enablement.
-            </p>
-
-            <div className="grid grid-cols-2 gap-4 pt-2">
-              <div className="p-4 rounded-lg bg-slate-100/80 border border-slate-200">
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Operational Focus</div>
-                <div className="text-sm font-bold text-slate-900 mt-1">Enterprise Tech Solutions</div>
-                <div className="text-xs text-slate-600 mt-1">Custom software, cloud, and modern mobile/web platforms.</div>
+      <section className="py-20 bg-[#FAF7F2]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="space-y-2 max-w-2xl">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                8 Dedicated Portals
               </div>
-              <div className="p-4 rounded-lg bg-slate-100/80 border border-slate-200">
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Educational Focus</div>
-                <div className="text-sm font-bold text-slate-900 mt-1">Skill & Tech Education</div>
-                <div className="text-xs text-slate-600 mt-1">Hands-on fellowships, campus labs, and corporate upskilling.</div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <Link
-                to="/about-us"
-                className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-800"
-              >
-                <span>Read Full Corporate Overview</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-          </div>
-
-          {/* Visual Showcase Box */}
-          <div className="bg-[#0B1930] rounded-2xl p-8 text-white relative shadow-2xl border border-blue-900/50">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-            
-            <div className="flex items-center justify-between pb-6 border-b border-blue-900/60">
-              <div>
-                <span className="text-xs text-blue-400 font-semibold uppercase tracking-wider">Corporate Identity</span>
-                <h4 className="text-lg font-heading font-bold text-white mt-0.5">OpenFrame IT Solutions Pvt Ltd</h4>
-              </div>
-              <div className="px-2.5 py-1 rounded bg-blue-900/60 border border-blue-700/50 text-[11px] text-sky-300 font-medium">
-                Active Organization
-              </div>
-            </div>
-
-            <div className="py-6 space-y-4">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-sm font-semibold text-white">Technology-First Architecture</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Engineered using clean design patterns, defensive programming, and rigorous data modeling.</div>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-sm font-semibold text-white">Practical Education Model</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Moving beyond rote theory with live sandbox laboratories and actual software engineering workflows.</div>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-sm font-semibold text-white">Independent Social Collaboration</div>
-                  <div className="text-xs text-slate-400 mt-0.5">Independent technical advisory collaboration with HopeNest Global Foundation (distinct legal entity).</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-blue-900/60 flex items-center justify-between text-xs text-slate-400">
-              <span>Incorporated in India</span>
-              <span>CIN Registration Placeholder</span>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 3. OUR BUSINESS DIVISIONS                                 */}
-      {/* ========================================================= */}
-      <section className="py-16 bg-slate-100/70 border-y border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Structure</span>
-            <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-              Our Core Business Divisions
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-2">
-              Structured operational units delivering focused value across software engineering, digital products, education, and social ecosystem collaboration.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
-                <Cpu className="w-5 h-5" />
-              </div>
-              <h3 className="font-heading font-bold text-slate-900 text-base">
-                1. IT & Software Solutions
-              </h3>
-              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                Enterprise software architecture, cloud orchestration, web and mobile platform engineering, data pipelines, and technical advisory.
-              </p>
-              <Link to="/it-solutions" className="mt-4 text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                <span>View Capabilities</span>
-                <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-10 h-10 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center mb-4">
-                <GraduationCap className="w-5 h-5" />
-              </div>
-              <h3 className="font-heading font-bold text-slate-900 text-base">
-                2. OpenFrame Education
-              </h3>
-              <p className="text-[11px] font-semibold text-blue-600 mt-0.5">
-                "Learn Today. Build Tomorrow."
-              </p>
-              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                Academic tutoring, technology & programming, STEM education, creative skills, and professional certification programmes for K-12 to graduates.
-              </p>
-              <Link to="/education" className="mt-4 text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                <span>Explore 7 Programme Categories</span>
-                <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
-                <Layers className="w-5 h-5" />
-              </div>
-              <h3 className="font-heading font-bold text-slate-900 text-base">
-                3. Digital Products & Platforms
-              </h3>
-              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                Proprietary platforms including Life Smart Card, StudyNotePro, LearnXcel, TalentHub, and LinkX digital networking.
-              </p>
-              <Link to="/products" className="mt-4 text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
-                <span>Explore Products Catalogue</span>
-                <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="w-10 h-10 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center mb-4">
-                <HeartHandshake className="w-5 h-5" />
-              </div>
-              <h3 className="font-heading font-bold text-slate-900 text-base">
-                4. HopeNest Collaboration
-              </h3>
-              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                Independent collaboration with HopeNest Global Foundation (an autonomous non-profit) for digital literacy and education access.
-              </p>
-              <Link to="/hopenest" className="mt-4 text-xs font-semibold text-teal-600 hover:text-teal-800 flex items-center gap-1">
-                <span>Foundation Details</span>
-                <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 4. IT & SOFTWARE SOLUTIONS HIGHLIGHTS                     */}
-      {/* ========================================================= */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-4">
-          <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Engineering</span>
-            <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-              IT & Software Solutions
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl">
-              From enterprise platforms to high-availability cloud systems, we build software designed for long-term maintainability and operational resilience.
-            </p>
-          </div>
-          <Link
-            to="/it-solutions"
-            className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 self-start md:self-auto"
-          >
-            <span>View All 6 Solutions</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {initialSolutions.slice(0, 3).map((sol) => (
-            <div
-              key={sol.id}
-              className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
-            >
-              <div className="p-6">
-                <div className="text-xs text-blue-600 font-semibold tracking-wide uppercase mb-1">
-                  Enterprise Capability
-                </div>
-                <h3 className="font-heading font-bold text-lg text-slate-900">
-                  {sol.title}
-                </h3>
-                <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  {sol.shortDesc}
-                </p>
-
-                <div className="mt-4 space-y-1.5">
-                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    Core Modules:
-                  </div>
-                  {sol.capabilities.slice(0, 3).map((cap, i) => (
-                    <div key={i} className="text-xs text-slate-700 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                      <span>{cap}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500 font-medium">Production Architecture</span>
-                <Link
-                  to="/it-solutions"
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                >
-                  <span>Learn More</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 5. OPENFRAME EDUCATION                                    */}
-      {/* ========================================================= */}
-      <section className="py-20 bg-[#0A192F] text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl mb-12">
-            <span className="text-xs font-bold uppercase tracking-wider text-sky-400">Pedagogy</span>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-heading font-bold text-white mt-1">
-              OpenFrame Education & Skill Development
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
-              Bridging the gap between conventional computer science theory and production software engineering through practical labs, real code reviews, and industry tooling.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {initialEducationPrograms.slice(0, 2).map((prog) => (
-              <div
-                key={prog.id}
-                className="bg-[#0F2042] rounded-xl p-6 border border-blue-800/50 hover:border-sky-400/50 transition-all flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between text-xs text-sky-300 mb-2">
-                    <span className="font-semibold">{prog.level}</span>
-                    <span className="text-slate-400">{prog.duration}</span>
-                  </div>
-                  <h3 className="font-heading font-bold text-xl text-white">
-                    {prog.title}
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                    {prog.summary}
-                  </p>
-
-                  <div className="mt-4 pt-4 border-t border-blue-900/60 space-y-1.5">
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                      Key Highlights:
-                    </div>
-                    {prog.highlights.slice(0, 3).map((hl, i) => (
-                      <div key={i} className="text-xs text-slate-300 flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                        <span>{hl}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-blue-900/60 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">{prog.format}</span>
-                  <Link
-                    to="/education"
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
-                  >
-                    View Curriculum
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link
-              to="/animation-course"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold transition-colors"
-            >
-              <Layers className="w-4 h-4 text-cyan-200" />
-              <span>Swift UI Animations, Graphs &amp; Charts (ZIP + Lab)</span>
-            </Link>
-            <Link
-              to="/education"
-              className="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-sky-400 hover:text-sky-300"
-            >
-              <span>Explore all academic partnerships &amp; specialized programs</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 6. OUR DIGITAL PRODUCTS                                   */}
-      {/* ========================================================= */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-2xl mx-auto mb-12">
-          <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Product Portfolio</span>
-          <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-            Our Proprietary Digital Platforms
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-600 mt-2">
-            Engineered internally by OpenFrame for operational excellence, enterprise resource management, and academic assessment.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {initialProducts.map((prod) => (
-            <div
-              key={prod.id}
-              className="bg-white rounded-xl border border-slate-200 p-6 flex flex-col justify-between hover:shadow-lg transition-shadow"
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                    {prod.status}
-                  </span>
-                </div>
-                <h3 className="font-heading font-bold text-lg text-slate-900 mt-3">
-                  {prod.name}
-                </h3>
-                <div className="text-xs font-medium text-slate-500 mt-0.5">
-                  {prod.tagline}
-                </div>
-                <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  {prod.description}
-                </p>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500">Modular Web Suite</span>
-                <Link
-                  to="/products"
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                >
-                  <span>Details</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 7. HOPENEST GLOBAL FOUNDATION (CRITICAL SEPARATION RULE)  */}
-      {/* ========================================================= */}
-      <section className="py-16 bg-slate-100 border-y border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-white rounded-2xl p-8 sm:p-10 border border-slate-200 shadow-sm grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
-            
-            <div className="lg:col-span-2 space-y-4">
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-teal-50 border border-teal-200 text-teal-800 text-[11px] font-semibold uppercase tracking-wider">
-                <HeartHandshake className="w-3.5 h-3.5 text-teal-600" />
-                <span>Legally Distinct Non-Profit Entity</span>
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900">
-                HopeNest Global Foundation
+              <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F]">
+                Built for Every Role in Education
               </h2>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                HopeNest Global Foundation is an autonomous, independent non-profit organization established to foster digital literacy, youth empowerment, and equal education opportunities for underprivileged communities.
-              </p>
-              <div className="p-4 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed">
-                <strong className="text-slate-900 block mb-1">Independent Collaboration Notice:</strong>
-                OpenFrame IT Solutions Private Limited and HopeNest Global Foundation maintain strict separate legal identities and autonomous governing boards. OpenFrame provides independent technology advisory and curriculum contributions to HopeNest initiatives under structured non-profit collaboration agreements.
-              </div>
-            </div>
-
-            <div className="bg-slate-50 rounded-xl p-6 border border-slate-200 text-center space-y-3">
-              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Foundation Focus</div>
-              <div className="text-base font-bold text-slate-900">Digital Access & Literacy</div>
-              <p className="text-xs text-slate-600">
-                Community learning centers, foundational digital literacy workshops, and educational enablement.
-              </p>
-              <Link
-                to="/hopenest"
-                className="inline-flex items-center justify-center gap-2 w-full py-2 px-4 rounded-lg bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs transition-colors shadow-sm"
-              >
-                <span>Learn About HopeNest</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 8. HOW WE WORK (Inspired by Process Flow in Uploaded Image)*/}
-      {/* ========================================================= */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          
-          <div className="lg:col-span-5 space-y-4">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Execution</span>
-            <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900">
-              How We Work
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-              We apply an engineering-led engagement cycle designed for predictability, transparent milestones, and zero architectural ambiguity.
-            </p>
-
-            <div className="space-y-6 pt-4">
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-sm shrink-0 border border-blue-200">
-                  01
-                </div>
-                <div>
-                  <h4 className="font-heading font-bold text-slate-900 text-sm">Initial Consultation & Requirements</h4>
-                  <p className="text-xs text-slate-600 mt-0.5">Comprehensive scoping of technical requirements, architectural constraints, and institutional objectives.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-full bg-sky-50 text-sky-600 flex items-center justify-center font-bold text-sm shrink-0 border border-sky-200">
-                  02
-                </div>
-                <div>
-                  <h4 className="font-heading font-bold text-slate-900 text-sm">Strategic Architecture & System Blueprint</h4>
-                  <p className="text-xs text-slate-600 mt-0.5">Authoring data schemas, system blueprints, interface prototypes, and milestone timelines.</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm shrink-0 border border-indigo-200">
-                  03
-                </div>
-                <div>
-                  <h4 className="font-heading font-bold text-slate-900 text-sm">Disciplined Execution & Delivery</h4>
-                  <p className="text-xs text-slate-600 mt-0.5">Sprint-driven development, automated code verification, deployment, and ongoing technical support.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Consultation Capture Card (Direct Design Reference Match) */}
-          <div className="lg:col-span-7 bg-[#0B1930] rounded-2xl p-8 sm:p-10 text-white shadow-2xl border border-blue-900/60">
-            <span className="text-xs text-sky-400 font-semibold uppercase tracking-wider">Inquiry</span>
-            <h3 className="text-2xl font-heading font-bold text-white mt-1">
-              Schedule Your Consultation
-            </h3>
-            <p className="text-xs text-slate-300 mt-1">
-              Connect directly with our engineering or educational advisory team to discuss your project.
-            </p>
-
-            {formSubmitted ? (
-              <div className="mt-6 p-6 rounded-xl bg-blue-900/40 border border-blue-500/40 text-center space-y-3">
-                <CheckCircle2 className="w-10 h-10 text-sky-400 mx-auto" />
-                <h4 className="font-heading font-bold text-lg text-white">Inquiry Received</h4>
-                <p className="text-xs text-slate-300 max-w-md mx-auto">
-                  Thank you for reaching out to OpenFrame IT Solutions Private Limited. Your consultation details have been logged in our system. Our team will review and respond shortly.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setFormSubmitted(false)}
-                  className="mt-2 text-xs font-semibold text-sky-300 underline"
-                >
-                  Submit Another Inquiry
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleFormSubmit} className="mt-6 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                      Full Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Rahul Sharma"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full bg-[#071326] border border-blue-900 rounded-lg px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                      Corporate / Official Email *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="name@company.com"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full bg-[#071326] border border-blue-900 rounded-lg px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                      Contact Phone
-                    </label>
-                    <input
-                      type="tel"
-                      placeholder="+91 98765 43210"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full bg-[#071326] border border-blue-900 rounded-lg px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                      Division of Interest
-                    </label>
-                    <select
-                      value={formData.division}
-                      onChange={(e) => setFormData({ ...formData, division: e.target.value as any })}
-                      className="w-full bg-[#071326] border border-blue-900 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-400"
-                    >
-                      <option value="IT Solutions">IT & Software Solutions</option>
-                      <option value="Education">OpenFrame Education</option>
-                      <option value="Products">Digital Products (CoreERP / EduLMS)</option>
-                      <option value="Partnerships">Institutional / Corporate Partnership</option>
-                      <option value="General">General Corporate Inquiry</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Project Scope / Requirements Summary *
-                  </label>
-                  <textarea
-                    required
-                    rows={3}
-                    placeholder="Briefly describe your software specifications, educational lab requirements, or consultation timeline..."
-                    value={formData.message}
-                    onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                    className="w-full bg-[#071326] border border-blue-900 rounded-lg p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full py-3 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs tracking-wide uppercase transition-colors shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
-                >
-                  <span>Request Official Consultation</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </form>
-            )}
-          </div>
-
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 9. LATEST BLOG ARTICLES                                   */}
-      {/* ========================================================= */}
-      <section className="py-16 bg-slate-100/70 border-t border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Thought Leadership</span>
-              <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-                Latest Insights & Articles
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-600 mt-1">
-                Technical perspectives, architectural patterns, and pedagogical reflections from our engineering and education teams.
+              <p className="text-sm text-[#64748B]">
+                Whether you learn at home, mentor students in class, manage a school campus, or run community outreach.
               </p>
             </div>
             <Link
-              to="/blog"
-              className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 self-start md:self-auto"
+              to="/portal"
+              className="text-xs font-semibold text-[#2563EB] hover:text-blue-800 inline-flex items-center gap-1 whitespace-nowrap"
             >
-              <span>Explore All Insights</span>
+              <span>View All 8 Portals</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {initialBlogPosts.map((post) => (
-              <article
-                key={post.id}
-                className="bg-white rounded-xl border border-slate-200 p-6 flex flex-col justify-between hover:shadow-md transition-shadow"
-              >
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
-                    <span className="font-semibold text-blue-600">{post.category}</span>
-                    <span>·</span>
-                    <span>{post.readTime}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {audienceCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <Link
+                  key={card.title}
+                  to={card.path}
+                  className="bg-white rounded-2xl p-6 border border-slate-200/80 hover:border-[#2563EB] hover:shadow-lg transition-all flex flex-col justify-between gap-5 group"
+                >
+                  <div className="space-y-4">
+                    <div className={`w-11 h-11 rounded-2xl ${card.accent} text-white flex items-center justify-center`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-heading font-bold text-lg text-[#18221F] group-hover:text-[#2563EB] transition-colors">
+                        {card.title}
+                      </h3>
+                      <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
+                        {card.desc}
+                      </p>
+                    </div>
                   </div>
-                  <h3 className="font-heading font-bold text-base text-slate-900 leading-snug">
-                    <Link to="/blog" className="hover:text-blue-600 transition-colors">
-                      {post.title}
-                    </Link>
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-2 line-clamp-3 leading-relaxed">
-                    {post.excerpt}
-                  </p>
-                </div>
-
-                <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-500">{post.publishedDate}</span>
-                  <Link
-                    to="/blog"
-                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                  >
-                    <span>Read Article</span>
-                    <ChevronRight className="w-3 h-3" />
-                  </Link>
-                </div>
-              </article>
-            ))}
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#18221F] group-hover:text-[#2563EB]">
+                    <span>{card.cta}</span>
+                    <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </section>
 
       {/* ========================================================= */}
-      {/* 10. CAREER OPPORTUNITIES                                  */}
+      {/* H. COMMUNITY & COLLABORATION SECTION                      */}
       {/* ========================================================= */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-gradient-to-r from-[#0B1930] to-[#0D234A] rounded-2xl p-8 sm:p-12 text-white relative overflow-hidden shadow-xl border border-blue-900/50">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            
-            <div className="lg:col-span-8 space-y-4">
-              <span className="text-xs uppercase tracking-widest text-sky-400 font-semibold">Join Our Organization</span>
-              <h2 className="text-2xl sm:text-3xl font-heading font-bold text-white">
-                Build The Future of Technology & Education
+      <section className="py-20 bg-[#F5F5F2] border-y border-slate-200/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
+            <div className="lg:col-span-6">
+              <div className="rounded-3xl overflow-hidden shadow-xl border border-slate-200 bg-white">
+                <img
+                  src={communityEditorialImg}
+                  alt="Learners, faculty, and mentors collaborating around a sunlit studio table"
+                  className="w-full h-[340px] sm:h-[400px] object-cover"
+                />
+              </div>
+            </div>
+
+            <div className="lg:col-span-6 space-y-6">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                OpenFrame Learning Community
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F] leading-tight">
+                Learning Is Better Together
               </h2>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                We are actively looking for disciplined software engineers, cloud architects, curriculum leads, and operational coordinators to join our centers in Bengaluru, Hyderabad, and Pune.
+              <p className="text-sm sm:text-base text-[#64748B] leading-relaxed">
+                Follow live platform announcements, attend community workshops, explore faculty articles, and collaborate across HopeNest literacy programmes.
               </p>
 
-              <div className="flex flex-wrap gap-2 pt-2">
-                {initialCareerOpenings.map((job) => (
-                  <span
-                    key={job.id}
-                    className="text-xs bg-blue-900/60 border border-blue-700/40 text-slate-300 px-3 py-1 rounded-md"
+              {/* Live announcements / blog feed */}
+              <div className="space-y-3">
+                {liveAnnouncements.map((item) => (
+                  <Link
+                    key={item.id}
+                    to={item.path}
+                    className="block bg-white rounded-2xl p-4 border border-slate-200/80 hover:border-[#123D32] transition-colors"
                   >
-                    {job.title}
-                  </span>
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-[#64748B] mb-1">
+                      <span className="font-semibold text-[#123D32]">Platform Dispatch</span>
+                      <span className="tabular-nums">{item.date}</span>
+                    </div>
+                    <div className="font-heading font-bold text-sm text-[#18221F] line-clamp-1">
+                      {item.title}
+                    </div>
+                    <p className="text-xs text-[#64748B] mt-1 line-clamp-2">{item.summary}</p>
+                  </Link>
                 ))}
               </div>
-            </div>
 
-            <div className="lg:col-span-4 text-left lg:text-right">
-              <Link
-                to="/careers"
-                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs tracking-wider uppercase shadow-lg shadow-blue-600/40 transition-all"
-              >
-                <span>Explore Careers & Apply</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================= */}
-      {/* 11. WORK WITH US (PARTNERSHIPS)                           */}
-      {/* ========================================================= */}
-      <section className="py-16 bg-white border-t border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Collaborate</span>
-            <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-              Work With Us
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-2">
-              Flexible partnership models tailored for enterprise clients, universities, independent mentors, and technology vendors.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:shadow-md transition-all">
-              <Briefcase className="w-6 h-6 text-blue-600 mb-3" />
-              <h3 className="font-heading font-bold text-sm text-slate-900">Enterprise Clients</h3>
-              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                Contractual software engineering, dedicated development squads, and enterprise infrastructure modernization.
-              </p>
-              <Link to="/work-with-us" className="mt-3 block text-xs font-semibold text-blue-600 hover:text-blue-800">
-                Partner with us →
-              </Link>
-            </div>
-
-            <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:shadow-md transition-all">
-              <BookOpen className="w-6 h-6 text-sky-600 mb-3" />
-              <h3 className="font-heading font-bold text-sm text-slate-900">Academic Institutions</h3>
-              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                Campus software labs, curriculum modernization, faculty enablement, and student hackathon mentorship.
-              </p>
-              <Link to="/work-with-us" className="mt-3 block text-xs font-semibold text-sky-600 hover:text-sky-800">
-                Institutional Tie-ups →
-              </Link>
-            </div>
-
-            <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:shadow-md transition-all">
-              <Users className="w-6 h-6 text-indigo-600 mb-3" />
-              <h3 className="font-heading font-bold text-sm text-slate-900">Technical Mentors</h3>
-              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                Industry practitioners conducting expert masterclasses, project code reviews, and capstone evaluations.
-              </p>
-              <Link to="/work-with-us" className="mt-3 block text-xs font-semibold text-indigo-600 hover:text-indigo-800">
-                Join Faculty Network →
-              </Link>
-            </div>
-
-            <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:shadow-md transition-all">
-              <ShieldCheck className="w-6 h-6 text-teal-600 mb-3" />
-              <h3 className="font-heading font-bold text-sm text-slate-900">Technology Partners</h3>
-              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                Cloud providers, tool vendors, and open ecosystem collaborators building joint integrations.
-              </p>
-              <Link to="/work-with-us" className="mt-3 block text-xs font-semibold text-teal-600 hover:text-teal-800">
-                Ecosystem Inquiry →
-              </Link>
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  to="/blog"
+                  className="px-5 py-3 rounded-xl bg-[#14213D] hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-2 whitespace-nowrap"
+                >
+                  <span>Read Community Insights</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+                <Link
+                  to="/hopenest"
+                  className="px-5 py-3 rounded-xl bg-white hover:bg-[#FAF7F2] border border-slate-300 text-[#18221F] text-xs font-semibold inline-flex items-center gap-2 whitespace-nowrap"
+                >
+                  <HeartHandshake className="w-4 h-4 text-[#123D32]" />
+                  <span>HopeNest Foundation</span>
+                </Link>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       {/* ========================================================= */}
-      {/* 12. CONTACT INFORMATION & PAN-INDIA LOCATIONS             */}
+      {/* I. ABOUT OPENFRAME + CONSULTATION FORM (Reference Layout) */}
       {/* ========================================================= */}
-      <section className="py-20 bg-slate-50 border-t border-slate-200">
+      <section className="py-20 bg-[#FAF7F2]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl mb-12">
-            <span className="text-xs font-bold uppercase tracking-wider text-blue-600">Offices</span>
-            <h2 className="text-2xl sm:text-3xl font-heading font-bold text-slate-900 mt-1">
-              Contact Information & Locations
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1">
-              Visit our corporate headquarters in Bengaluru or connect with our regional development and education hubs in Hyderabad and Pune.
-            </p>
-          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
+            {/* About OpenFrame Copy */}
+            <div className="lg:col-span-5 space-y-6">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+                About OpenFrame
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F] leading-tight">
+                Building Opportunities Through Education and Technology
+              </h2>
+              <p className="text-sm text-[#64748B] leading-relaxed">
+                OpenFrame IT Solutions Private Limited (headquartered in Bengaluru, India) combines enterprise software engineering with practical, accessible digital learning — partnering alongside schools, universities, working professionals, and the legally independent HopeNest Global Foundation.
+              </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {initialLocations.map((loc) => (
-              <div
-                key={loc.id}
-                className={`bg-white rounded-xl p-6 border ${
-                  loc.isHeadquarters ? 'border-blue-400 shadow-md ring-1 ring-blue-400/20' : 'border-slate-200'
-                } space-y-3`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-blue-600 uppercase tracking-wide">
-                    {loc.city}, {loc.state}
-                  </span>
-                  {loc.isHeadquarters && (
-                    <span className="text-[10px] font-semibold bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                      Corporate HQ
-                    </span>
-                  )}
+              <div className="space-y-3 pt-1 text-xs text-[#18221F]">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200/80">
+                  <div className="font-bold text-sm text-[#18221F]">Transparent Academic Standards</div>
+                  <p className="text-[#64748B] mt-1">
+                    Every certificate requires mandatory video completion, 15-question assessment verification, project submission, and educator evaluation.
+                  </p>
                 </div>
-
-                <h3 className="font-heading font-bold text-slate-900 text-base">
-                  {loc.name}
-                </h3>
-
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  {loc.address}, PIN: {loc.pincode}
-                </p>
-
-                <div className="pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                    <span>{loc.phone}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                    <span>{loc.email}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <Link
-                    to="/contact"
-                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                  >
-                    <span>Contact Corporate Office</span>
-                    <ChevronRight className="w-3 h-3" />
-                  </Link>
+                <div className="bg-white rounded-2xl p-4 border border-slate-200/80">
+                  <div className="font-bold text-sm text-[#18221F]">Independent Enterprise &amp; Non-Profit Alliance</div>
+                  <p className="text-[#64748B] mt-1">
+                    Custom software platforms, EduLMS campus enablement, and structured outreach across India.
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
 
-          <div className="mt-8 text-center">
+              <div className="pt-1 flex flex-wrap gap-4 text-xs font-semibold">
+                <Link to="/about-us" className="text-[#2563EB] hover:underline inline-flex items-center gap-1">
+                  <span>Corporate Overview</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+                <Link to="/careers" className="text-[#123D32] hover:underline inline-flex items-center gap-1">
+                  <span>Careers at OpenFrame</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+
+            {/* Navy Inquiry Box (Reference Layout Bottom-Right Card) */}
+            <div className="lg:col-span-7 bg-[#14213D] rounded-3xl p-8 sm:p-10 text-white shadow-2xl">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">
+                Institutional &amp; Learner Support
+              </div>
+              <h3 className="text-2xl sm:text-3xl font-editorial font-semibold text-white mt-1.5">
+                Schedule Your Consultation
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-300 mt-1.5">
+                Connect with our education advisors, institutional partnership team, or software architects.
+              </p>
+
+              {formSubmitted ? (
+                <div className="mt-6 p-6 rounded-2xl bg-white/10 border border-white/15 text-center space-y-3">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-300 mx-auto" />
+                  <h4 className="font-heading font-bold text-lg text-white">Consultation Request Logged</h4>
+                  <p className="text-xs text-slate-200 max-w-md mx-auto">
+                    Thank you for contacting OpenFrame Education. Your inquiry has been saved to our institutional team for review.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setFormSubmitted(false)}
+                    className="text-xs font-semibold text-blue-300 underline cursor-pointer"
+                  >
+                    Submit Another Request
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleFormSubmit} className="mt-6 space-y-4 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Ananya Rao"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full bg-white/10 border border-white/15 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="name@domain.com"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        className="w-full bg-white/10 border border-white/15 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Phone Number
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="+91 98765 43210"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        className="w-full bg-white/10 border border-white/15 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Area of Interest
+                      </label>
+                      <select
+                        value={formData.division}
+                        onChange={(e) => setFormData({ ...formData, division: e.target.value as any })}
+                        className="w-full bg-[#0f1a30] border border-white/15 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-blue-400"
+                      >
+                        <option value="Education">OpenFrame Education &amp; Courses</option>
+                        <option value="Partnerships">School / NGO Partnership</option>
+                        <option value="IT Solutions">Enterprise IT &amp; Software</option>
+                        <option value="Products">Digital Products (CoreERP / EduLMS)</option>
+                        <option value="General">General Inquiry</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Message / Requirements *
+                    </label>
+                    <textarea
+                      required
+                      rows={3}
+                      placeholder="Share your learning goal, school onboarding request, or project scope..."
+                      value={formData.message}
+                      onChange={(e) => setFormData({ ...formData, message: e.target.value })}
+                      className="w-full bg-white/10 border border-white/15 rounded-xl p-3.5 text-white placeholder-slate-400 focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3.5 px-5 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white font-semibold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>Send Consultation Request</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================= */}
+      {/* J. FINAL DARK GREEN CALL-TO-ACTION BAND                   */}
+      {/* ========================================================= */}
+      <section className="py-20 bg-[#123D32] text-white">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-200">
+            Begin Today
+          </div>
+          <h2 className="text-3xl sm:text-5xl font-editorial font-semibold text-white leading-tight">
+            Your Next Chapter Starts Here.
+          </h2>
+          <p className="text-sm sm:text-base text-emerald-100/80 max-w-xl mx-auto leading-relaxed">
+            Join thousands of students, educators, parents, schools, and professionals building real capabilities on OpenFrame.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
             <Link
-              to="/contact"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#0B1930] hover:bg-[#071326] text-white text-xs font-semibold tracking-wide uppercase transition-colors"
+              to="/portal?mode=register"
+              className="px-7 py-3.5 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-sm font-semibold shadow-lg transition-colors whitespace-nowrap"
             >
-              <span>Go to Full Corporate Contact Page</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              Join OpenFrame
+            </Link>
+            <Link
+              to="/marketplace"
+              className="px-7 py-3.5 rounded-xl bg-white/12 hover:bg-white/20 border border-white/25 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+            >
+              Explore Courses
             </Link>
           </div>
         </div>
@@ -1569,14 +1407,14 @@ export const HomePage: React.FC = () => {
         courseCategory="Admissions"
       />
 
-      {/* "PLAY ON MY SITE" YOUTUBE VIDEO POP-UP MODAL */}
+      {/* ON-SITE YOUTUBE VIDEO POP-UP MODAL */}
       <VideoPlayerModal
         isOpen={isVideoModalOpen}
         onClose={() => setIsVideoModalOpen(false)}
         video={selectedVideo}
         playlist={videoPlaylist}
         onSelectVideo={(vid) => setSelectedVideo(vid)}
-        onApplyForCourse={(title, cat) => {
+        onApplyForCourse={() => {
           setIsVideoModalOpen(false);
           setIsRegModalOpen(true);
         }}

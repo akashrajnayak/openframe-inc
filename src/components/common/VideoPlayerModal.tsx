@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ExtendedYouTubeVideo, MASTER_YOUTUBE_LIBRARY } from '../../services/youtubeVideoService';
 import { CourseThumbnail } from './CourseThumbnail';
+import { useRouter } from '../../router/RouterContext';
 
 interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   onApplyForCourse,
   onOpenQuinnAI
 }) => {
+  const { navigate } = useRouter();
   const [currentVideo, setCurrentVideo] = useState<ExtendedYouTubeVideo | null>(video);
   const [showPlaylistDrawer, setShowPlaylistDrawer] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -155,17 +157,30 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                   </div>
                 </div>
 
-                {/* Primary Action Button: Apply for Expert Mentorship */}
-                <div className="flex items-center space-x-2 shrink-0">
-                  {onApplyForCourse && (
-                    <button
-                      onClick={() => onApplyForCourse(currentVideo.title, currentVideo.subjectCategory)}
-                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
-                    >
-                      <GraduationCap className="w-3.5 h-3.5" />
-                      <span>Apply for Mentorship</span>
-                    </button>
-                  )}
+                {/* Primary Actions: Organize with Quinn AI & Direct Enroll Now */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      navigate(`/learn/video/${encodeURIComponent(currentYoutubeId)}?autoplay=1`);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Organize with Quinn AI</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      navigate(`/learn/video/${encodeURIComponent(currentYoutubeId)}?enroll=1&autoplay=1`);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <GraduationCap className="w-3.5 h-3.5" />
+                    <span>Enroll Now · Get Certified</span>
+                  </button>
                 </div>
               </div>
 
@@ -196,22 +211,34 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 </div>
               </div>
 
-              {/* Admission Notice */}
-              <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-800/50 flex items-center justify-between text-xs text-blue-200">
+              {/* 100% Free Learning & Quinn AI Notice */}
+              <div className="p-3.5 rounded-xl bg-blue-950/50 border border-blue-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-blue-200">
                 <div className="space-y-0.5">
-                  <div className="font-semibold text-white text-xs">Looking to master this with live instructor guidance?</div>
+                  <div className="font-semibold text-white text-xs">100% Free Enrollment · Zero Course Fee</div>
                   <div className="text-[11px] text-blue-300">
-                    Apply now to schedule a 1-on-1 counseling call with an OpenFrame academic expert. Customized fee and projects finalized during the call.
+                    Enroll free to watch with Quinn AI inside OpenFrame, answer 20–50 diagnostic questions, view 10 mastery graphs, and earn your certificate.
                   </div>
                 </div>
-                {onApplyForCourse && (
+                <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => onApplyForCourse(currentVideo.title, currentVideo.subjectCategory)}
-                    className="ml-3 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      navigate(`/learn/video/${encodeURIComponent(currentYoutubeId)}?enroll=1&autoplay=1`);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] shrink-0 cursor-pointer whitespace-nowrap"
                   >
-                    Apply Now
+                    Enroll &amp; Play Inside Site
                   </button>
-                )}
+                  {onApplyForCourse && (
+                    <button
+                      onClick={() => onApplyForCourse(currentVideo.title, currentVideo.subjectCategory)}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shrink-0 cursor-pointer whitespace-nowrap"
+                    >
+                      Register Free
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

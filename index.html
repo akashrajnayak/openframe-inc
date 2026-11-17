@@ -3,23 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenFrame IT Solutions Private Limited | Technology, Education & Innovation</title>
-    <meta name="description" content="Official corporate portal of OpenFrame IT Solutions Private Limited. Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development." />
-    <meta property="og:title" content="OpenFrame IT Solutions Private Limited | Technology, Education & Innovation" />
-    <meta property="og:description" content="Official corporate portal of OpenFrame IT Solutions Private Limited. Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development." />
+    <title>OpenFrame Education | Universal AI Course Discovery, Learning &amp; Certification Platform</title>
+    <meta name="description" content="OpenFrame Education is a Universal AI Course Discovery, Learning & Certification Platform featuring smart multilingual search, YouTube educational video playlists, Quinn AI tutor, verification assessments, and QR-verified certificates — by OpenFrame IT Solutions." />
+    <meta property="og:title" content="OpenFrame Education | Universal AI Course Discovery, Learning & Certification Platform" />
+    <meta property="og:description" content="Discover AI-organized courses across 12 universal categories, learn via official YouTube lectures and Quinn AI multilingual tutoring, pass verification assessments, and earn QR-verified certificates." />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="OpenFrame IT Solutions Private Limited" />
+    <meta property="og:site_name" content="OpenFrame Education" />
     <meta property="og:url" content="https://openframeitsolutions.com/" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="OpenFrame IT Solutions Private Limited | Technology, Education & Innovation" />
-    <meta name="twitter:description" content="Official corporate portal of OpenFrame IT Solutions Private Limited. Technology, Education, and Innovation delivering enterprise IT solutions, digital products, and skill development." />
+    <meta name="twitter:title" content="OpenFrame Education | Universal AI Course Discovery & Learning Platform" />
+    <meta name="twitter:description" content="Universal AI Course Search, Quinn AI Personal Tutor, Multi-Language Video Learning, Verification Assessments, and Verified Certificates." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" type="image/jpeg" href="/openframe_official_logo.jpg" />
     <link rel="apple-touch-icon" href="/openframe_official_logo.jpg" />
     <link rel="canonical" href="https://openframeitsolutions.com/" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -48,9 +48,11 @@
         var msg = event.message || '';
         if (
           filename.indexOf('chrome-extension://') !== -1 ||
+          filename.indexOf('@vite/client') !== -1 ||
           msg.indexOf('MetaMask') !== -1 ||
           msg.indexOf('ethereum') !== -1 ||
-          msg.indexOf('inpage.js') !== -1
+          msg.indexOf('inpage.js') !== -1 ||
+          msg.indexOf('WebSocket closed without opened') !== -1
         ) {
           event.stopImmediatePropagation();
           event.preventDefault();
@@ -65,8 +67,10 @@
         if (
           msg.indexOf('MetaMask') !== -1 ||
           msg.indexOf('ethereum') !== -1 ||
+          msg.indexOf('WebSocket closed without opened') !== -1 ||
           stack.indexOf('chrome-extension://') !== -1 ||
-          stack.indexOf('inpage.js') !== -1
+          stack.indexOf('inpage.js') !== -1 ||
+          stack.indexOf('@vite/client') !== -1
         ) {
           event.stopImmediatePropagation();
           event.preventDefault();

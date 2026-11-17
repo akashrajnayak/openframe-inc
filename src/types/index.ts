@@ -322,6 +322,7 @@ export interface StudentRegistration {
   state: string;
   district: string;
   city: string;
+  houseNumber?: string;
   streetAddress?: string;
   pincode?: string;
   schoolCollegeName: string;
@@ -697,6 +698,17 @@ export interface MarketplaceCourse {
     organization: string;
     bio?: string;
   };
+  educationLevels?: string[]; // Level 1–10 / Categories A–J codes or labels
+  degreeProgrammes?: string[]; // Targeted degrees/classes (e.g., LKG, Class 10, BCA, BCom, MBA, PhD)
+  subject?: string;
+  specialization?: string;
+  deliveryMethod?: 'Self-paced online' | 'Live online' | 'Classroom' | 'Hybrid' | 'Workshop' | 'Professional training';
+  accreditationVerified?: boolean;
+  accreditationNote?: string;
+  isEnrollable?: boolean;
+  prerequisites?: string;
+  reviewCount?: number;
+  hasVerifiedReviews?: boolean;
   recommendedVideos?: YouTubeVideoRecommendation[];
   createdAt?: string;
   updatedAt: string;
@@ -706,7 +718,15 @@ export interface MarketplaceCourse {
 // AI-POWERED LEARNING MANAGEMENT SYSTEM (LMS) TYPES
 // ====================================================
 
-export type LmsUserRole = 'student' | 'teacher' | 'parent' | 'admin';
+export type LmsUserRole =
+  | 'student'
+  | 'teacher'
+  | 'parent'
+  | 'institution_admin'
+  | 'ngo_partner'
+  | 'field_executive'
+  | 'professional'
+  | 'admin';
 
 export interface LmsUserProfile {
   uid: string;
@@ -716,6 +736,8 @@ export interface LmsUserProfile {
   role: LmsUserRole;
   roles: LmsUserRole[];
   registrationNumber: string;
+  institutionId?: string;
+  institutionName?: string;
   linkedStudentIds?: string[];
   assignedCourseIds?: string[];
   createdAt: string;
@@ -730,9 +752,35 @@ export interface StudentProfile {
   fullName: string;
   email: string;
   mobileNumber?: string;
+  whatsappNumber?: string;
+  profilePhotoUrl?: string;
+  dob?: string;
+  gender?: string;
+  country?: string;
+  state?: string;
+  district?: string;
+  city?: string;
+  houseNumber?: string;
+  streetAddress?: string;
+  pincode?: string;
+  qualification?: string;
+  institution?: string;
+  preferredLanguage?: string;
+  preferredCategories?: string[];
+  educationLevel?: EducationCategoryCode;
+  degreeOrClass?: string;
+  academicYear?: string;
+  subjects?: string[];
+  skills?: string[];
+  interests?: string[];
+  careerAspirations?: string;
+  learningFormatPreference?: 'Video' | 'Structured Course' | 'Interactive' | 'Mixed';
   parentEmail?: string;
   parentName?: string;
   parentMobile?: string;
+  isMinor?: boolean;
+  emailVerified?: boolean;
+  mobileVerified?: boolean;
   enrolledCourseIds: string[];
   assignedTeacherId?: string;
   assignedTeacherName?: string;
@@ -768,19 +816,77 @@ export interface ParentStudentLink {
   createdAt: string;
 }
 
+export type CourseEnrollmentStatus =
+  | 'Submitted'
+  | 'Pending Verification'
+  | 'Verified'
+  | 'Pending Payment'
+  | 'Payment Completed'
+  | 'Approved'
+  | 'Rejected'
+  | 'Cancelled'
+  | 'Active'
+  | 'Completed'
+  | 'Suspended';
+
+export interface CourseEnrollmentAuditEntry {
+  timestamp: string;
+  actorUid: string;
+  actorEmail?: string;
+  action: string;
+  fromStatus?: string;
+  toStatus?: string;
+  note?: string;
+}
+
 export interface CourseEnrollment {
   id: string;
+  enrollmentId?: string;
   studentId: string;
   studentName: string;
   studentEmail: string;
+  studentPhone?: string;
+  countryCode?: string;
+  dob?: string;
+  age?: number;
+  gender?: string;
+  country?: string;
+  state?: string;
+  district?: string;
+  city?: string;
+  pincode?: string;
+  address?: string;
+  educationLevel?: string;
+  degreeOrClass?: string;
+  academicYear?: string;
+  institution?: string;
+  subjectStream?: string;
+  previousQualification?: string;
+  skills?: string[];
+  learningInterests?: string[];
+  careerObjective?: string;
+  preferredLanguage?: string;
+  learningPreference?: string;
+  relevantExperience?: string;
+  parentName?: string;
+  parentMobile?: string;
+  consentAccepted?: boolean;
   registrationNumber: string;
   courseId: string;
   courseTitle: string;
+  courseCategory?: string;
+  deliveryMethod?: string;
   teacherId?: string;
   teacherName?: string;
-  status: 'Active' | 'Completed' | 'Suspended';
+  assignedCoordinator?: string;
+  internalNotes?: string;
+  status: CourseEnrollmentStatus;
   paymentStatus: 'Complimentary' | 'Paid' | 'Scholarship' | 'Pending';
   feeAmount: number;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  verifiedServerSide?: boolean;
+  auditHistory?: CourseEnrollmentAuditEntry[];
   enrolledAt: string;
   updatedAt: string;
 }
@@ -1310,7 +1416,7 @@ export interface LmsNotification {
 }
 
 // ====================================================
-// SCALABLE COURSE MARKETPLACE (15,000 -> 1M+ CATALOG)
+// SCALABLE COURSE MARKETPLACE
 // ====================================================
 
 export interface MarketplaceCounters {
@@ -1415,6 +1521,14 @@ export interface MarketplaceFilterParams {
   level?: string;
   duration?: string;
   publicationDate?: 'all' | 'week' | 'month' | 'year';
+  instructor?: string;
+  channel?: string;
+  educationLevel?: string;
+  degree?: string;
+  subject?: string;
+  deliveryMethod?: string;
+  accessType?: 'all' | 'free' | 'paid';
+  skill?: string;
   certificateOnly?: boolean;
   status?: string;
   sortBy?: 'popular' | 'rating' | 'price_low' | 'price_high' | 'newest';
@@ -2250,6 +2364,531 @@ export interface ApiUsageTelemetry {
     }>;
   };
 }
+
+// ====================================================
+// SCHOOL PARTNER PORTAL (MULTI-TENANT SAAS) TYPES
+// ====================================================
+
+export type SchoolApplicationStatus =
+  | 'Draft'
+  | 'Submitted'
+  | 'Under Review'
+  | 'Approved'
+  | 'Rejected'
+  | 'More Information Required'
+  | 'Suspended';
+
+export type SchoolPartnerInstitutionType =
+  | 'K-12 School'
+  | 'Primary School'
+  | 'High School'
+  | 'Pre-University / Junior College'
+  | 'Degree College / University'
+  | 'Coaching / Skill Academy'
+  | 'Other Institution';
+
+export interface SchoolDocumentUpload {
+  id: string;
+  docType: 'Registration Certificate' | 'Board Affiliation Letter' | 'UDISE Certificate' | 'Principal Authorization' | 'Other';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  status: 'Uploaded' | 'Verified' | 'Correction Needed';
+  uploadedAt: string;
+}
+
+export interface SchoolInstitution {
+  id: string;
+  applicationRef: string;
+  institutionCode: string;
+  name: string;
+  udiseCode?: string;
+  institutionType: SchoolPartnerInstitutionType;
+  boardAffiliation: string;
+  address: string;
+  state: string;
+  district: string;
+  city: string;
+  pinCode: string;
+  website?: string;
+  studentCountEstimate: number;
+  teacherCountEstimate: number;
+  principalName: string;
+  principalDesignation: string;
+  principalMobile: string;
+  principalMobileVerified?: boolean;
+  principalEmail: string;
+  principalEmailVerified?: boolean;
+  adminUid: string;
+  adminEmail: string;
+  assignedTeacherUids?: string[];
+  documents: SchoolDocumentUpload[];
+  consentAccepted: boolean;
+  declarationAcceptedAt?: string;
+  verificationStatus: SchoolApplicationStatus;
+  reviewerNotes?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  submittedAt?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchoolTenantClass {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  gradeName: string;
+  section: string;
+  academicYear: string;
+  classTeacherUid?: string;
+  classTeacherName?: string;
+  capacity?: number;
+  assignedTeacherUids?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SchoolStaffRole =
+  | 'Teacher'
+  | 'Class Teacher'
+  | 'Subject Coordinator'
+  | 'Academic Counselor'
+  | 'School Admin Staff'
+  | 'Support Staff';
+
+export interface SchoolStaffMember {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  staffUid?: string;
+  staffCode: string;
+  fullName: string;
+  email: string;
+  mobileNumber: string;
+  role: SchoolStaffRole;
+  qualification: string;
+  subjects: string[];
+  assignedClassIds: string[];
+  assignedClassLabels: string[];
+  status: 'Active' | 'Inactive' | 'Suspended';
+  joinedAt: string;
+  updatedAt: string;
+}
+
+export type SchoolStudentEnrollmentStatus =
+  | 'Active'
+  | 'On Leave'
+  | 'Transferred'
+  | 'Graduated'
+  | 'Withdrawn';
+
+export interface SchoolTenantStudent {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  assignedTeacherUids?: string[];
+  studentCode: string;
+  studentUid?: string;
+  fullName: string;
+  dob?: string;
+  gender?: 'Male' | 'Female' | 'Other' | 'Prefer not to say';
+  classId: string;
+  className: string;
+  section: string;
+  rollNumber?: string;
+  guardianName: string;
+  guardianRelation: string;
+  guardianPhone: string;
+  guardianEmail?: string;
+  addressSummary?: string;
+  enrollmentStatus: SchoolStudentEnrollmentStatus;
+  enrolledPrograms: string[];
+  documents?: Array<{
+    id: string;
+    name: string;
+    docType: string;
+    url: string;
+    uploadedAt: string;
+  }>;
+  admissionDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchoolTenantAttendanceRecord {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  assignedTeacherUids?: string[];
+  personId: string;
+  personName: string;
+  personType: 'Student' | 'Staff';
+  classId?: string;
+  classLabel?: string;
+  date: string;
+  status: 'Present' | 'Absent' | 'Late' | 'Excused';
+  markedByUid: string;
+  markedByName: string;
+  remarks?: string;
+  createdAt: string;
+}
+
+export interface SchoolProgramEnrollment {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  assignedTeacherUids?: string[];
+  courseId: string;
+  programTitle: string;
+  category: string;
+  studentId: string;
+  studentName: string;
+  studentCode: string;
+  classId: string;
+  className: string;
+  status: 'Enrolled' | 'In Progress' | 'Completed' | 'Withdrawn';
+  progressPercent: number;
+  feeInr: number;
+  enrolledAt: string;
+  updatedAt: string;
+}
+
+export type AssessmentDimension = 'IQ' | 'EQ' | 'SQ';
+
+export interface IqEqSqQuestionItem {
+  id: string;
+  prompt: string;
+  domain: string;
+  questionType: 'mcq' | 'likert';
+  options: string[];
+  /** Present only for authoritative evaluation; stripped before sending active quiz sheet to students */
+  correctOptionIndex?: number;
+  likertWeights?: number[];
+}
+
+export interface SchoolAssessmentAssignment {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  assignedTeacherUids?: string[];
+  title: string;
+  dimension: AssessmentDimension;
+  gradeBand: 'Primary (1-5)' | 'Middle (6-8)' | 'Secondary (9-12)';
+  targetClassIds: string[];
+  targetClassLabels: string[];
+  instructions: string;
+  durationMinutes: number;
+  allowRetakes: boolean;
+  scheduledStart: string;
+  scheduledEnd: string;
+  status: 'Scheduled' | 'Active' | 'Closed';
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchoolIqEqSqResult {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  assignedTeacherUids?: string[];
+  assignmentId: string;
+  assignmentTitle: string;
+  dimension: AssessmentDimension;
+  studentId: string;
+  studentName: string;
+  studentCode: string;
+  className: string;
+  status: 'Assigned' | 'In Progress' | 'Submitted';
+  answers: Record<string, number>;
+  scorePercent: number;
+  bandLabel: string;
+  educationalSummary: string;
+  subScores: Record<string, number>;
+  nonClinicalDisclaimerAccepted: boolean;
+  startedAt?: string;
+  submittedAt?: string;
+  updatedAt: string;
+}
+
+export interface SchoolPaymentStatusHistoryEntry {
+  status: 'Pending' | 'Paid' | 'Failed' | 'Refund Requested' | 'Refunded';
+  changedBy: string;
+  note?: string;
+  changedAt: string;
+}
+
+export interface SchoolTenantPayment {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  userId: string;
+  studentId?: string;
+  studentName?: string;
+  payerName: string;
+  payerEmail: string;
+  category: 'Program Fee' | 'Assessment Fee' | 'Tuition / School Fee' | 'Subscription';
+  description: string;
+  amountInr: number;
+  outstandingBalanceInr: number;
+  gateway: 'Razorpay' | 'Bank / NEFT' | 'Challan / Cash';
+  status: 'Pending' | 'Paid' | 'Failed' | 'Refund Requested' | 'Refunded';
+  receiptNumber: string;
+  invoiceNumber: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  verifiedServerSide: boolean;
+  statusHistory: SchoolPaymentStatusHistoryEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchoolTenantCertificate {
+  id: string;
+  certificateId: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  schoolName: string;
+  schoolCode: string;
+  studentId: string;
+  studentName: string;
+  studentCode: string;
+  className: string;
+  programId: string;
+  programTitle: string;
+  achievementSummary: string;
+  issuerName: string;
+  issueDate: string;
+  status: 'Issued' | 'Revoked' | 'Corrected';
+  revocationReason?: string;
+  correctionNote?: string;
+  verificationUrl: string;
+  qrDataUrl?: string;
+  issuedByUid: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchoolTenantAnnouncement {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  title: string;
+  message: string;
+  audience: 'All School' | 'Teachers & Staff' | 'Students & Parents' | 'Program Cohort';
+  priority: 'Standard' | 'Important' | 'Urgent';
+  channelSummary: string;
+  deliveryStatus: 'Delivered (In-App)' | 'Email Sent' | 'Email Not Configured' | 'Partial / Failed';
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface SchoolTenantAuditLog {
+  id: string;
+  institutionId: string;
+  institutionAdminUid: string;
+  actorUid: string;
+  actorEmail: string;
+  actorRole: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  summary: string;
+  createdAt: string;
+}
+
+// ====================================================
+// INTELLIGENT EDUCATION CLASSIFICATION, DISCOVERY, Q&A & ROADMAPS
+// ====================================================
+
+export type EducationCategoryCode = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J';
+
+export interface EducationClassificationCategory {
+  code: EducationCategoryCode;
+  levelNumber: number; // 1 to 10
+  id: string;
+  title: string;
+  shortTitle: string;
+  description: string;
+  programmes: string[];
+  degreeGroups?: Array<{ group: string; degrees: string[] }>;
+  streams: string[];
+  sampleSubjects: string[];
+  sampleQueries: string[];
+}
+
+export interface EducationTaxonomyItem {
+  id: string;
+  categoryCode: EducationCategoryCode;
+  levelNumber?: number;
+  categoryTitle: string;
+  itemType: 'qualification' | 'degree' | 'stream' | 'subject' | 'specialization';
+  name: string;
+  parentGroup?: string;
+  description?: string;
+  displayOrder?: number;
+  isActive: boolean;
+  createdByUid?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CourseRequestDoc {
+  id: string;
+  userId?: string;
+  requesterName: string;
+  requesterEmail: string;
+  topic: string;
+  educationLevel?: string;
+  degreeOrClass?: string;
+  preferredFormat?: string;
+  notes?: string;
+  status: 'Requested' | 'Under Review' | 'Planned' | 'Fulfilled';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ParsedLearningIntent {
+  rawQuery: string;
+  cleanedQuery: string;
+  educationLevelCode?: EducationCategoryCode;
+  educationLevelLabel?: string;
+  currentQualification?: string;
+  degreeOrClass?: string;
+  primarySubject?: string;
+  desiredSkill?: string;
+  careerGoal?: string;
+  preferredLanguage: string;
+  preferredLanguageCode: string;
+  preferredFormat?: 'Video' | 'Course' | 'Roadmap' | 'Q&A';
+  intentPriorityTerms: string[];
+  searchKeywords: string[];
+  correctionHint?: string;
+  usedAiParser?: boolean;
+}
+
+export type RecommendationCategoryId =
+  | 'recommended_for_you'
+  | 'related_to_degree'
+  | 'related_to_search'
+  | 'career_development'
+  | 'additional_skills'
+  | 'beginner_courses'
+  | 'advanced_courses'
+  | 'youtube_resources';
+
+export interface RecommendedCourseCard {
+  course: MarketplaceCourse;
+  whyRecommended: string;
+  matchScore: number;
+  recommendationCategory: RecommendationCategoryId;
+}
+
+export interface RecommendationGroupBucket {
+  id: RecommendationCategoryId;
+  title: string;
+  subtitle: string;
+  courses: RecommendedCourseCard[];
+}
+
+export interface RoadmapStageItem {
+  stageNumber: number;
+  title: string;
+  focusSummary: string;
+  estimatedDuration: string;
+  topics: string[];
+  milestoneAssignment: string;
+  recommendedCourseIds: string[];
+  recommendedCourses?: MarketplaceCourse[];
+  youtubeResources: YouTubeVideoRecommendation[];
+}
+
+export interface VisualLearningRoadmap {
+  id: string;
+  topic: string;
+  targetOutcome: string;
+  educationContext?: string;
+  totalEstimatedDuration: string;
+  stages: RoadmapStageItem[];
+  nonDegreeDisclaimer: string;
+  generatedBy: 'gemini' | 'structured_engine';
+  createdAt: string;
+}
+
+export interface QuinnDiscoveryResponse {
+  parsedIntent: ParsedLearningIntent;
+  recommendationGroups: RecommendationGroupBucket[];
+  youtubeResources: YouTubeVideoRecommendation[];
+  relatedSkills: string[];
+  roadmap: VisualLearningRoadmap;
+  totalMatchedCourses: number;
+  youtubeSource: string;
+}
+
+export interface QaPracticeQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+}
+
+export interface QaStructuredResult {
+  question: string;
+  subject: string;
+  topic: string;
+  educationContext: string;
+  language: string;
+  answer: string;
+  examples: string[];
+  keyTakeaways: string[];
+  relatedConcepts: string[];
+  recommendedCourses: Array<{
+    course: MarketplaceCourse;
+    rationale: string;
+  }>;
+  youtubeVideos: YouTubeVideoRecommendation[];
+  suggestedLearningPathTitle: string;
+  suggestedLearningPathSteps: string[];
+  practiceQuiz: QaPracticeQuestion[];
+  generatedBy: 'gemini' | 'structured_engine';
+  honestyNote?: string;
+}
+
+export interface QaSavedRecord {
+  id: string;
+  studentId: string;
+  studentName?: string;
+  question: string;
+  subject: string;
+  topic: string;
+  educationContext?: string;
+  answer: string;
+  relatedConcepts: string[];
+  recommendedCourseIds: string[];
+  youtubeVideoIds: string[];
+  savedAt: string;
+}
+
+export interface RecommendationAnalyticsEvent {
+  id: string;
+  userId?: string;
+  eventType: 'search' | 'course_impression' | 'course_enroll_click' | 'youtube_watch' | 'qa_ask' | 'roadmap_save';
+  query: string;
+  educationLevelCode?: string;
+  degreeOrClass?: string;
+  subject?: string;
+  courseId?: string;
+  videoId?: string;
+  createdAt: string;
+}
+
+
 
 
 

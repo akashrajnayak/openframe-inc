@@ -43,7 +43,9 @@ import {
   ConsentRecord,
   AiLearningPath,
   ContentReport,
-  ApiUsageTelemetry
+  ApiUsageTelemetry,
+  QaSavedRecord,
+  RecommendationAnalyticsEvent,
 } from '../types';
 import { quinnAiService } from './quinnAiService';
 
@@ -83,6 +85,22 @@ export class LmsService {
   // -------------------------------------------------------------
   // 1. Course Enrollment & Progress (8-Stage Tracking)
   // -------------------------------------------------------------
+  async updateStudentProfile(uid: string, partial: Partial<StudentProfile>): Promise<StudentProfile | null> {
+    if (!uid) return null;
+    const now = new Date().toISOString();
+    try {
+      await setDoc(
+        doc(db, 'student_profiles', uid),
+        stripUndefinedDeep({ ...partial, uid, updatedAt: now }),
+        { merge: true }
+      );
+      const snap = await getDoc(doc(db, 'student_profiles', uid));
+      return snap.exists() ? ({ id: snap.id, ...(snap.data() as any) } as StudentProfile) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async enrollStudentInCourse(
     course: MarketplaceCourse,
     student: {
@@ -90,7 +108,9 @@ export class LmsService {
       fullName: string;
       email: string;
       registrationNumber?: string;
-    }
+    },
+    paymentStatusOverride?: CourseEnrollment['paymentStatus'],
+    feeAmountOverride?: number
   ): Promise<{ enrollment: CourseEnrollment; progress: StudentProgressRecord }> {
     const now = new Date().toISOString();
     const enrollmentId = sanitizeId(`${student.uid}_${course.id}`);
@@ -129,8 +149,8 @@ export class LmsService {
       teacherId: assignedTeacherId || undefined,
       teacherName: assignedTeacherName || undefined,
       status: 'Active',
-      paymentStatus: course.price === 0 ? 'Complimentary' : 'Paid',
-      feeAmount: Number(course.price || 0),
+      paymentStatus: paymentStatusOverride || (course.price === 0 ? 'Complimentary' : 'Paid'),
+      feeAmount: feeAmountOverride !== undefined ? Number(feeAmountOverride) : Number(course.price || 0),
       enrolledAt: now,
       updatedAt: now,
     };
@@ -797,7 +817,7 @@ export class LmsService {
 
   async uploadDeliverableFile(
     file: File,
-    folder: 'projects' | 'presentations'
+    folder: 'projects' | 'presentations' | 'student-photos'
   ): Promise<{ url: string; fileName: string; size: number }> {
     return uploadDocumentToStorage(file, folder);
   }
@@ -1258,7 +1278,7 @@ export class LmsService {
 
     const teacherFinalApprovalGranted = Boolean(
       progress.teacherApproved ||
-        (progress.teacherEvaluation?.isApproved && (progress.teacherEvaluation?.totalScore || 0) >= 70)
+        (progress.teacherEvaluation?.isApproved && (progress.teacherEvaluation?.totalScore || 0) >= passingScore)
     );
 
     const isEligible =
@@ -1417,9 +1437,39 @@ export class LmsService {
     const cleanId = certificateId.trim();
     if (!cleanId) return null;
     try {
-      const snap = await getDoc(doc(db, 'certificates', sanitizeId(cleanId)));
-      if (!snap.exists()) return null;
-      const cert = { id: snap.id, ...(snap.data() as any) } as IssuedCertificate;
+      const sanitized = sanitizeId(cleanId);
+      let snap = await getDoc(doc(db, 'certificates', sanitized));
+      let cert: any = null;
+      if (snap.exists()) {
+        cert = { id: snap.id, ...(snap.data() as any) };
+      } else {
+        const pubSnap = await getDoc(doc(db, 'certificate_verification', sanitized));
+        if (!pubSnap.exists()) return null;
+        const p = pubSnap.data() as any;
+        cert = {
+          id: pubSnap.id,
+          certificateId: p.certificateId || sanitized,
+          studentId: p.studentId || '',
+          studentName: p.studentName || 'Verified Learner',
+          courseId: p.courseId || 'school-program',
+          courseTitle: p.courseTitle || 'OpenFrame Partner Program',
+          courseName: p.courseTitle || 'OpenFrame Partner Program',
+          schoolName: p.schoolName,
+          teacherName: p.issuerName || 'Authorized Institutional Signatory',
+          authorizedSignatory: p.schoolName ? `Issued with ${p.schoolName}` : 'Authorized Signatory · OpenFrame Education',
+          accreditationBody: p.schoolName
+            ? `OpenFrame School Partner Credential · ${p.schoolName}`
+            : 'Academic Alliance with HopeNest Global Foundation',
+          certificateType: 'School Partner Completion Credential',
+          grade: p.grade || 'Verified',
+          score: p.score ?? 100,
+          completionDate: p.issueDate || '',
+          issuedDate: p.issueDate || '',
+          status: p.status || 'Issued',
+          revocationReason: p.revocationReason,
+          correctionNote: p.correctionNote,
+        };
+      }
 
       // Generate QR client-side if not yet stored
       if (!cert.qrCodeUrl && typeof window !== 'undefined') {
@@ -1436,7 +1486,7 @@ export class LmsService {
         source: typeof window !== 'undefined' ? window.location.pathname : 'portal',
       }).catch(() => {});
 
-      return cert;
+      return cert as IssuedCertificate;
     } catch (err) {
       console.warn('Certificate verification lookup error:', err);
       return null;
@@ -1819,9 +1869,12 @@ export class LmsService {
     pendingAdminCertificates: number;
     activeTeachers: number;
     activeStudents: number;
+    totalSearches: number;
+    completedCoursesCount: number;
+    pendingAssessmentsCount: number;
   }> {
     try {
-      const [enr, vid, quiz, proj, evals, certs, stu, tch] = await Promise.all([
+      const [enr, vid, quiz, proj, evals, certs, stu, tch, searches, progSnap, presSnap] = await Promise.all([
         getDocs(query(collection(db, 'course_enrollments'), limit(500))),
         getDocs(query(collection(db, 'video_learning_sessions'), where('completed', '==', true), limit(500))),
         getDocs(query(collection(db, 'quiz_attempts'), limit(500))),
@@ -1830,11 +1883,27 @@ export class LmsService {
         getDocs(query(collection(db, 'certificates'), limit(500))),
         getDocs(query(collection(db, 'student_profiles'), limit(500))),
         getDocs(query(collection(db, 'teacher_profiles'), limit(500))),
+        getDocs(query(collection(db, 'search_history'), limit(500))).catch(() => ({ size: 0 } as any)),
+        getDocs(query(collection(db, 'student_progress'), limit(500))).catch(() => ({ docs: [] } as any)),
+        getDocs(query(collection(db, 'presentations'), limit(500))).catch(() => ({ docs: [] } as any)),
       ]);
 
       const quizDocs = quiz.docs.map((d) => d.data() as QuizAttempt);
       const passedCount = quizDocs.filter((q) => q.passed).length;
       const certDocs = certs.docs.map((d) => d.data() as IssuedCertificate);
+      const projDocs = proj.docs.map((d) => d.data() as ProjectSubmission);
+      const presDocs = presSnap.docs ? presSnap.docs.map((d: any) => d.data() as StudentPresentation) : [];
+      const progDocs = progSnap.docs ? progSnap.docs.map((d: any) => d.data() as StudentProgressRecord) : [];
+
+      const completedCoursesCount = progDocs.filter(
+        (p: StudentProgressRecord) =>
+          (p.overallProgressPercent || 0) >= 100 ||
+          Boolean(p.certificateIssued) ||
+          (p.completedStages || []).includes('CERTIFICATE')
+      ).length;
+
+      const pendingProjects = projDocs.filter((p) => p.status === 'Submitted' || p.status === 'Under Review').length;
+      const pendingPres = presDocs.filter((p: StudentPresentation) => p.status === 'Submitted' || p.status === 'Scheduled').length;
 
       return {
         totalEnrollments: enr.size,
@@ -1847,6 +1916,9 @@ export class LmsService {
         pendingAdminCertificates: certDocs.filter((c) => c.status === 'Pending Admin Approval').length,
         activeStudents: stu.size,
         activeTeachers: tch.size,
+        totalSearches: searches.size || 0,
+        completedCoursesCount,
+        pendingAssessmentsCount: pendingProjects + pendingPres,
       };
     } catch (err) {
       console.warn('Analytics aggregation fallback:', err);
@@ -1861,6 +1933,9 @@ export class LmsService {
         pendingAdminCertificates: 0,
         activeStudents: 0,
         activeTeachers: 0,
+        totalSearches: 0,
+        completedCoursesCount: 0,
+        pendingAssessmentsCount: 0,
       };
     }
   }
@@ -2263,6 +2338,123 @@ export class LmsService {
       // ignore
     }
     return null;
+  }
+
+  // ====================================================
+  // Q&A HISTORY (/qa_history) & DISCOVERY ANALYTICS (/recommendation_analytics)
+  // ====================================================
+
+  async saveQaEntry(entry: Omit<QaSavedRecord, 'id' | 'savedAt'>): Promise<QaSavedRecord> {
+    if (!entry.studentId) throw new Error('Authentication required to save Q&A answers.');
+    const id = sanitizeId(`qa_${entry.studentId.slice(0, 16)}_${Date.now().toString(36)}`);
+    const payload: QaSavedRecord = stripUndefinedDeep({
+      ...entry,
+      id,
+      savedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'qa_history', id), payload);
+    return payload;
+  }
+
+  async getQaHistory(studentId: string, maxCount = 50): Promise<QaSavedRecord[]> {
+    if (!studentId) return [];
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'qa_history'), where('studentId', '==', studentId), limit(maxCount))
+      );
+      return snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) } as QaSavedRecord))
+        .sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+    } catch {
+      return [];
+    }
+  }
+
+  async deleteQaEntry(id: string): Promise<void> {
+    if (!id) return;
+    await deleteDoc(doc(db, 'qa_history', sanitizeId(id)));
+  }
+
+  async logDiscoveryAnalyticsEvent(
+    event: Omit<RecommendationAnalyticsEvent, 'id' | 'createdAt'>
+  ): Promise<void> {
+    const id = sanitizeId(`ana_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`);
+    const payload: RecommendationAnalyticsEvent = stripUndefinedDeep({
+      ...event,
+      id,
+      query: String(event.query || '').slice(0, 240),
+      createdAt: new Date().toISOString(),
+    });
+    try {
+      await setDoc(doc(db, 'recommendation_analytics', id), payload);
+    } catch {
+      // Non-blocking telemetry
+    }
+  }
+
+  async getDiscoveryAnalyticsSummary(): Promise<{
+    totalSearches: number;
+    totalEvents: number;
+    totalEnrollments: number;
+    youtubeClicks: number;
+    qaCount: number;
+    topSearchedSubjects: Array<{ label: string; count: number }>;
+    popularDegrees: Array<{ label: string; count: number }>;
+    topRequestedSkills: Array<{ label: string; count: number }>;
+    recentEvents: RecommendationAnalyticsEvent[];
+  }> {
+    const [searchSnap, eventSnap, enrollSnap] = await Promise.all([
+      getDocs(query(collection(db, 'search_history'), limit(300))).catch(() => null),
+      getDocs(query(collection(db, 'recommendation_analytics'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'course_enrollments'), limit(500))).catch(() => null),
+    ]);
+
+    const searches = searchSnap ? searchSnap.docs.map((d) => d.data() as SearchHistoryEntry) : [];
+    const events = eventSnap
+      ? eventSnap.docs
+          .map((d) => d.data() as RecommendationAnalyticsEvent)
+          .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      : [];
+    const enrollments = enrollSnap ? enrollSnap.docs.map((d) => d.data() as any) : [];
+
+    const subjectMap = new Map<string, number>();
+    const degreeMap = new Map<string, number>();
+    const skillMap = new Map<string, number>();
+
+    searches.forEach((s) => {
+      const q = String(s.query || '').trim();
+      if (q) subjectMap.set(q, (subjectMap.get(q) || 0) + 1);
+    });
+
+    let youtubeClicks = 0;
+    let qaCount = 0;
+    events.forEach((e) => {
+      if (e.eventType === 'youtube_watch') youtubeClicks++;
+      if (e.eventType === 'qa_ask') qaCount++;
+      if (e.subject) skillMap.set(e.subject, (skillMap.get(e.subject) || 0) + 1);
+      if (e.degreeOrClass) degreeMap.set(e.degreeOrClass, (degreeMap.get(e.degreeOrClass) || 0) + 1);
+      if (e.query && e.eventType === 'search') {
+        subjectMap.set(e.query, (subjectMap.get(e.query) || 0) + 1);
+      }
+    });
+
+    const sortMap = (m: Map<string, number>) =>
+      Array.from(m.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+    return {
+      totalSearches: searches.length,
+      totalEvents: events.length,
+      totalEnrollments: enrollments.length,
+      youtubeClicks,
+      qaCount,
+      topSearchedSubjects: sortMap(subjectMap),
+      popularDegrees: sortMap(degreeMap),
+      topRequestedSkills: sortMap(skillMap),
+      recentEvents: events.slice(0, 20),
+    };
   }
 }
 

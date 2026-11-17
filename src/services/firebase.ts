@@ -28,6 +28,9 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   User
 } from 'firebase/auth';
 import {
@@ -176,7 +179,8 @@ export const SUPER_ADMIN_EMAILS = [
   'admin@openframeitsolutions.com'
 ];
 
-export async function loginWithGoogle(): Promise<User> {
+export async function loginWithGoogle(rememberMe = true): Promise<User> {
+  await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence).catch(() => {});
   const result = await signInWithPopup(auth, googleProvider);
   if (SUPER_ADMIN_EMAILS.includes((result.user.email || '').toLowerCase())) {
     await ensureAdminRecord(result.user);
@@ -184,7 +188,8 @@ export async function loginWithGoogle(): Promise<User> {
   return result.user;
 }
 
-export async function loginWithEmail(email: string, pass: string): Promise<User> {
+export async function loginWithEmail(email: string, pass: string, rememberMe = true): Promise<User> {
+  await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence).catch(() => {});
   const result = await signInWithEmailAndPassword(auth, email, pass);
   if (SUPER_ADMIN_EMAILS.includes((result.user.email || '').toLowerCase())) {
     await ensureAdminRecord(result.user);
@@ -329,7 +334,7 @@ export async function syncLmsUserProfile(
       : existingUser?.role ||
         (isSuper ? 'admin' : matchedTeacherReg ? 'teacher' : 'student');
 
-  const rolesSet = new Set<LmsUserRole>(existingUser?.roles || ['student']);
+  const rolesSet = new Set<LmsUserRole>(existingUser?.roles || [resolvedRole === 'admin' ? 'student' : resolvedRole]);
   rolesSet.add(resolvedRole);
   if (isSuper) rolesSet.add('admin');
   if (matchedTeacherReg) rolesSet.add('teacher');
@@ -338,10 +343,18 @@ export async function syncLmsUserProfile(
     existingUser?.registrationNumber ||
     matchedStudentReg?.id ||
     matchedTeacherReg?.id ||
-    (resolvedRole === 'teacher'
+    (resolvedRole === 'institution_admin'
+      ? `OF-SCH-${user.uid.slice(0, 6).toUpperCase()}`
+      : resolvedRole === 'teacher'
       ? `OF-TCH-${user.uid.slice(0, 6).toUpperCase()}`
       : resolvedRole === 'parent'
       ? `OF-PAR-${user.uid.slice(0, 6).toUpperCase()}`
+      : resolvedRole === 'ngo_partner'
+      ? `OF-NGO-${user.uid.slice(0, 6).toUpperCase()}`
+      : resolvedRole === 'field_executive'
+      ? `OF-FLD-${user.uid.slice(0, 6).toUpperCase()}`
+      : resolvedRole === 'professional'
+      ? `OF-PRO-${user.uid.slice(0, 6).toUpperCase()}`
       : `OF-STU-${user.uid.slice(0, 6).toUpperCase()}`);
 
   const profilePayload: LmsUserProfile = stripUndefinedDeep({
@@ -350,8 +363,10 @@ export async function syncLmsUserProfile(
     displayName: matchedStudentReg?.fullName || matchedTeacherReg?.fullName || displayName,
     ...(user.photoURL ? { photoURL: user.photoURL } : {}),
     role: resolvedRole === 'admin' && !isSuper ? 'student' : resolvedRole,
-    roles: Array.from(rolesSet),
+    roles: Array.from(rolesSet).slice(0, 2),
     registrationNumber: regNumber,
+    ...(existingUser?.institutionId ? { institutionId: existingUser.institutionId } : {}),
+    ...(existingUser?.institutionName ? { institutionName: existingUser.institutionName } : {}),
     linkedStudentIds: existingUser?.linkedStudentIds || [],
     assignedCourseIds: existingUser?.assignedCourseIds || [],
     createdAt: existingUser?.createdAt || now,
@@ -367,7 +382,7 @@ export async function syncLmsUserProfile(
   let studentProfile: StudentProfile | null = null;
   let teacherProfile: TeacherProfile | null = null;
 
-  if (profilePayload.role === 'student' || rolesSet.has('student')) {
+  if (profilePayload.role === 'student' || profilePayload.role === 'professional' || rolesSet.has('student')) {
     const stuRef = doc(db, 'student_profiles', user.uid);
     try {
       const stuSnap = await getDoc(stuRef);
@@ -419,6 +434,48 @@ export async function syncLmsUserProfile(
       await setDoc(tchRef, teacherProfile, { merge: true });
     } catch (err) {
       console.warn('Teacher profile sync warning:', err);
+    }
+  }
+
+  if (profilePayload.role === 'ngo_partner') {
+    const ngoRef = doc(db, 'ngo_partners', user.uid);
+    try {
+      const ngoSnap = await getDoc(ngoRef);
+      if (!ngoSnap.exists()) {
+        await setDoc(ngoRef, {
+          uid: user.uid,
+          email,
+          organizationName: profilePayload.displayName,
+          contactPerson: profilePayload.displayName,
+          registrationNumber: regNumber,
+          verificationStatus: 'Pending Review',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+
+  if (profilePayload.role === 'field_executive') {
+    const fldRef = doc(db, 'field_executives', user.uid);
+    try {
+      const fldSnap = await getDoc(fldRef);
+      if (!fldSnap.exists()) {
+        await setDoc(fldRef, {
+          uid: user.uid,
+          email,
+          fullName: profilePayload.displayName,
+          employeeCode: regNumber,
+          assignedRegion: 'Karnataka',
+          status: 'Active',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } catch {
+      // non-blocking
     }
   }
 
@@ -482,7 +539,7 @@ export async function getActivityLogs(): Promise<ActivityLog[]> {
 // ====================================================
 export async function uploadDocumentToStorage(
   file: File,
-  folder: 'resumes' | 'images' | 'documents' | 'projects' | 'presentations' = 'resumes'
+  folder: 'resumes' | 'images' | 'documents' | 'projects' | 'presentations' | 'student-photos' = 'resumes'
 ): Promise<{ url: string; fileName: string; size: number }> {
   if (file.size > 25 * 1024 * 1024) {
     throw new Error('File exceeds maximum size limit of 25MB.');

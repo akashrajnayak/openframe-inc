@@ -51,13 +51,18 @@ import { ParentDashboardPage } from './pages/ParentDashboardPage';
 import { PortalLoginPage } from './pages/PortalLoginPage';
 import { CertificateVerificationPage } from './pages/CertificateVerificationPage';
 import { ChatbotPage } from './pages/ChatbotPage';
+import { QaLearningPage } from './pages/QaLearningPage';
 import { SchoolEducationHubPage } from './pages/SchoolEducationHubPage';
-import { AnimationCoursePage } from './pages/AnimationCoursePage';
+import { NgoDashboardPage } from './pages/NgoDashboardPage';
+import { FieldExecutiveDashboardPage } from './pages/FieldExecutiveDashboardPage';
+import { ProfessionalDashboardPage } from './pages/ProfessionalDashboardPage';
 import { GlobalChatbotWidget } from './components/common/GlobalChatbotWidget';
 import { testFirestoreConnection } from './services/firebase';
+import { useAuth } from './context/AuthContext';
 
 function AppContent() {
   const { currentPath, navigate } = useRouter();
+  const { currentUser } = useAuth();
 
   React.useEffect(() => {
     testFirestoreConnection().catch(() => {});
@@ -76,11 +81,11 @@ function AppContent() {
     } else if (clean === '/marketplace' || clean === '/courses' || clean === '/education/marketplace') {
       pageTitle = '15,500+ Online Course Marketplace | OpenFrame Education';
     } else if (clean === '/chatbot' || clean === '/qwen-ai' || clean === '/quinn-ai' || clean === '/ai-assistant') {
-      pageTitle = 'Qwen AI • Dedicated Learning & Corporate Assistant | OpenFrame';
+      pageTitle = 'Quinn AI • Dedicated Learning & Corporate Assistant | OpenFrame';
+    } else if (clean === '/qa' || clean === '/ask') {
+      pageTitle = 'Ask Quinn Q&A • Academic & Skill Intelligence | OpenFrame Education';
     } else if (clean.startsWith('/marketplace/') || clean.startsWith('/course/')) {
       pageTitle = 'Course Curriculum & Enrolment | OpenFrame Education';
-    } else if (clean === '/animation-course' || clean === '/swift-ui-animations' || clean === '/courses/animation-studio') {
-      pageTitle = 'Swift UI Animations, Graphs & Charts Course (ZIP + Studio) | OpenFrame Education';
     } else if (clean === '/education') {
       pageTitle = 'OpenFrame Education | Learn. Develop. Achieve. | 15,500+ Courses & 110+ Categories';
     } else if (clean === '/school' || clean.startsWith('/school/')) {
@@ -121,19 +126,25 @@ function AppContent() {
       pageTitle = 'Official Corporate Documents Repository | OpenFrame IT Solutions';
     } else if (clean.startsWith('/learn/')) {
       pageTitle = 'Quinn AI Interactive Learning Workspace | OpenFrame Education';
-    } else if (clean === '/portal' || clean === '/login') {
-      pageTitle = 'Portal Sign In | OpenFrame Education';
+    } else if (clean === '/portal' || clean === '/login' || clean.startsWith('/portal/')) {
+      pageTitle = 'Portal Sign In Hub | OPENFRAME';
     } else if (clean === '/student/dashboard' || clean === '/student-portal') {
-      pageTitle = 'Student Learning & Certification Dashboard | OpenFrame Education';
+      pageTitle = 'Student Learning & Certification Dashboard | OPENFRAME';
     } else if (clean === '/teacher/dashboard' || clean === '/teacher-portal') {
-      pageTitle = 'Faculty Evaluation & Rubric Dashboard | OpenFrame Education';
+      pageTitle = 'Faculty Evaluation & Academic Dashboard | OPENFRAME';
     } else if (clean === '/parent/dashboard' || clean === '/parent-portal') {
-      pageTitle = 'Parent Progress Portal | OpenFrame Education';
+      pageTitle = 'Parent Progress & Engagement Portal | OPENFRAME';
+    } else if (clean === '/ngo/dashboard' || clean === '/ngo-portal') {
+      pageTitle = 'NGO Partner Hub & Impact Portal | OPENFRAME';
+    } else if (clean === '/field/dashboard' || clean === '/field-portal') {
+      pageTitle = 'Field Executive Outreach Workspace | OPENFRAME';
+    } else if (clean === '/professional/dashboard' || clean === '/professional-portal') {
+      pageTitle = 'Working Professional Upskilling Portal | OPENFRAME';
     } else if (clean.startsWith('/verify-certificate') || clean.startsWith('/certificate/')) {
       pageTitle = 'Official Certificate Public Verification | OpenFrame IT Solutions';
     } else if (clean === '/verification-checklist' || clean === '/checklist') {
       pageTitle = 'Corporate Verification & Compliance Checklist | OpenFrame IT Solutions';
-    } else if (clean.startsWith('/admin')) {
+    } else if (clean.startsWith('/admin') || clean === '/super-admin/dashboard') {
       pageTitle = 'Corporate Admin Console | OpenFrame IT Solutions';
       isNoIndex = true;
     }
@@ -163,7 +174,11 @@ function AppContent() {
       return <CourseLearningPage />;
     }
 
-    if (path === '/portal' || path === '/login') {
+    if (path === '/portal/admin') {
+      return <AdminLoginPage />;
+    }
+
+    if (path === '/portal' || path === '/login' || path.startsWith('/portal/')) {
       return <PortalLoginPage />;
     }
 
@@ -179,6 +194,18 @@ function AppContent() {
       return <ParentDashboardPage />;
     }
 
+    if (path === '/ngo/dashboard' || path === '/ngo-portal') {
+      return <NgoDashboardPage />;
+    }
+
+    if (path === '/field/dashboard' || path === '/field-portal') {
+      return <FieldExecutiveDashboardPage />;
+    }
+
+    if (path === '/professional/dashboard' || path === '/professional-portal') {
+      return <ProfessionalDashboardPage />;
+    }
+
     if (path.startsWith('/verify-certificate') || path.startsWith('/certificate/')) {
       return <CertificateVerificationPage />;
     }
@@ -189,10 +216,6 @@ function AppContent() {
 
     if (path.startsWith('/marketplace/') || path.startsWith('/course/')) {
       return <CourseDetailPage />;
-    }
-
-    if (path === '/animation-course' || path === '/swift-ui-animations' || path === '/courses/animation-studio') {
-      return <AnimationCoursePage />;
     }
 
     if (path === '/school' || path.startsWith('/school/class/') || path.startsWith('/school/subject/')) {
@@ -234,6 +257,9 @@ function AppContent() {
     switch (path) {
       case '/':
         return <HomePage />;
+      case '/qa':
+      case '/ask':
+        return <QaLearningPage />;
       case '/chatbot':
       case '/qwen-ai':
       case '/quinn-ai':
@@ -278,6 +304,8 @@ function AppContent() {
       case '/join/advisor':
         return <ProfessionalRegisterPage />;
       case '/partner/school':
+      case '/partner/school/dashboard':
+      case '/partner/school/register':
       case '/partner/institution':
       case '/partner/college':
         return <SchoolPartnerPage />;
@@ -320,6 +348,7 @@ function AppContent() {
         return <AdminLoginPage />;
       case '/admin':
       case '/admin/dashboard':
+      case '/super-admin/dashboard':
         return <AdminPage />;
       default:
         return (
@@ -361,16 +390,41 @@ function AppContent() {
     }
   };
 
-  const cleanCurrentPath = currentPath.split('?')[0] || '/';
-  const isAdminRoute = cleanCurrentPath.startsWith('/admin');
+  const rawCleanPath = currentPath.split('?')[0] || '/';
+  const cleanCurrentPath =
+    rawCleanPath.length > 1 && rawCleanPath.endsWith('/')
+      ? rawCleanPath.slice(0, -1)
+      : rawCleanPath;
+  const isAdminRoute = cleanCurrentPath.startsWith('/admin') || cleanCurrentPath === '/super-admin/dashboard';
+  const isSchoolPartnerShell =
+    Boolean(currentUser) &&
+    (cleanCurrentPath === '/partner/school/dashboard' ||
+      cleanCurrentPath === '/partner/school/register');
+  const isWorkspaceShellRoute =
+    isAdminRoute ||
+    isSchoolPartnerShell ||
+    [
+      '/student/dashboard',
+      '/student-portal',
+      '/teacher/dashboard',
+      '/teacher-portal',
+      '/parent/dashboard',
+      '/parent-portal',
+      '/ngo/dashboard',
+      '/ngo-portal',
+      '/field/dashboard',
+      '/field-portal',
+      '/professional/dashboard',
+      '/professional-portal',
+    ].includes(cleanCurrentPath);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 antialiased">
-      {!isAdminRoute && <Header />}
+      {!isWorkspaceShellRoute && <Header />}
       <main className="flex-1">
         {renderRoute()}
       </main>
-      {!isAdminRoute && <Footer />}
+      {!isWorkspaceShellRoute && <Footer />}
       {!isAdminRoute && <GlobalChatbotWidget />}
     </div>
   );

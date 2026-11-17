@@ -438,6 +438,8 @@ class YouTubeDiscoveryEngine {
     languageCode?: string;
     searchType?: 'video' | 'playlist' | 'channel';
     pageToken?: string;
+    videoDuration?: 'any' | 'short' | 'medium' | 'long';
+    publishedAfter?: string;
     maxResults?: number;
     jobId?: string;
     modifier?: string;
@@ -476,6 +478,11 @@ class YouTubeDiscoveryEngine {
           relevanceLanguage: langCode,
           safeSearch: 'strict',
           videoEmbeddable: searchType === 'video' ? 'true' : undefined,
+          videoDuration:
+            searchType === 'video' && params.videoDuration && params.videoDuration !== 'any'
+              ? params.videoDuration
+              : undefined,
+          publishedAfter: params.publishedAfter,
         },
         100
       );

@@ -53,6 +53,9 @@ export const AdminLmsControlPanel: React.FC<{
     pendingAdminCertificates: 0,
     activeStudents: 0,
     activeTeachers: 0,
+    totalSearches: 0,
+    completedCoursesCount: 0,
+    pendingAssessmentsCount: 0,
   });
 
   const [ytStatus, setYtStatus] = useState<{ apiKeyConfigured: boolean; mode: string }>({
@@ -370,7 +373,25 @@ export const AdminLmsControlPanel: React.FC<{
       </div>
 
       {/* Live Firestore KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="bg-white border border-slate-200 p-4 rounded-2xl">
+          <span className="text-[11px] text-slate-500 font-medium">Total Searches</span>
+          <div className="text-xl font-bold text-slate-900 mt-1 tabular-nums">
+            {Math.max(analytics.totalSearches, telemetry?.searchStats?.totalSearchesToday || 0)}
+          </div>
+        </div>
+        <div className="bg-white border border-slate-200 p-4 rounded-2xl">
+          <span className="text-[11px] text-slate-500 font-medium">Registered Students</span>
+          <div className="text-xl font-bold text-slate-900 mt-1 tabular-nums">{analytics.activeStudents}</div>
+        </div>
+        <div className="bg-white border border-slate-200 p-4 rounded-2xl">
+          <span className="text-[11px] text-slate-500 font-medium">Completed Courses</span>
+          <div className="text-xl font-bold text-blue-600 mt-1 tabular-nums">{analytics.completedCoursesCount}</div>
+        </div>
+        <div className="bg-white border border-slate-200 p-4 rounded-2xl">
+          <span className="text-[11px] text-slate-500 font-medium">Pending Assessments</span>
+          <div className="text-xl font-bold text-amber-600 mt-1 tabular-nums">{analytics.pendingAssessmentsCount}</div>
+        </div>
         <div className="bg-white border border-slate-200 p-4 rounded-2xl">
           <span className="text-[11px] text-slate-500 font-medium">Enrollments</span>
           <div className="text-xl font-bold text-slate-900 mt-1 tabular-nums">{analytics.totalEnrollments}</div>

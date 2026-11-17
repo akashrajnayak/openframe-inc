@@ -1071,26 +1071,72 @@ export const StudentAnalytics20Charts: React.FC<StudentAnalytics20ChartsProps> =
         <ChartCard
           index={11}
           title="Skills Development Radar"
-          subtitle="Multi-dimensional skill readiness: Concepts, Practicals, Notes & Accreditation"
+          subtitle="Multi-dimensional skill readiness vs 70% mastery benchmark"
           isEmpty={fProgress.length === 0}
           emptyMessage="Track course progress to measure multi-axis skills development."
         >
           {(() => {
             const gates = readinessFunnel.gates.map((g) => ({
-              label: g.label.replace(/^\d+\.\s*/, '').slice(0, 10),
-              pct: Math.round((g.count / readinessFunnel.total) * 100),
+              label: g.label.replace(/^\d+\.\s*/, '').slice(0, 11),
+              pct: Math.round((g.count / Math.max(1, readinessFunnel.total)) * 100),
             }));
+            const cx = 110;
+            const cy = 92;
+            const maxR = 64;
+            const n = Math.max(3, gates.length);
+            const pt = (idx: number, pct: number) => {
+              const angle = (Math.PI * 2 * idx) / n - Math.PI / 2;
+              const r = (pct / 100) * maxR;
+              return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle), angle };
+            };
+            const targetPts = gates.map((_, i) => pt(i, 70)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+            const studentPts = gates.map((g, i) => pt(i, g.pct)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
             return (
-              <div className="space-y-2 text-xs">
-                {gates.map((g) => (
-                  <div key={g.label} className="flex items-center gap-3">
-                    <span className="w-28 text-slate-600 truncate">{g.label}</span>
-                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${g.pct}%` }} />
+              <div className="flex flex-col sm:flex-row items-center gap-4 text-xs">
+                <svg viewBox="0 0 220 184" className="w-52 h-44 shrink-0">
+                  {[33, 66, 100].map((ring) => (
+                    <polygon
+                      key={ring}
+                      points={gates.map((_, i) => pt(i, ring)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}
+                      fill="none"
+                      stroke="#e2e8f0"
+                      strokeWidth="1"
+                    />
+                  ))}
+                  {gates.map((g, i) => {
+                    const outer = pt(i, 100);
+                    const lbl = pt(i, 122);
+                    return (
+                      <g key={g.label}>
+                        <line x1={cx} y1={cy} x2={outer.x} y2={outer.y} stroke="#e2e8f0" strokeWidth="1" />
+                        <text
+                          x={lbl.x}
+                          y={lbl.y}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          className="fill-slate-600 text-[8.5px] font-semibold"
+                        >
+                          {g.label}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  <polygon points={targetPts} fill="none" stroke="#94a3b8" strokeWidth="1.2" strokeDasharray="3 3" />
+                  <polygon points={studentPts} fill="rgba(79, 70, 229, 0.22)" stroke="#4f46e5" strokeWidth="2" />
+                  {gates.map((g, i) => {
+                    const p = pt(i, g.pct);
+                    return <circle key={g.label} cx={p.x} cy={p.y} r="3" fill="#4f46e5" />;
+                  })}
+                </svg>
+                <div className="flex-1 w-full space-y-1.5">
+                  {gates.map((g) => (
+                    <div key={g.label} className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-600 truncate pr-2">{g.label}</span>
+                      <span className="font-bold text-indigo-700 tabular-nums">{g.pct}%</span>
                     </div>
-                    <span className="w-9 text-right font-bold tabular-nums">{g.pct}%</span>
-                  </div>
-                ))}
+                  ))}
+                  <div className="pt-1 text-[10px] text-slate-400">Dashed ring = 70% benchmark</div>
+                </div>
               </div>
             );
           })()}
@@ -1227,24 +1273,50 @@ export const StudentAnalytics20Charts: React.FC<StudentAnalytics20ChartsProps> =
         <ChartCard
           index={16}
           title="Knowledge Retention Over Time"
-          subtitle="Cumulative passing rate and score retention across sequential attempts"
+          subtitle="Cumulative passing rate and attempt mastery across chronological quizzes"
           isEmpty={fQuizzes.length === 0}
           emptyMessage="Submit sequential verification quizzes to track knowledge retention."
         >
           {(() => {
-            const passed = fQuizzes.filter((q) => q.passed).length;
-            const passRate = Math.round((passed / Math.max(1, fQuizzes.length)) * 100);
+            const ordered = [...fQuizzes].reverse();
+            let cumPass = 0;
+            const series = ordered.map((q, idx) => {
+              if (q.passed) cumPass++;
+              return {
+                idx: idx + 1,
+                cumRate: Math.round((cumPass / (idx + 1)) * 100),
+                score: Number(q.percentageScore ?? q.percentage ?? 0),
+              };
+            });
+            const passRate = series[series.length - 1]?.cumRate ?? 0;
+            const W = 280;
+            const H = 100;
+            const padX = 16;
+            const padY = 12;
+            const pts = series
+              .map((s, i) => {
+                const x = series.length === 1 ? W / 2 : padX + (i / (series.length - 1)) * (W - padX * 2);
+                const y = H - padY - (s.cumRate / 100) * (H - padY * 2);
+                return { x, y, ...s };
+              });
+            const poly = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
             return (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-700">Verified Concept Retention Rate</span>
-                  <span className="text-lg font-bold text-emerald-600 tabular-nums">{passRate}%</span>
+              <div className="space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Cumulative Concept Retention</span>
+                  <span className="text-base font-bold text-emerald-600 tabular-nums">{passRate}%</span>
                 </div>
-                <div className="h-5 w-full bg-rose-100 rounded-xl overflow-hidden flex">
-                  <div className="h-full bg-emerald-600" style={{ width: `${passRate}%` }} />
-                </div>
-                <div className="flex justify-between text-xs text-slate-600">
-                  <span className="tabular-nums">Mastered Attempts: <strong>{passed}</strong></span>
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-28 bg-slate-50 rounded-xl border border-slate-100">
+                  <line x1={padX} y1={H - padY - 0.7 * (H - padY * 2)} x2={W - padX} y2={H - padY - 0.7 * (H - padY * 2)} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="3 3" />
+                  {pts.length > 1 && (
+                    <polyline fill="none" stroke="#059669" strokeWidth="2.2" points={poly} strokeLinecap="round" strokeLinejoin="round" />
+                  )}
+                  {pts.map((p) => (
+                    <circle key={p.idx} cx={p.x} cy={p.y} r="3.5" fill="#059669" stroke="#ffffff" strokeWidth="1.5" />
+                  ))}
+                </svg>
+                <div className="flex justify-between text-[11px] text-slate-600">
+                  <span className="tabular-nums">Mastered Attempts: <strong>{cumPass}</strong></span>
                   <span className="tabular-nums">Total Attempts: <strong>{fQuizzes.length}</strong></span>
                 </div>
               </div>
@@ -1255,8 +1327,8 @@ export const StudentAnalytics20Charts: React.FC<StudentAnalytics20ChartsProps> =
         {/* CHART 17: Assessment Score Variance (Box Plot / Quartile Summary) */}
         <ChartCard
           index={17}
-          title="Assessment Score Variance"
-          subtitle="Minimum, median, average, and peak quiz score distribution"
+          title="Assessment Score Variance (Box Plot)"
+          subtitle="Min–Max whiskers, Q1–Q3 IQR box, median bar & mean marker"
           isEmpty={fQuizzes.length === 0}
           emptyMessage="Complete verification quizzes to analyze score variance."
         >
@@ -1266,18 +1338,34 @@ export const StudentAnalytics20Charts: React.FC<StudentAnalytics20ChartsProps> =
               .sort((a, b) => a - b);
             const minScore = scores[0] ?? 0;
             const maxScore = scores[scores.length - 1] ?? 0;
-            const mid = scores[Math.floor(scores.length / 2)] ?? 0;
+            const q1 = scores[Math.floor(scores.length * 0.25)] ?? minScore;
+            const mid = scores[Math.floor(scores.length * 0.5)] ?? minScore;
+            const q3 = scores[Math.floor(scores.length * 0.75)] ?? maxScore;
+            const sx = (val: number) => 16 + (Math.min(100, Math.max(0, val)) / 100) * 248;
             return (
-              <div className="space-y-4 text-xs">
-                <div className="relative h-6 bg-slate-100 rounded-lg flex items-center px-2">
-                  <div
-                    className="h-3 bg-blue-600 rounded"
-                    style={{
-                      marginLeft: `${minScore}%`,
-                      width: `${Math.max(4, maxScore - minScore)}%`,
-                    }}
+              <div className="space-y-3 text-xs">
+                <svg viewBox="0 0 280 56" className="w-full h-14 bg-slate-50 rounded-xl border border-slate-100">
+                  <line x1={sx(0)} y1="28" x2={sx(100)} y2="28" stroke="#e2e8f0" strokeWidth="1" />
+                  <line x1={sx(minScore)} y1="28" x2={sx(maxScore)} y2="28" stroke="#475569" strokeWidth="1.5" />
+                  <line x1={sx(minScore)} y1="18" x2={sx(minScore)} y2="38" stroke="#475569" strokeWidth="2" />
+                  <line x1={sx(maxScore)} y1="18" x2={sx(maxScore)} y2="38" stroke="#475569" strokeWidth="2" />
+                  <rect
+                    x={sx(q1)}
+                    y="14"
+                    width={Math.max(4, sx(q3) - sx(q1))}
+                    height="28"
+                    rx="4"
+                    fill="#3b82f6"
+                    fillOpacity="0.25"
+                    stroke="#2563eb"
+                    strokeWidth="1.8"
                   />
-                </div>
+                  <line x1={sx(mid)} y1="14" x2={sx(mid)} y2="42" stroke="#1d4ed8" strokeWidth="2.5" />
+                  <polygon
+                    points={`${sx(avgQuizScore)},22 ${sx(avgQuizScore) + 5},28 ${sx(avgQuizScore)},34 ${sx(avgQuizScore) - 5},28`}
+                    fill="#059669"
+                  />
+                </svg>
                 <div className="grid grid-cols-4 gap-2 text-center">
                   <div className="p-2 bg-slate-50 rounded-lg">
                     <div className="text-[10px] text-slate-500">Min</div>
@@ -1353,6 +1441,11 @@ export const StudentAnalytics20Charts: React.FC<StudentAnalytics20ChartsProps> =
           emptyMessage="No study events recorded in the past 28 days yet."
         >
           <div className="space-y-2">
+            <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-semibold text-slate-400">
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+                <span key={i}>{d}</span>
+              ))}
+            </div>
             <div className="grid grid-cols-7 gap-1.5">
               {streakDays.map((cell) => (
                 <div
@@ -1370,12 +1463,17 @@ export const StudentAnalytics20Charts: React.FC<StudentAnalytics20ChartsProps> =
                 </div>
               ))}
             </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>28 days ago</span>
+            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
               <span className="font-semibold text-emerald-700 tabular-nums">
-                {streakDays.filter((d) => d.count > 0).length} active study days
+                {streakDays.filter((d) => d.count > 0).length} active days
               </span>
-              <span>Today</span>
+              <div className="flex items-center gap-1">
+                <span>Less</span>
+                <span className="w-3 h-3 rounded-xs bg-slate-50 border border-slate-200" />
+                <span className="w-3 h-3 rounded-xs bg-emerald-100 border border-emerald-300" />
+                <span className="w-3 h-3 rounded-xs bg-emerald-600 border border-emerald-700" />
+                <span>More</span>
+              </div>
             </div>
           </div>
         </ChartCard>

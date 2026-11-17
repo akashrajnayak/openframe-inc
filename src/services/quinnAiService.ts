@@ -7,8 +7,13 @@ import {
   YouTubeVideoRecommendation,
   TeacherEvaluationRubricScores,
   AiLearningPath,
+  StudentProfile,
+  MarketplaceFilterParams,
+  QuinnDiscoveryResponse,
+  QaStructuredResult,
 } from '../types';
 import { youtubeVideoService } from './youtubeVideoService';
+import { parseEducationalIntent } from '../utils/searchIntelligence';
 
 /**
  * Quinn AI - Educational Intelligence Client Service
@@ -665,6 +670,151 @@ export class QuinnAiService {
       ],
       maxMarks: 100,
       difficultyLevel: 'Intermediate',
+    };
+  }
+
+  async generatePracticeQuestions(params: {
+    courseTitle: string;
+    lessonTopic: string;
+    language?: string;
+    objectives?: string[];
+  }): Promise<Array<{ question: string; hint: string; sampleAnswer: string; difficulty: string }>> {
+    try {
+      const res = await fetch('/api/quinn/practice-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.questions) && data.questions.length > 0) {
+          return data.questions;
+        }
+      }
+    } catch {
+      // fallback below
+    }
+    const topic = params.lessonTopic || params.courseTitle;
+    return [
+      {
+        question: `Explain the core workflow and primary outcome of "${topic}".`,
+        hint: 'Focus on inputs, transformations, and verification.',
+        sampleAnswer: `${topic} transforms structured inputs into reliable, verifiable outputs.`,
+        difficulty: 'Basic',
+      },
+      {
+        question: `Describe one common error in "${topic}" and how you validate against it.`,
+        hint: 'Consider edge cases and boundary assumptions.',
+        sampleAnswer: 'Missing validation on assumptions; run clean unit/sanity checks against known examples.',
+        difficulty: 'Intermediate',
+      },
+    ];
+  }
+
+  async recommendCategory(params: {
+    title: string;
+    description: string;
+    availableCategories?: string[];
+  }): Promise<{ primaryCategory: string; subcategory: string; additionalCategories: string[]; reason: string }> {
+    try {
+      const res = await fetch('/api/quinn/recommend-category', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {
+      // fallback below
+    }
+    return {
+      primaryCategory: params.availableCategories?.[0] || 'Artificial Intelligence',
+      subcategory: params.title.slice(0, 40) || 'Applied Fundamentals',
+      additionalCategories: [params.availableCategories?.[0] || 'Artificial Intelligence'],
+      reason: 'Fallback keyword classification.',
+    };
+  }
+
+  async discoverAndRecommend(params: {
+    query: string;
+    studentProfile?: Partial<StudentProfile> | null;
+    filters?: Partial<MarketplaceFilterParams>;
+    maxPerGroup?: number;
+  }): Promise<QuinnDiscoveryResponse> {
+    try {
+      const res = await fetch('/api/quinn/discover-and-recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (res.ok) {
+        return (await res.json()) as QuinnDiscoveryResponse;
+      }
+    } catch (err) {
+      console.warn('discoverAndRecommend network fallback:', err);
+    }
+
+    const intent = parseEducationalIntent(params.query || '', params.studentProfile);
+    const topic = intent.desiredSkill || intent.cleanedQuery || 'Core Foundations';
+    return {
+      parsedIntent: intent,
+      recommendationGroups: [],
+      youtubeResources: youtubeVideoService.getVideosForCourse(topic, intent.primarySubject || 'Education', topic),
+      relatedSkills: [topic, 'Communication Skills', 'Problem Solving'],
+      totalMatchedCourses: 0,
+      youtubeSource: 'curated_library',
+      roadmap: {
+        id: `roadmap-${Date.now().toString(36)}`,
+        topic,
+        targetOutcome: `Build structured mastery in ${topic}`,
+        educationContext: intent.degreeOrClass || intent.educationLevelLabel || 'Self-Paced',
+        totalEstimatedDuration: '8 Weeks · Self-Paced',
+        stages: [],
+        nonDegreeDisclaimer: 'Self-paced OpenFrame Skill Roadmap — not an accredited university degree.',
+        generatedBy: 'structured_engine',
+        createdAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  async askQuinnQa(params: {
+    question: string;
+    studentProfile?: Partial<StudentProfile> | null;
+    educationContext?: string;
+    language?: string;
+  }): Promise<QaStructuredResult> {
+    try {
+      const res = await fetch('/api/quinn/qa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (res.ok) {
+        return (await res.json()) as QaStructuredResult;
+      }
+    } catch (err) {
+      console.warn('askQuinnQa network fallback:', err);
+    }
+
+    const intent = parseEducationalIntent(params.question || '', params.studentProfile);
+    const topic = intent.desiredSkill || intent.primarySubject || params.question;
+    return {
+      question: params.question,
+      subject: intent.primarySubject || 'General Studies',
+      topic,
+      educationContext: params.educationContext || intent.degreeOrClass || 'Learner',
+      language: params.language || intent.preferredLanguage || 'English',
+      answer: `${topic} focuses on understanding core principles, structured examples, and practical application steps.`,
+      examples: [`Apply ${topic} inside a small worked example before solving larger problems.`],
+      keyTakeaways: [`Understand key definitions of ${topic}`, `Practice actively with short verification quizzes.`],
+      relatedConcepts: [`${topic} Basics`, 'Applied Case Analysis'],
+      recommendedCourses: [],
+      youtubeVideos: youtubeVideoService.getVideosForCourse(topic, intent.primarySubject || 'Education', topic),
+      suggestedLearningPathTitle: `${topic} Study Path`,
+      suggestedLearningPathSteps: [`1. Clarify core terms in ${topic}`, `2. Watch guided videos`, `3. Practice & enroll`],
+      practiceQuiz: [],
+      generatedBy: 'structured_engine',
     };
   }
 }

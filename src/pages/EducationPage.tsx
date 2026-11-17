@@ -28,7 +28,6 @@ import {
   ExternalLink,
   ShieldCheck,
   HelpCircle,
-  BarChart3,
   Lightbulb,
   Check,
   Building,
@@ -281,14 +280,6 @@ export const EducationPage: React.FC = () => {
                 </Link>
 
                 <Link
-                  to="/animation-course"
-                  className="px-5 py-3.5 rounded-xl bg-gradient-to-r from-indigo-600/90 to-sky-600/90 hover:from-indigo-500 hover:to-sky-500 text-white border border-sky-400/40 font-bold text-sm sm:text-base transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm shadow-lg"
-                >
-                  <BarChart3 className="w-4 h-4 text-sky-200" />
-                  <span>Swift UI Animations &amp; Charts (ZIP)</span>
-                </Link>
-
-                <Link
                   to="/chatbot"
                   className="px-5 py-3.5 rounded-xl bg-gradient-to-r from-cyan-600/80 to-blue-700/80 hover:from-cyan-500 hover:to-blue-600 text-white border border-cyan-400/40 font-bold text-sm sm:text-base transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm"
                 >
@@ -389,37 +380,6 @@ export const EducationPage: React.FC = () => {
       {/* ======================================================== */}
       <section className="py-20 bg-slate-900 text-white border-t border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="mb-12 rounded-2xl bg-gradient-to-r from-[#071326] via-[#0F2042] to-[#13294d] border border-cyan-500/40 p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-left">
-            <div className="space-y-1.5">
-              <div className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                New Course Release · Source ZIP + Live Interactive Lab
-              </div>
-              <h3 className="text-xl font-extrabold text-white">
-                Swift UI Animations, 12 Graphs &amp; Charts Course (Ramotion Source Pack)
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl">
-                Access all 5 downloadable ZIP files, inspect AppDelegate.swift and component starter kits, and test 12 animated charts and 17 UI animations directly in your browser.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 shrink-0">
-              <a
-                href="/downloads/animation-course/swift-ui-animation-components-master-pack.zip"
-                download
-                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download Course ZIP</span>
-              </a>
-              <Link
-                to="/animation-course"
-                className="px-4 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-200 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
-              >
-                <BarChart3 className="w-4 h-4" />
-                <span>Open Interactive Studio</span>
-              </Link>
-            </div>
-          </div>
-
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-16">
             <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-400 text-xs font-semibold uppercase tracking-wider">
               <span>9 Comprehensive Learning Pillars</span>

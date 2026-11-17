@@ -25,7 +25,7 @@ import {
   Sparkles,
   X,
   LogOut,
-  ExternalLink
+  ExternalLink,
 } from 'lucide-react';
 import { AdminRole } from '../../types';
 import { Link } from '../../router/RouterContext';

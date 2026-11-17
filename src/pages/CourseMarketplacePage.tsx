@@ -51,10 +51,19 @@ import {
   MarketplaceAutocompleteSuggestion,
   MarketplaceCourseType,
   CourseContentType,
-  AiLearningPath
+  AiLearningPath,
+  EducationCategoryCode,
+  QuinnDiscoveryResponse
 } from '../types';
 import { CORPORATE_CONTENT_TYPES } from '../data/corporateTrainingTaxonomy';
+import {
+  EDUCATION_CLASSIFICATION_CATEGORIES,
+  EDUCATION_CATEGORY_BY_CODE,
+  getAllProgrammesForCategory
+} from '../data/educationClassificationData';
 import { StudentRegistrationModal } from '../components/common/StudentRegistrationModal';
+import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
+import { LearningRoadmapPanel } from '../components/discovery/LearningRoadmapPanel';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
@@ -64,6 +73,7 @@ import { quinnAiService } from '../services/quinnAiService';
 import {
   UNIVERSAL_12_CATEGORIES,
   EXCEL_TOPIC_GROUPS,
+  POPULAR_SEARCH_TOPICS,
   detectQueryLanguage,
   normalizeAndExpandQuery,
   getRecentSearches,
@@ -73,7 +83,7 @@ import {
 
 export const CourseMarketplacePage: React.FC = () => {
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, studentProfile } = useAuth();
 
   // Paginated courses state (never loads all 15k–1M records at once)
   const [courses, setCourses] = useState<MarketplaceCourse[]>([]);
@@ -88,13 +98,14 @@ export const CourseMarketplacePage: React.FC = () => {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [savingFavId, setSavingFavId] = useState<string | null>(null);
 
-  // Registration Pop-up Modal State
+  // Generic Admissions Modal vs Course Checkout & Enrollment Modal
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
   const [regModalData, setRegModalData] = useState<{ title: string; id: string; category: string }>({
     title: 'General Programme',
     id: '',
     category: 'Information Technology'
   });
+  const [enrollModalCourse, setEnrollModalCourse] = useState<MarketplaceCourse | null>(null);
 
   // Video Player Pop-up Modal State
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
@@ -119,18 +130,35 @@ export const CourseMarketplacePage: React.FC = () => {
   const [selectedPricingTier, setSelectedPricingTier] = useState('All');
   const [selectedLevel, setSelectedLevel] = useState('All');
   const [selectedDuration, setSelectedDuration] = useState('All');
+  const [selectedInstructor, setSelectedInstructor] = useState('');
+  const [selectedChannel, setSelectedChannel] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [publicationDate, setPublicationDate] = useState<'all' | 'week' | 'month' | 'year'>('all');
   const [certificateOnly, setCertificateOnly] = useState(false);
   const [sortBy, setSortBy] = useState<'popular' | 'rating' | 'price_low' | 'price_high' | 'newest'>('popular');
 
+  // Education Classification (A–J), Degree, Access Type & Unified Discovery State
+  const [selectedEducationLevel, setSelectedEducationLevel] = useState<'All' | EducationCategoryCode>('All');
+  const [selectedDegreeProgramme, setSelectedDegreeProgramme] = useState('All');
+  const [selectedAccessType, setSelectedAccessType] = useState<'all' | 'free' | 'paid'>('all');
+  const [unifiedViewTab, setUnifiedViewTab] = useState<
+    'all_results' | 'openframe_courses' | 'youtube_videos' | 'learning_paths' | 'related_skills'
+  >('all_results');
+  const [discoveryResult, setDiscoveryResult] = useState<QuinnDiscoveryResponse | null>(null);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+
   // Search Intelligence, Excel Pills, Live YouTube & AI Course Organizer State
   const [recentSearches, setRecentSearches] = useState<string[]>(() => getRecentSearches());
+  const [recommendedQuickCourses, setRecommendedQuickCourses] = useState<MarketplaceCourse[]>([]);
   const [selectedExcelTopic, setSelectedExcelTopic] = useState('All Excel Topics');
   const [liveYoutubeEnabled, setLiveYoutubeEnabled] = useState(true);
   const [liveYoutubeResults, setLiveYoutubeResults] = useState<any[]>([]);
   const [liveYoutubeLoading, setLiveYoutubeLoading] = useState(false);
+  const [liveYoutubeLoadingMore, setLiveYoutubeLoadingMore] = useState(false);
+  const [liveYoutubePageToken, setLiveYoutubePageToken] = useState<string | null>(null);
+  const [liveYoutubeError, setLiveYoutubeError] = useState<string | null>(null);
   const [liveYoutubeNote, setLiveYoutubeNote] = useState<string | null>(null);
+  const [activeYouTubeQuery, setActiveYouTubeQuery] = useState('');
   const [aiPathOpen, setAiPathOpen] = useState(false);
   const [aiPathLoading, setAiPathLoading] = useState(false);
   const [aiPathData, setAiPathData] = useState<AiLearningPath | null>(null);
@@ -139,7 +167,155 @@ export const CourseMarketplacePage: React.FC = () => {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
 
-  // Parse URL query params on route change (e.g., from Homepage Hero Search)
+  const runIntelligentDiscovery = async (
+    rawQuery: string,
+    opts?: {
+      levelOverride?: 'All' | EducationCategoryCode;
+      degreeOverride?: string;
+      accessOverride?: 'all' | 'free' | 'paid';
+      langOverride?: string;
+    }
+  ) => {
+    const q = rawQuery.trim();
+    const lvl = opts?.levelOverride ?? selectedEducationLevel;
+    const deg = opts?.degreeOverride ?? selectedDegreeProgramme;
+    const access = opts?.accessOverride ?? selectedAccessType;
+    const lang = opts?.langOverride ?? selectedLanguage;
+    if (q.length < 2 && lvl === 'All' && deg === 'All') {
+      setDiscoveryResult(null);
+      return;
+    }
+
+    setDiscoveryLoading(true);
+    try {
+      const effectiveQuery = q.length >= 2 ? q : deg !== 'All' ? deg : EDUCATION_CATEGORY_BY_CODE[lvl as EducationCategoryCode]?.title || 'Courses';
+      const resp = await quinnAiService.discoverAndRecommend({
+        query: effectiveQuery,
+        studentProfile: studentProfile || undefined,
+        filters: {
+          educationLevel: lvl !== 'All' ? lvl : undefined,
+          degree: deg !== 'All' ? deg : undefined,
+          accessType: access,
+          language: lang !== 'All' ? lang : undefined,
+        },
+      });
+      setDiscoveryResult(resp);
+
+      lmsService
+        .logDiscoveryAnalyticsEvent({
+          userId: currentUser?.uid,
+          eventType: 'search',
+          query: effectiveQuery,
+          educationLevelCode: resp.parsedIntent.educationLevelCode || (lvl !== 'All' ? lvl : undefined),
+          degreeOrClass: resp.parsedIntent.degreeOrClass || (deg !== 'All' ? deg : undefined),
+          subject: resp.parsedIntent.desiredSkill || resp.parsedIntent.primarySubject,
+        })
+        .catch(() => {});
+    } catch {
+      // Keep catalog responsive on fallback
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  };
+
+  // Explicit YouTube Data API v3 Search (ONLY on explicit submit, suggestion click, chip/category click, URL load, or Retry/Load More — NEVER on keystrokes)
+  const runLiveYouTubeSearch = async (
+    rawQuery: string,
+    options?: {
+      pageToken?: string | null;
+      append?: boolean;
+      languageOverride?: string;
+      channelOverride?: string;
+      categoryOverride?: string;
+    }
+  ) => {
+    const q = rawQuery.trim();
+    const ch = (options?.channelOverride ?? selectedChannel).trim();
+    if (!liveYoutubeEnabled || (q.length < 2 && !ch)) {
+      if (!options?.append) {
+        setLiveYoutubeResults([]);
+        setLiveYoutubePageToken(null);
+        setLiveYoutubeError(null);
+        setLiveYoutubeNote(null);
+        setActiveYouTubeQuery('');
+      }
+      return;
+    }
+
+    const isAppend = Boolean(options?.append && options?.pageToken);
+    if (isAppend) {
+      setLiveYoutubeLoadingMore(true);
+    } else {
+      setLiveYoutubeLoading(true);
+      setLiveYoutubeError(null);
+      setActiveYouTubeQuery(q || ch);
+    }
+
+    try {
+      const detected = detectQueryLanguage(q);
+      const langBase = options?.languageOverride ?? selectedLanguage;
+      const langParam = langBase !== 'All' ? langBase : detected.label;
+      const queryToSend =
+        selectedExcelTopic !== 'All Excel Topics' && q.toLowerCase().includes('excel')
+          ? `${q} ${selectedExcelTopic}`
+          : q;
+
+      const res = await fetch('/api/youtube/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: queryToSend,
+          category: (options?.categoryOverride ?? selectedCategory) !== 'All' ? (options?.categoryOverride ?? selectedCategory) : '',
+          language: langParam,
+          channel: ch || undefined,
+          duration: selectedDuration !== 'All' ? selectedDuration : 'any',
+          publicationDate,
+          searchType: courseTypeFilter === 'youtube_playlist' ? 'playlist' : 'video',
+          pageToken: options?.pageToken || undefined,
+          maxResults: 6,
+          includePlaylists: true,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Unable to reach YouTube search gateway.');
+      }
+
+      const data = await res.json();
+      const incoming = Array.isArray(data.videos) ? data.videos : [];
+      setLiveYoutubeResults((prev) => {
+        if (!isAppend) return incoming;
+        const seen = new Set(prev.map((item) => item.videoId || item.id));
+        return [...prev, ...incoming.filter((item: any) => !seen.has(item.videoId || item.id))];
+      });
+      setLiveYoutubePageToken(data.nextPageToken || null);
+      setLiveYoutubeError(data.retryable && data.error ? data.error : null);
+      setLiveYoutubeNote(data.notice || null);
+
+      if (!isAppend && q.length >= 2) {
+        setRecentSearches(saveRecentSearch(q));
+        if (currentUser?.uid) {
+          lmsService
+            .recordSearchHistory({
+              userId: currentUser.uid,
+              query: q,
+              detectedLanguage: detected.label,
+              category: selectedCategory !== 'All' ? selectedCategory : undefined,
+              resultCount: incoming.length,
+            })
+            .catch(() => {});
+        }
+      }
+    } catch (err: any) {
+      if (!isAppend) setLiveYoutubeResults([]);
+      setLiveYoutubeError(err?.message || 'YouTube Data API request failed.');
+    } finally {
+      setLiveYoutubeLoading(false);
+      setLiveYoutubeLoadingMore(false);
+    }
+  };
+
+  // Parse URL query params on route change (e.g., from Homepage Search or A–J Taxonomy Cards)
   useEffect(() => {
     const qIdx = router.currentPath.indexOf('?');
     if (qIdx === -1) return;
@@ -148,6 +324,24 @@ export const CourseMarketplacePage: React.FC = () => {
     const catParam = sp.get('cat') || sp.get('category');
     const langParam = sp.get('lang');
     const groupParam = sp.get('group');
+    const levelParam = sp.get('level') as EducationCategoryCode | null;
+    const degreeParam = sp.get('degree');
+    const viewParam = sp.get('view');
+    const cleanLang =
+      langParam && langParam !== 'auto' && langParam !== 'Auto-Detect Language'
+        ? langParam.replace(/\s*\(.*\)$/, '')
+        : undefined;
+
+    if (levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam]) {
+      setSelectedEducationLevel(levelParam);
+    }
+    if (degreeParam) {
+      setSelectedDegreeProgramme(degreeParam);
+    }
+    if (viewParam === 'roadmap') {
+      setUnifiedViewTab('learning_paths');
+    }
+
     if (qParam !== null) {
       setSearchQuery(qParam);
       if (/\bexcel\b/i.test(qParam)) {
@@ -155,14 +349,27 @@ export const CourseMarketplacePage: React.FC = () => {
       }
       if (qParam.trim().length >= 2) {
         setRecentSearches(saveRecentSearch(qParam));
+        runLiveYouTubeSearch(qParam, {
+          languageOverride: cleanLang,
+          categoryOverride: catParam || undefined,
+        });
+        runIntelligentDiscovery(qParam, {
+          levelOverride: levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam] ? levelParam : undefined,
+          degreeOverride: degreeParam || undefined,
+          langOverride: cleanLang,
+        });
       }
+    } else if ((levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam]) || degreeParam) {
+      runIntelligentDiscovery('', {
+        levelOverride: levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam] ? levelParam : 'All',
+        degreeOverride: degreeParam || 'All',
+        langOverride: cleanLang,
+      });
     }
+
     if (catParam) setSelectedCategory(catParam);
     if (groupParam) setSelectedGroup(groupParam);
-    if (langParam && langParam !== 'auto' && langParam !== 'Auto-Detect Language') {
-      const cleanLang = langParam.replace(/\s*\(.*\)$/, '');
-      setSelectedLanguage(cleanLang);
-    }
+    if (cleanLang) setSelectedLanguage(cleanLang);
   }, [router.currentPath]);
 
   // Mobile filters drawer
@@ -180,11 +387,13 @@ export const CourseMarketplacePage: React.FC = () => {
     let active = true;
     Promise.all([
       marketplaceService.getLiveMarketplaceCounters().catch(() => null),
-      marketplaceService.getCategories().catch(() => [])
-    ]).then(([liveStats, catList]) => {
+      marketplaceService.getCategories().catch(() => []),
+      marketplaceService.filterCourses({ tab: 'recommended', page: 1, pageSize: 4 }).catch(() => ({ courses: [] })),
+    ]).then(([liveStats, catList, recRes]) => {
       if (!active) return;
       if (liveStats) setCounters(liveStats);
       if (catList && catList.length > 0) setCategories(catList);
+      if (recRes?.courses) setRecommendedQuickCourses(recRes.courses);
     });
     return () => {
       active = false;
@@ -265,6 +474,9 @@ export const CourseMarketplacePage: React.FC = () => {
         category: selectedCategory,
         subcategory: selectedSubcategory !== 'All' ? selectedSubcategory : undefined,
         categoryGroup: selectedGroup,
+        educationLevel: selectedEducationLevel !== 'All' ? selectedEducationLevel : undefined,
+        degree: selectedDegreeProgramme !== 'All' ? selectedDegreeProgramme : undefined,
+        accessType: selectedAccessType,
         courseType: courseTypeFilter,
         contentType: contentTypeFilter,
         libraryCollection: libraryCollectionFilter,
@@ -272,6 +484,8 @@ export const CourseMarketplacePage: React.FC = () => {
         pricingTier: selectedPricingTier,
         level: selectedLevel,
         duration: selectedDuration,
+        instructor: selectedInstructor.trim() || undefined,
+        channel: selectedChannel.trim() || undefined,
         status: selectedStatus,
         publicationDate,
         certificateOnly,
@@ -302,6 +516,9 @@ export const CourseMarketplacePage: React.FC = () => {
         category: selectedCategory,
         subcategory: selectedSubcategory !== 'All' ? selectedSubcategory : undefined,
         categoryGroup: selectedGroup,
+        educationLevel: selectedEducationLevel !== 'All' ? selectedEducationLevel : undefined,
+        degree: selectedDegreeProgramme !== 'All' ? selectedDegreeProgramme : undefined,
+        accessType: selectedAccessType,
         courseType: courseTypeFilter,
         contentType: contentTypeFilter,
         libraryCollection: libraryCollectionFilter,
@@ -309,6 +526,8 @@ export const CourseMarketplacePage: React.FC = () => {
         pricingTier: selectedPricingTier,
         level: selectedLevel,
         duration: selectedDuration,
+        instructor: selectedInstructor.trim() || undefined,
+        channel: selectedChannel.trim() || undefined,
         status: selectedStatus,
         publicationDate,
         certificateOnly,
@@ -340,6 +559,9 @@ export const CourseMarketplacePage: React.FC = () => {
     selectedCategory,
     selectedSubcategory,
     selectedGroup,
+    selectedEducationLevel,
+    selectedDegreeProgramme,
+    selectedAccessType,
     courseTypeFilter,
     contentTypeFilter,
     libraryCollectionFilter,
@@ -347,65 +569,13 @@ export const CourseMarketplacePage: React.FC = () => {
     selectedPricingTier,
     selectedLevel,
     selectedDuration,
+    selectedInstructor,
+    selectedChannel,
     selectedStatus,
     publicationDate,
     certificateOnly,
     sortBy
   ]);
-
-  // Live YouTube Data API v3 Search & Search History Telemetry (debounced when searchQuery >= 3 chars)
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (!liveYoutubeEnabled || q.length < 3) {
-      setLiveYoutubeResults([]);
-      setLiveYoutubeNote(null);
-      return;
-    }
-    let cancelled = false;
-    setLiveYoutubeLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const detected = detectQueryLanguage(q);
-        const langParam = selectedLanguage !== 'All' ? selectedLanguage : detected.label;
-        const res = await fetch('/api/youtube/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: selectedExcelTopic !== 'All Excel Topics' && q.toLowerCase().includes('excel')
-              ? `${q} ${selectedExcelTopic}`
-              : q,
-            language: langParam,
-            maxResults: 6,
-            includePlaylists: true
-          })
-        });
-        if (!cancelled && res.ok) {
-          const data = await res.json();
-          setLiveYoutubeResults(Array.isArray(data.videos) ? data.videos : []);
-          setLiveYoutubeNote(data.notice || null);
-          setRecentSearches(saveRecentSearch(q));
-          if (currentUser?.uid) {
-            lmsService.recordSearchHistory({
-              userId: currentUser.uid,
-              query: q,
-              detectedLanguage: detected.label,
-              category: selectedCategory !== 'All' ? selectedCategory : undefined,
-              resultCount: (data.videos || []).length,
-            }).catch(() => {});
-          }
-        }
-      } catch {
-        if (!cancelled) setLiveYoutubeResults([]);
-      } finally {
-        if (!cancelled) setLiveYoutubeLoading(false);
-      }
-    }, 450);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [searchQuery, selectedLanguage, selectedExcelTopic, liveYoutubeEnabled]);
 
   const handleGenerateAiPath = async (overrideCount?: 3 | 6 | 9) => {
     const topic = searchQuery.trim() || (selectedCategory !== 'All' ? selectedCategory : 'Applied Data & AI Skills');
@@ -480,6 +650,11 @@ export const CourseMarketplacePage: React.FC = () => {
     setSelectedCategory('All');
     setSelectedSubcategory('All');
     setSelectedGroup('All');
+    setSelectedEducationLevel('All');
+    setSelectedDegreeProgramme('All');
+    setSelectedAccessType('all');
+    setUnifiedViewTab('all_results');
+    setDiscoveryResult(null);
     setCourseTypeFilter('all');
     setContentTypeFilter('all');
     setLibraryCollectionFilter('all');
@@ -487,17 +662,26 @@ export const CourseMarketplacePage: React.FC = () => {
     setSelectedPricingTier('All');
     setSelectedLevel('All');
     setSelectedDuration('All');
+    setSelectedInstructor('');
+    setSelectedChannel('');
     setSelectedStatus('All');
     setPublicationDate('all');
     setCertificateOnly(false);
     setSelectedExcelTopic('All Excel Topics');
     setSortBy('popular');
+    setLiveYoutubeResults([]);
+    setLiveYoutubePageToken(null);
+    setLiveYoutubeError(null);
+    setActiveYouTubeQuery('');
   };
 
   const hasActiveFilters =
     selectedCategory !== 'All' ||
     selectedSubcategory !== 'All' ||
     selectedGroup !== 'All' ||
+    selectedEducationLevel !== 'All' ||
+    selectedDegreeProgramme !== 'All' ||
+    selectedAccessType !== 'all' ||
     courseTypeFilter !== 'all' ||
     contentTypeFilter !== 'all' ||
     libraryCollectionFilter !== 'all' ||
@@ -505,6 +689,8 @@ export const CourseMarketplacePage: React.FC = () => {
     selectedPricingTier !== 'All' ||
     selectedLevel !== 'All' ||
     selectedDuration !== 'All' ||
+    selectedInstructor.trim().length > 0 ||
+    selectedChannel.trim().length > 0 ||
     selectedStatus !== 'All' ||
     publicationDate !== 'all' ||
     certificateOnly ||
@@ -621,14 +807,26 @@ export const CourseMarketplacePage: React.FC = () => {
     if (s.type === 'category') {
       setSelectedCategory(s.category || s.label);
       setSearchQuery('');
+      runLiveYouTubeSearch(s.category || s.label, { categoryOverride: s.category || s.label });
     } else if (s.type === 'subcategory') {
       setSelectedSubcategory(s.label);
       setSearchQuery('');
+      runLiveYouTubeSearch(s.label);
     } else if (s.type === 'language') {
       setSelectedLanguage(s.label);
       setSearchQuery('');
+    } else if (s.type === 'channel') {
+      setSelectedChannel(s.label);
+      setSearchQuery('');
+      runLiveYouTubeSearch(s.label, { channelOverride: s.label });
+    } else if (s.type === 'instructor') {
+      setSelectedInstructor(s.label);
+      setSearchQuery('');
+      runLiveYouTubeSearch(s.label);
     } else {
       setSearchQuery(s.label);
+      runLiveYouTubeSearch(s.label);
+      runIntelligentDiscovery(s.label);
     }
     window.scrollTo({ top: 440, behavior: 'smooth' });
   };
@@ -766,101 +964,201 @@ export const CourseMarketplacePage: React.FC = () => {
                 </div>
 
                 {/* Input Container */}
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cyan-400" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onFocus={() => setIsSearchFocused(true)}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setIsSearchFocused(true);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') setIsSearchFocused(false);
-                      if (e.key === 'Enter') {
-                        setIsSearchFocused(false);
-                        window.scrollTo({ top: 440, behavior: 'smooth' });
-                      }
-                    }}
-                    placeholder="Search title, YouTube channel, instructor, language, or ID..."
-                    className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => {
-                        setSearchQuery('');
-                        setIsSearchFocused(false);
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setIsSearchFocused(false);
+                    if (searchQuery.trim().length >= 2 || selectedChannel.trim()) {
+                      runLiveYouTubeSearch(searchQuery);
+                      runIntelligentDiscovery(searchQuery);
+                    }
+                    window.scrollTo({ top: 440, behavior: 'smooth' });
+                  }}
+                  className="relative flex gap-2"
+                >
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cyan-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onFocus={() => setIsSearchFocused(true)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setIsSearchFocused(true);
                       }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setIsSearchFocused(false);
+                      }}
+                      placeholder="What do you want to learn today?"
+                      className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setIsSearchFocused(false);
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shrink-0 cursor-pointer"
+                  >
+                    Search
+                  </button>
 
                   {/* AUTOCOMPLETE DROPDOWN */}
                   {isSearchFocused && (
-                    <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-[#0B1E3F] border border-cyan-500/50 rounded-2xl shadow-2xl overflow-hidden divide-y divide-blue-900/60 text-left text-xs max-h-[420px] overflow-y-auto">
+                    <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-[#0B1E3F] border border-cyan-500/50 rounded-2xl shadow-2xl overflow-hidden divide-y divide-blue-900/60 text-left text-xs max-h-[440px] overflow-y-auto">
                       <div className="px-3.5 py-2 bg-[#071326] flex items-center justify-between text-[11px]">
                         <span className="font-bold text-cyan-300">
-                          {isAutocompleting ? 'Searching catalog index...' : 'Live Catalog Suggestions'}
+                          {isAutocompleting
+                            ? 'Searching catalog index...'
+                            : searchQuery.trim().length < 2
+                            ? 'Popular, Recent & Recommended Courses'
+                            : 'Live Catalog Suggestions'}
                         </span>
                         <span className="text-[10px] text-slate-400 tabular-nums">
-                          {autocompleteSuggestions.length} matches
+                          {searchQuery.trim().length >= 2
+                            ? `${autocompleteSuggestions.length} matches · Language: ${detectQueryLanguage(searchQuery).label}`
+                            : 'Zero YouTube calls while typing'}
                         </span>
                       </div>
 
-                      <div className="p-2 space-y-1">
-                        {autocompleteSuggestions.length === 0 && !isAutocompleting ? (
-                          <div className="p-3 text-slate-400 text-center text-[11px]">
-                            Press Enter to run full database search for &ldquo;{searchQuery}&rdquo;
-                          </div>
-                        ) : (
-                          autocompleteSuggestions.map((s, idx) => (
-                            <button
-                              key={`${s.type}-${s.id || s.label}-${idx}`}
-                              type="button"
-                              onClick={() => handleSelectSuggestion(s)}
-                              className="w-full px-3 py-2 rounded-xl hover:bg-cyan-950/70 text-left flex items-center justify-between gap-2 transition-colors cursor-pointer group"
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <span className="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-cyan-300">
-                                  {s.type === 'course' ? (
-                                    s.courseType === 'youtube_playlist' ? (
-                                      <ListVideo className="w-3.5 h-3.5" />
-                                    ) : (
-                                      <BookOpen className="w-3.5 h-3.5" />
-                                    )
-                                  ) : s.type === 'channel' ? (
-                                    <Tv className="w-3.5 h-3.5 text-rose-400" />
-                                  ) : s.type === 'instructor' ? (
-                                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                                  ) : s.type === 'language' ? (
-                                    <Globe className="w-3.5 h-3.5 text-sky-400" />
-                                  ) : (
-                                    <Tag className="w-3.5 h-3.5 text-amber-400" />
-                                  )}
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-white group-hover:text-cyan-300 truncate text-xs">
-                                    {s.label}
-                                  </div>
-                                  {s.sublabel && (
-                                    <div className="text-[10px] text-slate-400 truncate">
-                                      {s.sublabel}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">
-                                {s.type}
-                              </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
+                      {searchQuery.trim().length >= 2 && normalizeAndExpandQuery(searchQuery).correctionHint && (
+                        <div className="px-3.5 py-2 bg-blue-950/80 text-[11px] text-sky-300 font-medium">
+                          {normalizeAndExpandQuery(searchQuery).correctionHint}
+                        </div>
+                      )}
 
-                      {/* Qwen AI Assistant Quick Access */}
+                      {searchQuery.trim().length < 2 ? (
+                        <div className="p-3 space-y-3">
+                          {recentSearches.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                                Recently Searched Topics
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {recentSearches.slice(0, 6).map((rs) => (
+                                  <button
+                                    key={rs}
+                                    type="button"
+                                    onClick={() => {
+                                      setSearchQuery(rs);
+                                      setIsSearchFocused(false);
+                                      runLiveYouTubeSearch(rs);
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] cursor-pointer"
+                                  >
+                                    {rs}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] uppercase tracking-wider font-bold text-cyan-300">
+                              Popular Searches
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {POPULAR_SEARCH_TOPICS.slice(0, 8).map((pop) => (
+                                <button
+                                  key={pop}
+                                  type="button"
+                                  onClick={() => {
+                                    setSearchQuery(pop);
+                                    setIsSearchFocused(false);
+                                    runLiveYouTubeSearch(pop);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-blue-950/70 hover:bg-blue-900 border border-blue-800/70 text-sky-200 text-[11px] cursor-pointer"
+                                >
+                                  {pop}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {recommendedQuickCourses.length > 0 && (
+                            <div className="space-y-1">
+                              <div className="text-[10px] uppercase tracking-wider font-bold text-emerald-300">
+                                Recommended Courses
+                              </div>
+                              {recommendedQuickCourses.slice(0, 3).map((rc) => (
+                                <button
+                                  key={rc.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setIsSearchFocused(false);
+                                    router.navigate(`/marketplace/${rc.id}`);
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 flex items-center justify-between gap-2 text-[11px] text-white cursor-pointer"
+                                >
+                                  <span className="truncate font-medium">{rc.title}</span>
+                                  <span className="text-[10px] text-emerald-300 shrink-0">{rc.category}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-2 space-y-1">
+                          {autocompleteSuggestions.length === 0 && !isAutocompleting ? (
+                            <div className="p-3 text-slate-400 text-center text-[11px]">
+                              Press Enter or click Search to run live YouTube + catalog search for &ldquo;{searchQuery}&rdquo;
+                            </div>
+                          ) : (
+                            autocompleteSuggestions.map((s, idx) => (
+                              <button
+                                key={`${s.type}-${s.id || s.label}-${idx}`}
+                                type="button"
+                                onClick={() => handleSelectSuggestion(s)}
+                                className="w-full px-3 py-2 rounded-xl hover:bg-cyan-950/70 text-left flex items-center justify-between gap-2 transition-colors cursor-pointer group"
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span className="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-cyan-300">
+                                    {s.type === 'course' ? (
+                                      s.courseType === 'youtube_playlist' ? (
+                                        <ListVideo className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <BookOpen className="w-3.5 h-3.5" />
+                                      )
+                                    ) : s.type === 'channel' ? (
+                                      <Tv className="w-3.5 h-3.5 text-rose-400" />
+                                    ) : s.type === 'instructor' ? (
+                                      <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : s.type === 'language' ? (
+                                      <Globe className="w-3.5 h-3.5 text-sky-400" />
+                                    ) : (
+                                      <Tag className="w-3.5 h-3.5 text-amber-400" />
+                                    )}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-white group-hover:text-cyan-300 truncate text-xs">
+                                      {s.label}
+                                    </div>
+                                    {s.sublabel && (
+                                      <div className="text-[10px] text-slate-400 truncate">
+                                        {s.sublabel}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">
+                                  {s.type}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+
+                      {/* Quinn AI Assistant Quick Access */}
                       <div className="p-3 bg-gradient-to-r from-blue-950/90 to-cyan-950/90 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <Bot className="w-4 h-4 text-cyan-400 shrink-0" />
@@ -880,7 +1178,7 @@ export const CourseMarketplacePage: React.FC = () => {
                       </div>
                     </div>
                   )}
-                </div>
+                </form>
 
                 {/* Popular Quick Search Chips + Recent Searches */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
@@ -895,9 +1193,12 @@ export const CourseMarketplacePage: React.FC = () => {
                         if (chip === 'Hindi') {
                           setSelectedLanguage('Hindi');
                           setSearchQuery('');
+                          if (searchQuery.trim()) runLiveYouTubeSearch(searchQuery, { languageOverride: 'Hindi' });
                         } else {
                           setSearchQuery(chip);
                           setIsSearchFocused(false);
+                          runLiveYouTubeSearch(chip);
+                          runIntelligentDiscovery(chip);
                         }
                       }}
                       className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-cyan-950 text-slate-300 hover:text-cyan-300 border border-slate-700 hover:border-cyan-500/50 transition-colors text-[10px] cursor-pointer"
@@ -1048,6 +1349,82 @@ export const CourseMarketplacePage: React.FC = () => {
               )}
             </div>
 
+            {/* Education Level Category (A–J) Filter */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-[#123D32] block">
+                Education Level (Categories A–J)
+              </label>
+              <select
+                value={selectedEducationLevel}
+                onChange={(e) => {
+                  const val = e.target.value as 'All' | EducationCategoryCode;
+                  setSelectedEducationLevel(val);
+                  setSelectedDegreeProgramme('All');
+                  runIntelligentDiscovery(searchQuery, { levelOverride: val, degreeOverride: 'All' });
+                }}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="All">All Education Levels (LKG to PhD &amp; Skills)</option>
+                {EDUCATION_CLASSIFICATION_CATEGORIES.map((cat) => (
+                  <option key={cat.code} value={cat.code}>
+                    {cat.code}. {cat.shortTitle}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Degree / Class / Programme Filter */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                Degree / Class / Programme
+              </label>
+              <select
+                value={selectedDegreeProgramme}
+                onChange={(e) => {
+                  const deg = e.target.value;
+                  setSelectedDegreeProgramme(deg);
+                  runIntelligentDiscovery(searchQuery, { degreeOverride: deg });
+                }}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="All">All Degrees &amp; Classes</option>
+                {(selectedEducationLevel !== 'All'
+                  ? getAllProgrammesForCategory(selectedEducationLevel)
+                  : EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))
+                )
+                  .slice(0, 80)
+                  .map((prog) => (
+                    <option key={prog} value={prog}>
+                      {prog}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* Access Type Filter (Free vs Paid) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">Course Access Type</label>
+              <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl text-[11px] font-semibold">
+                {(['all', 'free', 'paid'] as const).map((acc) => (
+                  <button
+                    key={acc}
+                    type="button"
+                    onClick={() => {
+                      setSelectedAccessType(acc);
+                      runIntelligentDiscovery(searchQuery, { accessOverride: acc });
+                    }}
+                    className={`py-1.5 rounded-lg capitalize cursor-pointer transition-colors ${
+                      selectedAccessType === acc
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {acc === 'all' ? 'All' : acc === 'free' ? 'Free' : 'Paid'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Category Dropdown (Dynamic) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 block tabular-nums">
@@ -1055,7 +1432,10 @@ export const CourseMarketplacePage: React.FC = () => {
               </label>
               <select
                 value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
+                onChange={(e) => {
+                  setSelectedCategory(e.target.value);
+                  setSelectedSubcategory('All');
+                }}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="All">All Categories</option>
@@ -1065,6 +1445,51 @@ export const CourseMarketplacePage: React.FC = () => {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Subcategory Filter */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">Subcategory / Topic</label>
+              <select
+                value={selectedSubcategory}
+                onChange={(e) => setSelectedSubcategory(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="All">All Subcategories</option>
+                {Array.from(
+                  new Set(
+                    (selectedCategory !== 'All'
+                      ? categoryOptions.find((c) => c.name === selectedCategory)?.subcategories || []
+                      : categoryOptions.flatMap((c) => c.subcategories || [])
+                    ).slice(0, 60)
+                  )
+                ).map((sub) => (
+                  <option key={sub} value={sub}>{sub}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Instructor & YouTube Channel Filters */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">Instructor Name</label>
+              <input
+                type="text"
+                value={selectedInstructor}
+                onChange={(e) => setSelectedInstructor(e.target.value)}
+                placeholder="Filter by instructor..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">YouTube Channel</label>
+              <input
+                type="text"
+                value={selectedChannel}
+                onChange={(e) => setSelectedChannel(e.target.value)}
+                placeholder="e.g. MIT, freeCodeCamp..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
 
             {/* Course Format Filter */}
@@ -1221,11 +1646,371 @@ export const CourseMarketplacePage: React.FC = () => {
 
           {/* MAIN RESULTS SECTION */}
           <section className="lg:col-span-9 space-y-6 text-left">
+            {/* Unified Discovery View Switcher & Ask Q&A Bridge */}
+            <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs font-semibold">
+                {[
+                  { id: 'all_results', label: 'All Results' },
+                  { id: 'openframe_courses', label: 'OpenFrame Courses' },
+                  { id: 'youtube_videos', label: 'YouTube Videos' },
+                  { id: 'learning_paths', label: '8-Stage Learning Path' },
+                  { id: 'related_skills', label: 'Related Skills' },
+                ].map((vt) => (
+                  <button
+                    key={vt.id}
+                    type="button"
+                    onClick={() => {
+                      setUnifiedViewTab(vt.id as any);
+                      if ((vt.id === 'learning_paths' || vt.id === 'related_skills') && !discoveryResult) {
+                        runIntelligentDiscovery(searchQuery || (selectedCategory !== 'All' ? selectedCategory : 'Applied Digital & AI Skills'));
+                      }
+                    }}
+                    className={`px-3.5 py-2 rounded-xl whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                      unifiedViewTab === vt.id
+                        ? 'bg-[#123D32] text-white'
+                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {vt.label}
+                  </button>
+                ))}
+              </div>
+              <Link
+                to={`/qa${searchQuery.trim().length >= 2 ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`}
+                className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                <span>Ask Concept Q&amp;A</span>
+              </Link>
+            </div>
+
+            {/* Parsed Educational Intent Banner + Quinn AI Discovery Loading */}
+            {discoveryLoading && (
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 flex items-center gap-3 text-xs text-slate-700">
+                <RefreshCw className="w-4 h-4 animate-spin text-[#2563EB]" />
+                <span>Quinn AI is analyzing your educational goal and ranking 7 recommendation categories + 8-stage roadmap...</span>
+              </div>
+            )}
+
+            {discoveryResult && !discoveryLoading && (
+              <div className="bg-[#FAF7F2] rounded-2xl p-5 border border-slate-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-[#123D32]">
+                      Quinn AI Educational Intent Understanding
+                    </div>
+                    <h2 className="font-editorial text-lg sm:text-xl font-bold text-[#18221F] mt-0.5">
+                      Personalized Recommendations for &ldquo;{discoveryResult.parsedIntent.desiredSkill || discoveryResult.parsedIntent.primarySubject || discoveryResult.parsedIntent.rawQuery}&rdquo;
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUnifiedViewTab('learning_paths')}
+                    className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    View 8-Stage Learning Roadmap
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="bg-white rounded-xl p-3 border border-slate-200">
+                    <div className="text-[11px] text-slate-500">Education Level</div>
+                    <div className="font-bold text-slate-900 mt-0.5 truncate">
+                      {discoveryResult.parsedIntent.educationLevelCode
+                        ? `${discoveryResult.parsedIntent.educationLevelCode}. ${EDUCATION_CATEGORY_BY_CODE[discoveryResult.parsedIntent.educationLevelCode]?.shortTitle || ''}`
+                        : 'General / Multi-Level'}
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl p-3 border border-slate-200">
+                    <div className="text-[11px] text-slate-500">Degree / Class</div>
+                    <div className="font-bold text-slate-900 mt-0.5 truncate">
+                      {discoveryResult.parsedIntent.degreeOrClass || 'Open Programme'}
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl p-3 border border-slate-200">
+                    <div className="text-[11px] text-slate-500">Target Skill / Topic</div>
+                    <div className="font-bold text-[#123D32] mt-0.5 truncate">
+                      {discoveryResult.parsedIntent.desiredSkill || discoveryResult.parsedIntent.primarySubject || 'Core Mastery'}
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-xl p-3 border border-slate-200">
+                    <div className="text-[11px] text-slate-500">Language &amp; Goal</div>
+                    <div className="font-bold text-slate-900 mt-0.5 truncate">
+                      {discoveryResult.parsedIntent.preferredLanguage} · {discoveryResult.parsedIntent.careerGoal || 'Skill Growth'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 7 OpenFrame Recommendation Categories when viewing All Results */}
+                {unifiedViewTab === 'all_results' && discoveryResult.recommendationGroups.length > 0 && (
+                  <div className="space-y-4 pt-2">
+                    {discoveryResult.recommendationGroups
+                      .filter((grp) => grp.courses.length > 0)
+                      .map((grp) => (
+                        <div key={grp.id} className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-2.5">
+                            <div>
+                              <h3 className="text-sm font-bold text-[#18221F]">{grp.title}</h3>
+                              <p className="text-[11px] text-slate-500">{grp.subtitle}</p>
+                            </div>
+                            <span className="text-[11px] font-semibold text-[#123D32] tabular-nums">
+                              {grp.courses.length} matched courses
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {grp.courses.slice(0, 3).map((rec) => (
+                              <div
+                                key={`${grp.id}-${rec.course.id}`}
+                                className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 flex flex-col justify-between space-y-2.5"
+                              >
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                                    <span className="font-semibold text-blue-700 truncate">{rec.course.category}</span>
+                                    <span className="font-bold text-[#123D32] tabular-nums shrink-0">
+                                      {rec.course.price > 0 ? `₹${rec.course.price.toLocaleString()}` : 'Free'}
+                                    </span>
+                                  </div>
+                                  <Link
+                                    to={`/marketplace/${rec.course.id}`}
+                                    className="font-bold text-xs text-slate-900 hover:text-blue-700 line-clamp-2 block"
+                                  >
+                                    {rec.course.title}
+                                  </Link>
+                                  <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200/70 rounded-lg px-2 py-1 leading-snug">
+                                    {rec.whyRecommended}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1.5 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEnrollModalCourse(rec.course)}
+                                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white text-[11px] font-bold cursor-pointer"
+                                  >
+                                    Enroll Now
+                                  </button>
+                                  <Link
+                                    to={`/marketplace/${rec.course.id}`}
+                                    className="py-1.5 px-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-[11px] font-semibold"
+                                  >
+                                    Syllabus
+                                  </Link>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                {/* Unified View Tab: 8-Stage Learning Path */}
+                {unifiedViewTab === 'learning_paths' && (
+                  <LearningRoadmapPanel
+                    roadmap={discoveryResult.roadmap}
+                    availableCourses={discoveryResult.recommendationGroups.flatMap((g) => g.courses.map((c) => c.course))}
+                    onEnrollCourse={(courseObj) => setEnrollModalCourse(courseObj)}
+                    onWatchVideo={(vid) => {
+                      const vidId = vid.videoId || vid.youtubeId || 'JMUxmLyrhSk';
+                      const fallbackThumb = `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+                      const ext: ExtendedYouTubeVideo = {
+                        id: vid.videoId || vid.id,
+                        videoId: vidId,
+                        youtubeId: vidId,
+                        title: vid.title,
+                        channelTitle: vid.channelTitle,
+                        thumbnail: vid.thumbnail || vid.thumbnailUrl || fallbackThumb,
+                        thumbnailUrl: vid.thumbnailUrl || vid.thumbnail || fallbackThumb,
+                        duration: vid.duration || 'Tutorial',
+                        level: vid.level === 'Advanced' ? 'Advanced' : vid.level === 'Intermediate' ? 'Intermediate' : 'Beginner',
+                        subjectCategory: discoveryResult.parsedIntent.primarySubject || 'Learning Path',
+                        recommendedReason: vid.recommendedReason || 'External YouTube Resource',
+                        embedUrl: vid.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
+                        keyTopicsCovered: [discoveryResult.parsedIntent.desiredSkill || 'Topic Mastery'],
+                      };
+                      setSelectedVideo(ext);
+                      setVideoPlaylist([ext]);
+                      setIsVideoModalOpen(true);
+                    }}
+                  />
+                )}
+
+                {/* Unified View Tab: Related Skills */}
+                {unifiedViewTab === 'related_skills' && (
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 space-y-3">
+                    <h3 className="text-sm font-bold text-[#18221F]">Complementary &amp; Career-Boosting Skills</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {discoveryResult.relatedSkills.map((sk) => (
+                        <div key={sk} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 flex flex-col justify-between gap-2.5">
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">{sk}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Recommended alongside {discoveryResult.parsedIntent.desiredSkill || discoveryResult.parsedIntent.primarySubject || 'your study track'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSearchQuery(sk);
+                                setUnifiedViewTab('all_results');
+                                runLiveYouTubeSearch(sk);
+                                runIntelligentDiscovery(sk);
+                              }}
+                              className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold cursor-pointer"
+                            >
+                              Find Courses
+                            </button>
+                            <Link
+                              to={`/qa?q=${encodeURIComponent(`What is ${sk} and how do I get started?`)}`}
+                              className="py-1.5 px-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-[11px] font-semibold"
+                            >
+                              Ask Q&amp;A
+                            </Link>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Section 8: Matched YouTube Resources inside Discovery */}
+                {(unifiedViewTab === 'all_results' || unifiedViewTab === 'youtube_videos') &&
+                  discoveryResult.youtubeResources.length > 0 && (
+                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider">
+                            External YouTube Learning Resources
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            Curated educational lectures played via official YouTube embed with clear creator attribution.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {discoveryResult.youtubeResources.slice(0, 6).map((yt) => {
+                          const vidId = yt.videoId || yt.youtubeId || 'JMUxmLyrhSk';
+                          const ytThumb = yt.thumbnail || yt.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+                          return (
+                            <div
+                              key={yt.id || vidId}
+                              className="rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden flex flex-col justify-between"
+                            >
+                              <div>
+                                <div className="aspect-video bg-slate-900 relative overflow-hidden">
+                                  <img
+                                    src={ytThumb}
+                                    alt={yt.title}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[10px] font-semibold">
+                                    External YouTube Resource
+                                  </span>
+                                </div>
+                                <div className="p-3 space-y-1">
+                                  <div className="text-xs font-bold text-slate-900 line-clamp-2">{yt.title}</div>
+                                  <div className="text-[11px] text-slate-600 truncate">{yt.channelTitle}</div>
+                                </div>
+                              </div>
+                              <div className="px-3 pb-3 flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const ext: ExtendedYouTubeVideo = {
+                                      id: yt.id || `yt-${vidId}`,
+                                      videoId: vidId,
+                                      youtubeId: vidId,
+                                      title: yt.title,
+                                      channelTitle: yt.channelTitle,
+                                      thumbnail: ytThumb,
+                                      thumbnailUrl: ytThumb,
+                                      duration: yt.duration || 'Tutorial',
+                                      level: 'Beginner',
+                                      subjectCategory: discoveryResult.parsedIntent.primarySubject || 'YouTube Resource',
+                                      recommendedReason: yt.recommendedReason || 'External YouTube Resource',
+                                      embedUrl: yt.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
+                                      keyTopicsCovered: [searchQuery.trim() || yt.title],
+                                    };
+                                    setSelectedVideo(ext);
+                                    setVideoPlaylist([ext]);
+                                    setIsVideoModalOpen(true);
+                                  }}
+                                  className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                >
+                                  <Play className="w-3 h-3 fill-current" />
+                                  <span>Watch Lecture</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleBookmarkCourse(e, `yt-${vidId}`, yt.title, 'External YouTube Resource', vidId)}
+                                  className={`p-1.5 rounded-lg border text-[11px] cursor-pointer ${
+                                    bookmarkedIds.has(`yt-${vidId}`)
+                                      ? 'bg-blue-600 border-blue-600 text-white'
+                                      : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                                  }`}
+                                  title="Save to Learning Plan"
+                                >
+                                  <Bookmark className={`w-3.5 h-3.5 ${bookmarkedIds.has(`yt-${vidId}`) ? 'fill-current' : ''}`} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+              </div>
+            )}
+
+            {/* Education Classification A–J Quick Strip */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[#123D32] uppercase tracking-wider">
+                  Education Classification (LKG to PhD &amp; Skills · A–J)
+                </span>
+                {selectedEducationLevel !== 'All' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedEducationLevel('All');
+                      setSelectedDegreeProgramme('All');
+                    }}
+                    className="text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer"
+                  >
+                    All Levels
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {EDUCATION_CLASSIFICATION_CATEGORIES.map((cat) => {
+                  const active = selectedEducationLevel === cat.code;
+                  return (
+                    <button
+                      key={cat.code}
+                      type="button"
+                      onClick={() => {
+                        setSelectedEducationLevel(cat.code);
+                        setSelectedDegreeProgramme('All');
+                        runIntelligentDiscovery(searchQuery, { levelOverride: cat.code, degreeOverride: 'All' });
+                      }}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-[#123D32] text-white border-[#123D32]'
+                          : 'bg-slate-50 hover:bg-emerald-50 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {cat.code}. {cat.shortTitle}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* 12 Universal Categories A–L Quick Filter Strip */}
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  12 Universal Categories (A–L)
+                  12 Universal Subject Domains (A–L)
                 </span>
                 {selectedGroup !== 'All' && (
                   <button
@@ -1245,8 +2030,11 @@ export const CourseMarketplacePage: React.FC = () => {
                       key={uc.code}
                       type="button"
                       onClick={() => {
+                        const qStr = uc.featuredQueries[0] || uc.name;
                         setSelectedGroup(uc.domainGroup);
-                        setSearchQuery(uc.featuredQueries[0] || '');
+                        setSearchQuery(qStr);
+                        runLiveYouTubeSearch(qStr);
+                        runIntelligentDiscovery(qStr);
                       }}
                       className={`px-3 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                         isActive
@@ -1426,8 +2214,8 @@ export const CourseMarketplacePage: React.FC = () => {
               )}
             </div>
 
-            {/* Live YouTube Discovery Section (Official YouTube Data API v3) */}
-            {searchQuery.trim().length >= 3 && (
+            {/* Live YouTube Discovery Section (Official YouTube Data API v3 — explicit triggers only) */}
+            {(activeYouTubeQuery || liveYoutubeResults.length > 0 || searchQuery.trim().length >= 3) && (
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
@@ -1436,20 +2224,46 @@ export const CourseMarketplacePage: React.FC = () => {
                       <span>Live YouTube Educational Resources</span>
                     </div>
                     <p className="text-xs text-slate-600 mt-0.5">
-                      Matched public tutorials &amp; playlists for &ldquo;{searchQuery.trim()}&rdquo;
-                      {selectedLanguage !== 'All' ? ` (${selectedLanguage})` : ''}.
+                      {activeYouTubeQuery
+                        ? `Matched public tutorials & playlists for "${activeYouTubeQuery}"${selectedLanguage !== 'All' ? ` (${selectedLanguage})` : ''}.`
+                        : `Click "Search YouTube Now" or press Enter to fetch live YouTube Data API v3 courses for "${searchQuery.trim()}".`}
                     </p>
                   </div>
-                  <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={liveYoutubeEnabled}
-                      onChange={(e) => setLiveYoutubeEnabled(e.target.checked)}
-                      className="accent-blue-600"
-                    />
-                    <span>Include Live YouTube Results</span>
-                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(searchQuery.trim().length >= 2 || selectedChannel.trim()) && (
+                      <button
+                        type="button"
+                        onClick={() => runLiveYouTubeSearch(searchQuery)}
+                        disabled={liveYoutubeLoading}
+                        className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                      >
+                        {liveYoutubeLoading ? 'Searching...' : activeYouTubeQuery ? 'Refresh YouTube' : 'Search YouTube Now'}
+                      </button>
+                    )}
+                    <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={liveYoutubeEnabled}
+                        onChange={(e) => setLiveYoutubeEnabled(e.target.checked)}
+                        className="accent-blue-600"
+                      />
+                      <span>Include Live YouTube</span>
+                    </label>
+                  </div>
                 </div>
+
+                {liveYoutubeError && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2 text-xs text-amber-900">
+                    <span>{liveYoutubeError}</span>
+                    <button
+                      type="button"
+                      onClick={() => runLiveYouTubeSearch(activeYouTubeQuery || searchQuery)}
+                      className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold shrink-0 cursor-pointer"
+                    >
+                      Retry YouTube Search
+                    </button>
+                  </div>
+                )}
 
                 {liveYoutubeLoading ? (
                   <div className="text-xs text-slate-500 py-4 flex items-center gap-2">
@@ -1458,86 +2272,111 @@ export const CourseMarketplacePage: React.FC = () => {
                   </div>
                 ) : liveYoutubeResults.length === 0 ? (
                   <div className="text-xs text-slate-500 py-2">
-                    Showing indexed OpenFrame courses below. Refine your search phrase for additional live YouTube tutorials.
+                    Showing indexed OpenFrame courses below. Press Enter or click &ldquo;Search YouTube Now&rdquo; to query YouTube Data API v3 directly.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {liveYoutubeResults.map((yt) => {
-                      const vidId = yt.videoId || yt.youtubeId;
-                      const isPl = Boolean(yt.playlistId || yt.playlistInfo?.playlistId);
-                      const isSavedBm = bookmarkedIds.has(`yt-${vidId}`);
-                      const formattedViews = formatViews(yt.viewCount);
-                      return (
-                        <div key={yt.id || vidId} className="rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden flex flex-col justify-between">
-                          <div>
-                            <div className="aspect-video bg-slate-900 relative overflow-hidden">
-                              <img
-                                src={yt.thumbnail || yt.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`}
-                                alt={yt.title}
-                                className="w-full h-full object-cover"
-                              />
-                              <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold">
-                                {isPl ? 'YouTube Playlist' : 'Free YouTube Video'}
-                              </span>
-                            </div>
-                            <div className="p-3.5 space-y-1.5">
-                              <h4 className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">{yt.title}</h4>
-                              <div className="flex items-center gap-2 text-[11px] text-slate-600">
-                                {yt.channelThumbnail && (
-                                  <img src={yt.channelThumbnail} alt={yt.channelTitle} className="w-4 h-4 rounded-full object-cover shrink-0" />
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {liveYoutubeResults.map((yt) => {
+                        const vidId = yt.videoId || yt.youtubeId;
+                        const isPl = Boolean(yt.playlistId || yt.playlistInfo?.playlistId);
+                        const isSavedBm = bookmarkedIds.has(`yt-${vidId}`);
+                        const formattedViews = formatViews(yt.viewCount);
+                        return (
+                          <div key={yt.id || vidId} className="rounded-xl border border-slate-200 bg-slate-50/50 overflow-hidden flex flex-col justify-between">
+                            <div>
+                              <div className="aspect-video bg-slate-900 relative overflow-hidden">
+                                <img
+                                  src={yt.thumbnail || yt.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`}
+                                  alt={yt.title}
+                                  className="w-full h-full object-cover"
+                                />
+                                <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[10px] font-bold">
+                                  {isPl ? 'External YouTube Playlist' : 'External YouTube Resource'}
+                                </span>
+                                {yt.level && (
+                                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-slate-900/85 text-cyan-300 text-[10px] font-semibold">
+                                    {yt.level}
+                                  </span>
                                 )}
-                                <span className="truncate font-medium">{yt.channelTitle}</span>
                               </div>
-                              <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
-                                <span>{formattedViews || yt.duration || 'Educational'}</span>
-                                {yt.publishedAt && <span>{new Date(yt.publishedAt).toLocaleDateString()}</span>}
+                              <div className="p-3.5 space-y-1.5">
+                                <h4 className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">{yt.title}</h4>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                                  {yt.channelThumbnail && (
+                                    <img src={yt.channelThumbnail} alt={yt.channelTitle} className="w-4 h-4 rounded-full object-cover shrink-0" />
+                                  )}
+                                  <span className="truncate font-medium">{yt.channelTitle}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
+                                  <span>{formattedViews || yt.duration || 'Educational'}</span>
+                                  {yt.publishedAt && <span>{new Date(yt.publishedAt).toLocaleDateString()}</span>}
+                                </div>
                               </div>
                             </div>
+                            <div className="px-3.5 pb-3.5 flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const ext: ExtendedYouTubeVideo = {
+                                    id: yt.id || `yt-${vidId}`,
+                                    videoId: vidId,
+                                    youtubeId: vidId,
+                                    title: yt.title,
+                                    channelTitle: yt.channelTitle,
+                                    thumbnail: yt.thumbnail || yt.thumbnailUrl,
+                                    thumbnailUrl: yt.thumbnailUrl || yt.thumbnail,
+                                    duration: yt.duration || 'Tutorial',
+                                    level: yt.level === 'Advanced' ? 'Advanced' : yt.level === 'Intermediate' ? 'Intermediate' : 'Beginner',
+                                    subjectCategory: selectedCategory !== 'All' ? selectedCategory : 'OpenFrame Discovery',
+                                    recommendedReason: yt.recommendedReason || 'Discovered via OpenFrame YouTube Search',
+                                    embedUrl: yt.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
+                                    keyTopicsCovered: [searchQuery.trim() || yt.title],
+                                  };
+                                  setSelectedVideo(ext);
+                                  setVideoPlaylist([ext]);
+                                  setIsVideoModalOpen(true);
+                                }}
+                                className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                                <span>Play Lesson</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleBookmarkCourse(e, `yt-${vidId}`, yt.title, searchQuery.trim() || 'YouTube Lesson', vidId)}
+                                className={`p-1.5 rounded-lg border text-[11px] cursor-pointer ${
+                                  isSavedBm
+                                    ? 'bg-blue-600 border-blue-600 text-white'
+                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                                }`}
+                                title="Add to My Learning"
+                              >
+                                <Bookmark className={`w-3.5 h-3.5 ${isSavedBm ? 'fill-current' : ''}`} />
+                              </button>
+                            </div>
                           </div>
-                          <div className="px-3.5 pb-3.5 flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const ext: ExtendedYouTubeVideo = {
-                                  id: yt.id || `yt-${vidId}`,
-                                  videoId: vidId,
-                                  youtubeId: vidId,
-                                  title: yt.title,
-                                  channelTitle: yt.channelTitle,
-                                  thumbnail: yt.thumbnail || yt.thumbnailUrl,
-                                  thumbnailUrl: yt.thumbnailUrl || yt.thumbnail,
-                                  duration: yt.duration || 'Tutorial',
-                                  level: 'Beginner',
-                                  subjectCategory: selectedCategory !== 'All' ? selectedCategory : 'OpenFrame Discovery',
-                                  recommendedReason: yt.recommendedReason || 'Discovered via OpenFrame YouTube Search',
-                                  embedUrl: yt.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
-                                  keyTopicsCovered: [searchQuery.trim()],
-                                };
-                                setSelectedVideo(ext);
-                                setVideoPlaylist([ext]);
-                                setIsVideoModalOpen(true);
-                              }}
-                              className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
-                            >
-                              <Play className="w-3 h-3 fill-current" />
-                              <span>Play Lesson</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleToggleBookmarkCourse(e, `yt-${vidId}`, yt.title, searchQuery.trim(), vidId)}
-                              className={`p-1.5 rounded-lg border text-[11px] cursor-pointer ${
-                                isSavedBm
-                                  ? 'bg-blue-600 border-blue-600 text-white'
-                                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                              }`}
-                              title="Add to My Learning"
-                            >
-                              <Bookmark className={`w-3.5 h-3.5 ${isSavedBm ? 'fill-current' : ''}`} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+
+                    {liveYoutubePageToken && (
+                      <div className="flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            runLiveYouTubeSearch(activeYouTubeQuery || searchQuery, {
+                              pageToken: liveYoutubePageToken,
+                              append: true,
+                            })
+                          }
+                          disabled={liveYoutubeLoadingMore}
+                          className="px-4 py-2 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-800 cursor-pointer disabled:opacity-50"
+                        >
+                          {liveYoutubeLoadingMore ? 'Loading More Videos...' : 'Load More YouTube Videos (+6)'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {liveYoutubeNote && (
@@ -1622,9 +2461,7 @@ export const CourseMarketplacePage: React.FC = () => {
                   const trackLabel =
                     course.price > 0
                       ? `₹${course.price.toLocaleString()}`
-                      : course.libraryCollection === 'corporate_training'
-                      ? 'Corporate Track'
-                      : 'Academic Access';
+                      : 'Free';
 
                   return (
                     <div
@@ -1733,18 +2570,26 @@ export const CourseMarketplacePage: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Meta: Rating + Views/Enrolled + Published + Duration */}
+                          {/* Meta: Verified Reviews (only if present) + Views/Enrolled + Certificate + Duration */}
                           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 gap-2">
-                            <div className="flex items-center space-x-1 tabular-nums">
-                              <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                              <span className="font-bold text-slate-800">{course.rating}</span>
+                            <div className="flex items-center space-x-2 tabular-nums">
+                              {course.hasVerifiedReviews && (course.reviewCount ?? 0) > 0 && (
+                                <span className="flex items-center space-x-1">
+                                  <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                                  <span className="font-bold text-slate-800">{course.rating}</span>
+                                </span>
+                              )}
                               {formatViews(course.viewCount) ? (
-                                <span className="text-[11px] text-slate-500 flex items-center gap-0.5 ml-1">
+                                <span className="text-[11px] text-slate-500 flex items-center gap-0.5">
                                   <Eye className="w-3 h-3" />
                                   {formatViews(course.viewCount)}
                                 </span>
+                              ) : course.enrolledCount > 0 ? (
+                                <span className="text-[11px] text-slate-500">{course.enrolledCount} enrolled</span>
                               ) : (
-                                <span className="text-[11px] text-slate-400">({course.enrolledCount})</span>
+                                <span className="text-[11px] text-emerald-700 font-semibold">
+                                  {course.certificateEligibility ? 'Certificate Track' : 'Open Study'}
+                                </span>
                               )}
                             </div>
 
@@ -1807,11 +2652,11 @@ export const CourseMarketplacePage: React.FC = () => {
 
                         <div className="grid grid-cols-2 gap-1.5">
                           <button
-                            onClick={() => handleOpenApply(course.title, course.id, course.category)}
+                            onClick={() => setEnrollModalCourse(course)}
                             className="py-1.5 px-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-bold transition-all flex items-center justify-center space-x-1 shadow-xs cursor-pointer"
                           >
                             <GraduationCap className="w-3 h-3 text-cyan-300" />
-                            <span>Enroll</span>
+                            <span>{course.price > 0 ? `Enroll (₹${course.price})` : 'Enroll Free'}</span>
                           </button>
 
                           <Link
@@ -1942,12 +2787,78 @@ export const CourseMarketplacePage: React.FC = () => {
 
             <div className="space-y-4 text-xs">
               <div>
+                <label className="font-bold text-[#123D32] block mb-1">
+                  Education Level (Categories A–J)
+                </label>
+                <select
+                  value={selectedEducationLevel}
+                  onChange={(e) => {
+                    const val = e.target.value as 'All' | EducationCategoryCode;
+                    setSelectedEducationLevel(val);
+                    setSelectedDegreeProgramme('All');
+                    runIntelligentDiscovery(searchQuery, { levelOverride: val, degreeOverride: 'All' });
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                >
+                  <option value="All">All Education Levels (LKG to PhD &amp; Skills)</option>
+                  {EDUCATION_CLASSIFICATION_CATEGORIES.map((cat) => (
+                    <option key={cat.code} value={cat.code}>
+                      {cat.code}. {cat.shortTitle}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Degree / Class / Programme</label>
+                <select
+                  value={selectedDegreeProgramme}
+                  onChange={(e) => {
+                    const deg = e.target.value;
+                    setSelectedDegreeProgramme(deg);
+                    runIntelligentDiscovery(searchQuery, { degreeOverride: deg });
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                >
+                  <option value="All">All Degrees &amp; Classes</option>
+                  {(selectedEducationLevel !== 'All'
+                    ? getAllProgrammesForCategory(selectedEducationLevel)
+                    : EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))
+                  )
+                    .slice(0, 80)
+                    .map((prog) => (
+                      <option key={prog} value={prog}>{prog}</option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Course Access Type</label>
+                <select
+                  value={selectedAccessType}
+                  onChange={(e) => {
+                    const acc = e.target.value as 'all' | 'free' | 'paid';
+                    setSelectedAccessType(acc);
+                    runIntelligentDiscovery(searchQuery, { accessOverride: acc });
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                >
+                  <option value="all">All (Free &amp; Paid)</option>
+                  <option value="free">Free Courses</option>
+                  <option value="paid">Paid Programmes</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="font-bold text-slate-700 block mb-1">
                   Learning Category ({categoryOptions.length})
                 </label>
                 <select
                   value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedCategory(e.target.value);
+                    setSelectedSubcategory('All');
+                  }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
                 >
                   <option value="All">All Categories</option>
@@ -1957,6 +2868,49 @@ export const CourseMarketplacePage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Subcategory / Topic</label>
+                <select
+                  value={selectedSubcategory}
+                  onChange={(e) => setSelectedSubcategory(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                >
+                  <option value="All">All Subcategories</option>
+                  {Array.from(
+                    new Set(
+                      (selectedCategory !== 'All'
+                        ? categoryOptions.find((c) => c.name === selectedCategory)?.subcategories || []
+                        : categoryOptions.flatMap((c) => c.subcategories || [])
+                      ).slice(0, 60)
+                    )
+                  ).map((sub) => (
+                    <option key={sub} value={sub}>{sub}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Instructor Name</label>
+                <input
+                  type="text"
+                  value={selectedInstructor}
+                  onChange={(e) => setSelectedInstructor(e.target.value)}
+                  placeholder="Filter by instructor..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">YouTube Channel</label>
+                <input
+                  type="text"
+                  value={selectedChannel}
+                  onChange={(e) => setSelectedChannel(e.target.value)}
+                  placeholder="Filter by YouTube channel..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                />
               </div>
 
               <div>
@@ -2108,7 +3062,18 @@ export const CourseMarketplacePage: React.FC = () => {
         </div>
       )}
 
-      {/* STUDENT REGISTRATION POP-UP MODAL */}
+      {/* COURSE ENROLLMENT & PAYMENT CHECKOUT MODAL */}
+      <CourseEnrollmentModal
+        isOpen={Boolean(enrollModalCourse)}
+        onClose={() => setEnrollModalCourse(null)}
+        course={enrollModalCourse}
+        onEnrolled={() => {
+          setEnrollModalCourse(null);
+          showToast('Course enrollment confirmed!');
+        }}
+      />
+
+      {/* STUDENT REGISTRATION POP-UP MODAL (Admissions fallback) */}
       <StudentRegistrationModal
         isOpen={isRegModalOpen}
         onClose={() => setIsRegModalOpen(false)}

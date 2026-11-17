@@ -4,28 +4,25 @@ import {
   Menu,
   X,
   ChevronDown,
-  Globe,
-  Lock,
   ArrowRight,
-  Shield,
-  Layers,
+  LogOut,
   Sparkles,
-  PhoneCall,
-  Brain
+  User as UserIcon,
+  ShieldCheck,
 } from 'lucide-react';
-import { storageService } from '../../services/storageService';
+import { useAuth } from '../../context/AuthContext';
 
 export const Header: React.FC = () => {
-  const { currentPath } = useRouter();
+  const { currentPath, navigate } = useRouter();
+  const { currentUser, lmsUser, authorizedDashboardPath, logout } = useAuth();
   const cleanPath = currentPath.split('?')[0] || '/';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [solutionsDropdownOpen, setSolutionsDropdownOpen] = useState(false);
+  const [programsOpen, setProgramsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [siteSettings, setSiteSettings] = useState(storageService.getSiteSettings());
 
   useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 20);
+      setIsScrolled(window.scrollY > 16);
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
@@ -33,316 +30,291 @@ export const Header: React.FC = () => {
 
   useEffect(() => {
     setMobileMenuOpen(false);
-    setSolutionsDropdownOpen(false);
+    setProgramsOpen(false);
   }, [currentPath]);
 
-  const navLinks = [
+  const primaryLinks = [
     { label: 'Home', path: '/' },
+    { label: 'Explore Courses', path: '/marketplace' },
+    { label: 'Ask Q&A', path: '/qa' },
+    { label: 'Learning Programs', path: '/education', hasDropdown: true },
+    { label: 'For Schools', path: '/partner/school' },
+    { label: 'For Teachers', path: '/teacher/dashboard' },
     { label: 'About Us', path: '/about-us' },
-    { label: 'IT Solutions', path: '/it-solutions', hasDropdown: true },
-    { label: 'Education', path: '/education' },
-    { label: 'School (LKG–12)', path: '/school' },
-    { label: 'Courses (15.5k+)', path: '/marketplace' },
-    { label: 'Qwen AI', path: '/chatbot' },
-    { label: 'Products', path: '/products' },
-    { label: 'HopeNest', path: '/hopenest' },
-    { label: 'Blog', path: '/blog' },
-    { label: 'Careers', path: '/careers' },
-    { label: 'Work With Us', path: '/work-with-us' },
+    { label: 'HopeNest Foundation', path: '/hopenest' },
+    { label: 'Contact', path: '/contact' },
   ];
 
+  const userInitial = (lmsUser?.displayName || currentUser?.displayName || currentUser?.email || 'O')
+    .charAt(0)
+    .toUpperCase();
+
   return (
-    <header className="sticky top-0 z-50 w-full transition-all duration-300">
-      {/* Top Corporate Strip / Announcement */}
-      {siteSettings.showAnnouncement && (
-        <div className="bg-[#071326] text-slate-300 text-xs border-b border-blue-950/60 py-1.5 px-4 sm:px-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-1.5 text-blue-400 font-semibold tracking-wide uppercase text-[11px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                Official Corporate Portal
+    <header
+      className={`sticky top-0 z-50 w-full transition-all duration-200 border-b ${
+        isScrolled
+          ? 'bg-[#FAF7F2]/95 backdrop-blur-md border-slate-200/90 shadow-sm py-3'
+          : 'bg-[#FAF7F2] border-slate-200/70 py-4'
+      }`}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-4">
+          {/* Left: OpenFrame Brand */}
+          <Link to="/" className="flex items-center gap-2.5 shrink-0 group" aria-label="OpenFrame Education">
+            <div className="w-9 h-9 rounded-xl bg-white border border-slate-200/90 p-0.5 shadow-xs flex items-center justify-center overflow-hidden">
+              <img
+                src="/openframe_official_logo.jpg"
+                alt="OpenFrame Education"
+                className="w-full h-full object-contain rounded-lg"
+              />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-editorial font-semibold text-[#18221F] text-lg leading-none tracking-tight group-hover:text-[#123D32] transition-colors">
+                OpenFrame
               </span>
-              <span className="hidden sm:inline text-slate-400">|</span>
-              <span className="hidden sm:inline text-slate-300 truncate max-w-xl">
-                {siteSettings.announcementText}
+              <span className="text-[10px] uppercase font-semibold tracking-[0.14em] text-[#123D32] mt-1">
+                Education &amp; IT
               </span>
             </div>
-            <div className="flex items-center gap-3 text-slate-400 text-[11px]">
-              <Link to="/chatbot" className="text-cyan-400 hover:text-cyan-300 font-bold transition-colors flex items-center gap-1">
-                <Brain className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Qwen AI</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/student/dashboard" className="text-sky-400 hover:text-sky-300 font-semibold transition-colors flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-amber-300" />
-                <span>Student LMS</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/animation-course" className="text-cyan-300 hover:text-white font-semibold transition-colors">
-                <span>Animations &amp; Charts (ZIP)</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/teacher/dashboard" className="hover:text-blue-300 transition-colors">
-                <span>Teacher Portal</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/parent/dashboard" className="hover:text-blue-300 transition-colors">
-                <span>Parent Portal</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/portal" className="hover:text-white transition-colors">
-                <span>Portal Sign In</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/verify-certificate" className="hover:text-white transition-colors">
-                <span>Verify Certificate</span>
-              </Link>
-              <span className="text-slate-600">·</span>
-              <Link to="/admin/login" className="hover:text-blue-300 transition-colors flex items-center gap-1">
-                <Lock className="w-3 h-3" />
-                <span>Admin</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
+          </Link>
 
-      {/* Main Navigation Bar */}
-      <nav
-        className={`w-full transition-all duration-200 border-b ${
-          isScrolled
-            ? 'bg-[#0B1930]/95 backdrop-blur-md border-blue-900/40 shadow-lg shadow-black/20 py-3'
-            : 'bg-[#0B1930] border-blue-950/80 py-4'
-        }`}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between gap-4">
-            
-            {/* Zone 1: Brand Wordmark */}
-            <Link to="/" className="flex items-center gap-3 group shrink-0" aria-label="OpenFrame IT Solutions">
-              <div className="w-10 h-10 rounded-lg bg-white p-0.5 shadow-md shadow-blue-500/20 group-hover:shadow-blue-500/40 transition-shadow flex items-center justify-center overflow-hidden border border-blue-500/40">
-                <img
-                  src="/openframe_official_logo.jpg"
-                  alt="OpenFrame IT Solutions"
-                  className="w-full h-full object-contain rounded-md"
-                />
-              </div>
-              <div className="flex flex-col">
-                <span className="font-heading font-extrabold text-white text-lg tracking-tight leading-none group-hover:text-sky-300 transition-colors">
-                  OpenFrame
-                </span>
-                <span className="text-[10px] uppercase font-semibold tracking-widest text-blue-400 mt-1">
-                  IT Solutions Pvt Ltd
-                </span>
-              </div>
-            </Link>
+          {/* Center: Clean Editorial Links */}
+          <nav className="hidden lg:flex items-center gap-0.5 text-[13px] font-medium text-[#18221F]/80">
+            {primaryLinks.map((item) => {
+              const isActive =
+                cleanPath === item.path ||
+                (item.path !== '/' && cleanPath.startsWith(item.path));
 
-            {/* Zone 2: Navigation Links (Desktop) */}
-            <div className="hidden xl:flex items-center gap-0.5 text-[12px] font-medium text-slate-300">
-              {navLinks.map((item) => {
-                const isActive =
-                  cleanPath === item.path ||
-                  (item.path !== '/' && cleanPath.startsWith(item.path));
-
-                if (item.hasDropdown) {
-                  return (
-                    <div
-                      key={item.path}
-                      className="relative"
-                      onMouseEnter={() => setSolutionsDropdownOpen(true)}
-                      onMouseLeave={() => setSolutionsDropdownOpen(false)}
-                    >
-                      <Link
-                        to={item.path}
-                        className={`px-3 py-2 rounded-md transition-colors flex items-center gap-1 ${
-                          isActive
-                            ? 'text-sky-400 font-semibold bg-white/5'
-                            : 'hover:text-white hover:bg-white/5'
-                        }`}
-                      >
-                        <span>{item.label}</span>
-                        <ChevronDown className="w-3.5 h-3.5 opacity-70" />
-                      </Link>
-
-                      {solutionsDropdownOpen && (
-                        <div className="absolute top-full left-0 w-72 pt-2 z-50">
-                          <div className="bg-[#0F2042] border border-blue-800/50 rounded-xl shadow-2xl p-2.5 backdrop-blur-xl">
-                            <Link
-                              to="/it-solutions"
-                              className="block p-2.5 rounded-lg hover:bg-blue-900/50 transition-colors group"
-                            >
-                              <div className="text-white font-medium text-sm group-hover:text-sky-300">
-                                All IT & Software Solutions
-                              </div>
-                              <div className="text-slate-400 text-xs mt-0.5">
-                                Enterprise systems, cloud, web and mobile platforms
-                              </div>
-                            </Link>
-                            <div className="my-1 border-t border-blue-900/60"></div>
-                            <Link
-                              to="/products"
-                              className="block p-2.5 rounded-lg hover:bg-blue-900/50 transition-colors group"
-                            >
-                              <div className="text-white font-medium text-sm group-hover:text-sky-300">
-                                Proprietary Digital Products
-                              </div>
-                              <div className="text-slate-400 text-xs mt-0.5">
-                                CoreERP, EduLMS, CloudPulse & CollabFlow
-                              </div>
-                            </Link>
-                            <Link
-                              to="/education"
-                              className="block p-2.5 rounded-lg hover:bg-blue-900/50 transition-colors group"
-                            >
-                              <div className="text-white font-medium text-sm group-hover:text-sky-300">
-                                OpenFrame Education
-                              </div>
-                              <div className="text-slate-400 text-xs mt-0.5">
-                                Industry-aligned tech training & campus labs
-                              </div>
-                            </Link>
-                            <Link
-                              to="/school"
-                              className="block p-2.5 rounded-lg hover:bg-blue-900/50 transition-colors group"
-                            >
-                              <div className="text-white font-medium text-sm group-hover:text-sky-300">
-                                School Education (LKG–12)
-                              </div>
-                              <div className="text-slate-400 text-xs mt-0.5">
-                                Karnataka State, CBSE &amp; ICSE multilingual learning
-                              </div>
-                            </Link>
-                            <Link
-                              to="/animation-course"
-                              className="block p-2.5 rounded-lg hover:bg-blue-900/50 transition-colors group"
-                            >
-                              <div className="text-white font-medium text-sm group-hover:text-sky-300">
-                                Swift UI Animation &amp; Charts Studio
-                              </div>
-                              <div className="text-slate-400 text-xs mt-0.5">
-                                17 Ramotion UI components, 12 chart types &amp; ZIP packs
-                              </div>
-                            </Link>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
+              if (item.hasDropdown) {
                 return (
-                  <Link
+                  <div
                     key={item.path}
-                    to={item.path}
-                    className={`px-2 py-2 rounded-md transition-colors whitespace-nowrap ${
-                      isActive
-                        ? 'text-sky-400 font-semibold bg-white/5'
-                        : 'hover:text-white hover:bg-white/5'
-                    }`}
+                    className="relative"
+                    onMouseEnter={() => setProgramsOpen(true)}
+                    onMouseLeave={() => setProgramsOpen(false)}
                   >
-                    {item.label}
-                  </Link>
+                    <Link
+                      to={item.path}
+                      className={`px-2.5 py-2 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap ${
+                        isActive
+                          ? 'text-[#123D32] font-semibold bg-[#123D32]/8'
+                          : 'hover:text-[#18221F] hover:bg-black/4'
+                      }`}
+                    >
+                      <span>{item.label}</span>
+                      <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                    </Link>
+
+                    {programsOpen && (
+                      <div className="absolute top-full left-0 w-72 pt-2 z-50">
+                        <div className="bg-white border border-slate-200 rounded-2xl shadow-xl p-2 space-y-0.5">
+                          <Link
+                            to="/education"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#18221F]">OpenFrame Education</div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              Structured fellowships &amp; certification tracks
+                            </div>
+                          </Link>
+                          <Link
+                            to="/school"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#18221F]">School Education (LKG–12)</div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              CBSE, ICSE &amp; State Board interactive learning
+                            </div>
+                          </Link>
+                          <Link
+                            to="/chatbot"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#123D32] flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-[#2563EB]" />
+                              <span>Quinn AI Personal Tutor</span>
+                            </div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              Multilingual 24/7 mentor, notes &amp; study guides
+                            </div>
+                          </Link>
+                          <div className="my-1 border-t border-slate-100" />
+                          <Link
+                            to="/it-solutions"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#18221F]">Enterprise IT Solutions</div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              Custom software engineering &amp; cloud platforms
+                            </div>
+                          </Link>
+                          <Link
+                            to="/products"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#18221F]">Digital Products Suite</div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              CoreERP, EduLMS &amp; enterprise tools
+                            </div>
+                          </Link>
+                          <Link
+                            to="/verify-certificate"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#18221F] flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-[#123D32]" />
+                              <span>Verify Certificate</span>
+                            </div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              Public QR &amp; credential ID lookup
+                            </div>
+                          </Link>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
-              })}
-            </div>
+              }
 
-            {/* Zone 3: Actions & Mobile Hamburger */}
-            <div className="flex items-center gap-2.5 shrink-0">
-              <Link
-                to="/chatbot"
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 shadow-sm transition-all whitespace-nowrap"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Qwen AI</span>
-              </Link>
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`px-2.5 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                    isActive
+                      ? 'text-[#123D32] font-semibold bg-[#123D32]/8'
+                      : 'hover:text-[#18221F] hover:bg-black/4'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
 
-              <Link
-                to="/contact"
-                className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 active:bg-blue-700 shadow-md shadow-blue-600/30 transition-all whitespace-nowrap"
-              >
-                <span>Contact Us</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+          {/* Right: Auth Actions & Mobile Trigger */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            {currentUser && lmsUser ? (
+              <div className="hidden sm:flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate(authorizedDashboardPath)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <span className="w-5 h-5 rounded-full bg-white/20 text-[11px] font-bold flex items-center justify-center">
+                    {userInitial}
+                  </span>
+                  <span>My Workspace</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  title="Sign Out"
+                  className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="hidden sm:flex items-center gap-2">
+                <Link
+                  to="/portal"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#18221F] hover:bg-black/5 border border-slate-300/80 bg-white/80 transition-colors whitespace-nowrap"
+                >
+                  Login
+                </Link>
+                <Link
+                  to="/portal?mode=register"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-700 shadow-sm transition-colors whitespace-nowrap"
+                >
+                  <span>Get Started</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            )}
 
-              {/* Mobile menu toggle */}
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="xl:hidden p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
-                aria-label="Toggle navigation menu"
-              >
-                {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-              </button>
-            </div>
-
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 rounded-xl text-[#18221F] hover:bg-black/5 transition-colors cursor-pointer"
+              aria-label="Toggle navigation menu"
+            >
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
           </div>
         </div>
-      </nav>
+      </div>
 
       {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className="xl:hidden bg-[#0B1930] border-b border-blue-900/60 shadow-2xl px-4 py-4 space-y-1">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-1">
-            Menu Navigation
+        <div className="lg:hidden bg-[#FAF7F2] border-t border-slate-200 shadow-xl px-4 py-5 space-y-2 max-h-[82vh] overflow-y-auto">
+          <div className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider px-3 pb-1">
+            Explore OpenFrame
           </div>
-          {navLinks.map((item) => (
+          {primaryLinks.map((item) => (
             <Link
               key={item.path}
               to={item.path}
-              className={`block px-3 py-2 rounded-md text-sm font-medium ${
+              className={`block px-3 py-2.5 rounded-xl text-sm font-medium ${
                 cleanPath === item.path
-                  ? 'bg-blue-600/20 text-sky-400 font-semibold'
-                  : 'text-slate-300 hover:text-white hover:bg-white/5'
+                  ? 'bg-[#123D32]/10 text-[#123D32] font-semibold'
+                  : 'text-[#18221F] hover:bg-black/5'
               }`}
             >
               {item.label}
             </Link>
           ))}
-          <div className="pt-2 border-t border-blue-900/60 flex flex-col gap-2">
-            <Link
-              to="/student/dashboard"
-              className="px-3 py-2 rounded-md text-xs font-semibold text-sky-400 bg-sky-950/40 hover:text-white flex items-center gap-2"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Student Learning Portal (Quinn AI)</span>
+
+          <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2 text-xs">
+            <Link to="/school" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#18221F] whitespace-nowrap">
+              School (LKG–12)
             </Link>
-            <Link
-              to="/teacher/dashboard"
-              className="px-3 py-2 rounded-md text-xs text-slate-300 hover:text-white flex items-center gap-2"
-            >
-              <span>Faculty Evaluation Dashboard</span>
+            <Link to="/qa" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#2563EB] whitespace-nowrap">
+              Ask Quinn Q&amp;A
             </Link>
-            <Link
-              to="/parent/dashboard"
-              className="px-3 py-2 rounded-md text-xs text-slate-300 hover:text-white flex items-center gap-2"
-            >
-              <span>Parent Progress Portal</span>
+            <Link to="/chatbot" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#123D32] whitespace-nowrap">
+              Quinn AI Tutor
             </Link>
-            <Link
-              to="/portal"
-              className="px-3 py-2 rounded-md text-xs text-slate-300 hover:text-white flex items-center gap-2"
-            >
-              <span>Unified Portal Sign In</span>
+            <Link to="/verify-certificate" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#18221F] whitespace-nowrap">
+              Verify Certificate
             </Link>
-            <Link
-              to="/verify-certificate"
-              className="px-3 py-2 rounded-md text-xs text-slate-300 hover:text-white flex items-center gap-2"
-            >
-              <span>Public Certificate Verification</span>
-            </Link>
-            <Link
-              to="/admin/login"
-              className="px-3 py-2 rounded-md text-xs text-slate-400 hover:text-sky-300 flex items-center gap-2"
-            >
-              <Lock className="w-4 h-4" />
-              <span>Admin Portal Login</span>
-            </Link>
-            <Link
-              to="/contact"
-              className="mt-2 w-full text-center py-2.5 px-4 rounded-lg bg-blue-600 text-white font-medium text-sm shadow-md"
-            >
-              Contact Corporate Office
-            </Link>
+          </div>
+
+          <div className="pt-3 border-t border-slate-200 flex flex-col gap-2">
+            {currentUser && lmsUser ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate(authorizedDashboardPath)}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#123D32] text-white font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <UserIcon className="w-4 h-4" />
+                  <span>Open My Workspace</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  className="w-full py-2 px-4 rounded-xl border border-slate-300 bg-white text-slate-700 font-medium text-xs cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5">
+                <Link
+                  to="/portal"
+                  className="py-2.5 px-4 rounded-xl border border-slate-300 bg-white text-[#18221F] font-semibold text-sm text-center"
+                >
+                  Login
+                </Link>
+                <Link
+                  to="/portal?mode=register"
+                  className="py-2.5 px-4 rounded-xl bg-[#2563EB] text-white font-semibold text-sm text-center"
+                >
+                  Get Started
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       )}

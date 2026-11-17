@@ -1,8 +1,11 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
@@ -22,11 +25,21 @@ import {
 import {
   detectQueryLanguage,
   normalizeAndExpandQuery,
+  parseEducationalIntent,
 } from './src/utils/searchIntelligence';
+import { EDUCATION_CATEGORY_BY_CODE } from './src/data/educationClassificationData';
 import type {
   MarketplaceCourse,
   MarketplaceAutocompleteSuggestion,
+  AssessmentDimension,
 } from './src/types';
+import {
+  getQuestionBank,
+  stripQuestionAnswers,
+  evaluateIqEqSqResponses,
+  NON_CLINICAL_EDUCATIONAL_DISCLAIMER,
+  type IqEqSqGradeBand,
+} from './src/data/iqEqSqQuestionsData';
 
 const geminiTelemetry = {
   dateKey: new Date().toISOString().slice(0, 10),
@@ -299,8 +312,78 @@ const VERIFIED_EDUCATIONAL_VIDEO_POOL: CuratedVideoSeed[] = [
     channelTitle: 'CS50',
     duration: '2:25:00',
     level: 'Beginner',
-    subject: 'computer science stem academic education engineering',
+    subject: 'computer science stem academic education engineering bca btech',
     recommendedReason: 'Gold-standard introduction to algorithmic thinking, abstraction, and problem decomposition.',
+  },
+  {
+    id: 'yt-econ-1',
+    videoId: '3ez10ADR_gM',
+    title: 'Intro to Economics & Microeconomics — Supply, Demand & Scarcity',
+    channelTitle: 'CrashCourse',
+    duration: '12:08',
+    level: 'Beginner',
+    subject: 'microeconomics economics supply demand commerce puc bcom ba',
+    recommendedReason: 'Clear foundational explanation of microeconomic decision-making, scarcity, incentives, and market equilibrium.',
+  },
+  {
+    id: 'yt-acc-1',
+    videoId: 'yYX4bvQSqbo',
+    title: 'Accounting Basics Explained Through Story — Debits, Credits & Balance Sheet',
+    channelTitle: 'Accounting Stuff',
+    duration: '18:05',
+    level: 'Beginner',
+    subject: 'accounting commerce puc bcom finance bookkeeping ledger gst',
+    recommendedReason: 'Step-by-step introduction to double-entry bookkeeping, income statements, and balance sheets for PUC & BCom learners.',
+  },
+  {
+    id: 'yt-fin-1',
+    videoId: 'WEDIj9JBTC8',
+    title: 'Finance & Investing Valuation — Cash Flow, Time Value of Money & Capital',
+    channelTitle: 'Ackman Finance Lecture',
+    duration: '43:39',
+    level: 'Intermediate',
+    subject: 'finance corporate finance mba bcom valuation investing',
+    recommendedReason: 'Practical framework for financial modeling, discounted cash flow, capital allocation, and business risk.',
+  },
+  {
+    id: 'yt-math-1',
+    videoId: 'fNk_zzaMoSs',
+    title: 'Essence of Mathematics — Vectors, Algebraic Structures & Geometric Reasoning',
+    channelTitle: '3Blue1Brown',
+    duration: '9:52',
+    level: 'Beginner',
+    subject: 'mathematics class 5 class 10 puc bsc engineering algebra geometry fractions',
+    recommendedReason: 'Builds visual intuition for foundational mathematical structures applicable from school to university engineering.',
+  },
+  {
+    id: 'yt-sci-1',
+    videoId: 'bHIhgxav9LY',
+    title: 'Physics & Science Principles Explained Clearly — Energy, Circuits & Forces',
+    channelTitle: 'Veritasium',
+    duration: '14:15',
+    level: 'Beginner',
+    subject: 'science physics chemistry biology class 10 secondary puc',
+    recommendedReason: 'Demystifies physical laws, energy transfer, and real-world scientific reasoning with clear visual demonstrations.',
+  },
+  {
+    id: 'yt-comm-1',
+    videoId: 'HAnw168huqA',
+    title: 'Think Fast, Talk Smart: Communication Skills & Confident Speaking',
+    channelTitle: 'Stanford Graduate School of Business',
+    duration: '58:18',
+    level: 'Beginner',
+    subject: 'communication skills spoken english public speaking career professional personality',
+    recommendedReason: 'Practical communication framework for structured speaking, confidence, active listening, and workplace persuasion.',
+  },
+  {
+    id: 'yt-res-1',
+    videoId: '2_wM2R-x6oI',
+    title: 'Research Methodology Complete Guide — Quantitative, Qualitative & Literature Review',
+    channelTitle: 'Scribbr',
+    duration: '15:24',
+    level: 'Intermediate',
+    subject: 'research methodology phd postgraduate doctoral academic writing thesis mba msc',
+    recommendedReason: 'Covers research design, sampling methods, data collection validity, and peer-reviewed academic writing standards.',
   },
 ];
 
@@ -432,7 +515,7 @@ function normalizeLoadedCourse(raw: any): MarketplaceCourse {
       : 'standard');
 
   const price = Math.max(0, Number(raw.price ?? 0));
-  const isFree = false;
+  const isFree = price === 0 || Boolean(raw.isFree);
   const pricingTier =
     raw.pricingTier && raw.pricingTier !== 'Free'
       ? raw.pricingTier
@@ -467,6 +550,9 @@ function normalizeLoadedCourse(raw: any): MarketplaceCourse {
       ? `https://i.ytimg.com/vi/${youtubeVideoId}/hqdefault.jpg`
       : getCategoryFallbackImage(raw.category || '', raw.categoryGroup || '');
 
+  const reviewCount = Number(raw.reviewCount || 0);
+  const hasVerifiedReviews = Boolean(raw.hasVerifiedReviews && reviewCount > 0);
+
   return {
     ...raw,
     recommendedVideos: normalizedRecVideos,
@@ -474,6 +560,8 @@ function normalizeLoadedCourse(raw: any): MarketplaceCourse {
     pricingTier,
     price,
     isFree,
+    reviewCount,
+    hasVerifiedReviews,
     courseType,
     contentType: raw.contentType,
     topic: raw.topic,
@@ -735,6 +823,8 @@ function getBaseCatalogIndex(): BaseCatalogIndex {
       lang,
       ...(course.keywords || []),
       ...(course.skillsAcquired || []),
+      ...(course.educationLevels || []),
+      ...(course.degreeProgrammes || []),
     ]
       .join(' ')
       .toLowerCase();
@@ -829,6 +919,8 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
   const publicationDate = params.publicationDate && params.publicationDate !== 'all' ? String(params.publicationDate) : null;
   const certificateOnly = params.certificateOnly === true || params.certificateOnly === 'true';
   const status = params.status && params.status !== 'All' ? String(params.status) : null;
+  const instructorFilter = typeof params.instructor === 'string' ? params.instructor.trim().toLowerCase() : '';
+  const channelFilter = typeof params.channel === 'string' ? params.channel.trim().toLowerCase() : '';
 
   const matched: MarketplaceCourse[] = [];
   const nowMs = Date.now();
@@ -911,6 +1003,45 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
       const ms = dateStr ? Date.parse(dateStr) : 0;
       if (!ms || ms < pubCutoffMs) continue;
     }
+    if (instructorFilter) {
+      const instr = (course.instructorName || course.instructor?.name || '').toLowerCase();
+      if (!instr.includes(instructorFilter)) continue;
+    }
+    if (channelFilter) {
+      const ch = (course.youtubeChannelName || '').toLowerCase();
+      if (!ch.includes(channelFilter)) continue;
+    }
+    if (params.accessType === 'free' && course.price > 0) continue;
+    if (params.accessType === 'paid' && course.price <= 0) continue;
+    if (params.educationLevel && params.educationLevel !== 'All') {
+      const targetLvl = String(params.educationLevel).toLowerCase();
+      const levels = (course.educationLevels || []).map((l) => l.toLowerCase());
+      const blobMatch = searchBlob.includes(targetLvl);
+      if (levels.length > 0 && !levels.some((l) => l.includes(targetLvl)) && !blobMatch) continue;
+    }
+    if (params.degree && params.degree !== 'All') {
+      const targetDeg = String(params.degree).toLowerCase();
+      const progs = (course.degreeProgrammes || []).map((p) => p.toLowerCase());
+      if (progs.length > 0 && !progs.some((p) => p.includes(targetDeg)) && !searchBlob.includes(targetDeg)) continue;
+    }
+    if (params.deliveryMethod && params.deliveryMethod !== 'All' && params.deliveryMethod !== 'all') {
+      const targetMethod = String(params.deliveryMethod).toLowerCase();
+      const effectiveMethod = (
+        course.deliveryMethod ||
+        (course.courseType === 'youtube_video' || course.courseType === 'youtube_playlist'
+          ? 'Self-paced online'
+          : 'Self-paced online')
+      ).toLowerCase();
+      if (effectiveMethod !== targetMethod) continue;
+    }
+    if (params.subject && params.subject !== 'All') {
+      const targetSub = String(params.subject).toLowerCase().trim();
+      if (targetSub && !searchBlob.includes(targetSub)) continue;
+    }
+    if (params.skill && params.skill !== 'All') {
+      const targetSkill = String(params.skill).toLowerCase().trim();
+      if (targetSkill && !searchBlob.includes(targetSkill)) continue;
+    }
     if (status && course.status !== status) continue;
 
     matched.push(course);
@@ -931,16 +1062,137 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '5mb' }));
+  app.use(
+    express.json({
+      limit: '5mb',
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
   // Warm base catalog index in background
   setImmediate(() => getBaseCatalogIndex());
 
-  // Lightweight sliding-window per-IP rate limiter for AI, YouTube & Discovery APIs
+  // ------------------------------------------------------------------
+  // Server-side Firebase ID Token Verifier (RS256 via Google Public Certs)
+  // ------------------------------------------------------------------
+  const firebaseAppletCfg = (() => {
+    try {
+      return JSON.parse(
+        fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf8')
+      );
+    } catch {
+      return { projectId: '', firestoreDatabaseId: '(default)' };
+    }
+  })();
+
+  let cachedCerts: Record<string, string> = {};
+  let cachedCertsExpiresAt = 0;
+
+  async function getFirebasePublicCerts(): Promise<Record<string, string>> {
+    if (Date.now() < cachedCertsExpiresAt && Object.keys(cachedCerts).length > 0) {
+      return cachedCerts;
+    }
+    const resp = await fetch(
+      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!resp.ok) throw new Error('Failed to fetch Firebase public certificates.');
+    const cc = resp.headers.get('cache-control') || '';
+    const maxAgeMatch = cc.match(/max-age=(\d+)/i);
+    const maxAgeSec = maxAgeMatch ? Number(maxAgeMatch[1]) : 3600;
+    cachedCerts = (await resp.json()) as Record<string, string>;
+    cachedCertsExpiresAt = Date.now() + Math.max(60, maxAgeSec) * 1000;
+    return cachedCerts;
+  }
+
+  interface VerifiedFirebaseUser {
+    uid: string;
+    email: string;
+    emailVerified: boolean;
+    rawToken: string;
+  }
+
+  async function verifyFirebaseBearerToken(
+    req: express.Request
+  ): Promise<VerifiedFirebaseUser | null> {
+    const authHeader = String(req.headers.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.slice(7).trim();
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    try {
+      const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      if (header.alg !== 'RS256' || !header.kid) return null;
+
+      const certs = await getFirebasePublicCerts();
+      const certPem = certs[header.kid];
+      if (!certPem) return null;
+
+      const signedInput = `${parts[0]}.${parts[1]}`;
+      const signature = Buffer.from(parts[2], 'base64url');
+      const isValidSig = crypto.verify(
+        'RSA-SHA256',
+        Buffer.from(signedInput, 'utf8'),
+        certPem,
+        signature
+      );
+      if (!isValidSig) return null;
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const expectedAud = firebaseAppletCfg.projectId;
+      if (!expectedAud || payload.aud !== expectedAud) return null;
+      if (payload.iss !== `https://securetoken.google.com/${expectedAud}`) return null;
+      if (typeof payload.exp !== 'number' || payload.exp <= nowSec) return null;
+      if (typeof payload.sub !== 'string' || !payload.sub) return null;
+
+      return {
+        uid: payload.sub,
+        email: String(payload.email || '').toLowerCase(),
+        emailVerified: Boolean(payload.email_verified),
+        rawToken: token,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const SERVER_SUPER_ADMIN_EMAILS = new Set([
+    'akashrajnayak@gmail.com',
+    'admin@openframeitsolutions.com',
+  ]);
+
+  async function isVerifiedPlatformAdmin(user: VerifiedFirebaseUser): Promise<boolean> {
+    if (user.emailVerified && SERVER_SUPER_ADMIN_EMAILS.has(user.email)) {
+      return true;
+    }
+    if (!firebaseAppletCfg.projectId) return false;
+    const dbId = firebaseAppletCfg.firestoreDatabaseId || '(default)';
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseAppletCfg.projectId}/databases/${dbId}/documents/admin_users/${encodeURIComponent(user.uid)}`;
+    try {
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${user.rawToken}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!resp.ok) return false;
+      const doc = (await resp.json()) as any;
+      const fields = doc.fields || {};
+      const isActive = fields.isActive?.booleanValue === true;
+      const role = fields.role?.stringValue || '';
+      return isActive && (role === 'Super Admin' || role === 'Education Admin');
+    } catch {
+      return false;
+    }
+  }
+
+  // Lightweight sliding-window per-IP rate limiter for AI, YouTube, Discovery, Payments & School Partner APIs
   const rateLimitMap = new Map<string, number[]>();
   const RATE_LIMIT_WINDOW_MS = 60_000;
   const RATE_LIMIT_MAX_REQUESTS = 90;
 
-  app.use(['/api/youtube', '/api/discovery', '/api/quinn'], (req, res, next) => {
+  app.use(['/api/youtube', '/api/discovery', '/api/quinn', '/api/school-partner', '/api/payments'], (req, res, next) => {
     const forwarded = req.headers['x-forwarded-for'];
     const ip =
       (Array.isArray(forwarded) ? forwarded[0] : String(forwarded || '').split(',')[0].trim()) ||
@@ -1612,27 +1864,62 @@ async function startServer() {
       category = '',
       language = '',
       searchType = 'video',
+      pageToken = '',
+      duration = 'any',
+      publicationDate = 'all',
+      channel = '',
       maxResults = 9,
     } = req.body || {};
     const cleanQuery = String(query || '').trim();
+    const cleanChannel = String(channel || '').trim();
     const detected = detectQueryLanguage(cleanQuery);
     const effectiveLang =
       language && language !== 'auto' && language !== 'Auto-Detect Language'
         ? String(language)
         : detected.label;
 
+    const ytDuration: 'any' | 'short' | 'medium' | 'long' =
+      duration === 'short'
+        ? 'short'
+        : duration === 'medium'
+        ? 'medium'
+        : duration === 'long'
+        ? 'long'
+        : 'any';
+
+    const nowMs = Date.now();
+    const publishedAfter =
+      publicationDate === 'week'
+        ? new Date(nowMs - 7 * 86400000).toISOString()
+        : publicationDate === 'month'
+        ? new Date(nowMs - 30 * 86400000).toISOString()
+        : publicationDate === 'year'
+        ? new Date(nowMs - 365 * 86400000).toISOString()
+        : undefined;
+
     const quota = youtubeDiscoveryEngine.getQuotaStatus();
-    if (quota.apiKeyConfigured && cleanQuery) {
+    if (quota.apiKeyConfigured && (cleanQuery || cleanChannel)) {
       try {
         const page = await youtubeDiscoveryEngine.discoverPage({
-          query: `${cleanQuery} ${category}`.trim(),
+          query: `${cleanQuery} ${cleanChannel} ${category}`.trim(),
           category: String(category || 'Artificial Intelligence'),
           languageLabel: effectiveLang,
           searchType: searchType === 'playlist' ? 'playlist' : 'video',
+          pageToken: pageToken ? String(pageToken) : undefined,
+          videoDuration: ytDuration,
+          publishedAfter,
           maxResults: Number(maxResults) || 9,
         });
-        if (page.items.length > 0) {
-          const videos = page.items.map((item) => ({
+        let filteredItems = page.items;
+        if (cleanChannel) {
+          const lc = cleanChannel.toLowerCase();
+          const chMatches = filteredItems.filter((item) =>
+            (item.youtubeChannelName || '').toLowerCase().includes(lc)
+          );
+          if (chMatches.length > 0) filteredItems = chMatches;
+        }
+        if (filteredItems.length > 0) {
+          const videos = filteredItems.map((item) => ({
             id: item.youtubeVideoId || item.youtubePlaylistId || item.id,
             videoId: item.youtubeVideoId || '',
             youtubeId: item.youtubeVideoId || '',
@@ -1658,15 +1945,32 @@ async function startServer() {
               : `https://www.youtube-nocookie.com/embed/${item.youtubeVideoId}`,
             source: 'youtube_data_api',
           }));
-          trackSearchQuery(cleanQuery, effectiveLang, videos.length);
+          trackSearchQuery(cleanQuery || cleanChannel, effectiveLang, videos.length);
           return res.json({
             source: 'youtube_data_api',
             detectedLanguage: effectiveLang,
+            nextPageToken: page.nextPageToken || null,
+            totalResults: page.totalResults || videos.length,
             videos,
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn('Live YouTube Data API search fallback to curated index:', err);
+        const fallback = selectCuratedFallbackVideos(cleanQuery, String(category)).map((v) => ({
+          ...v,
+          detectedLanguage: effectiveLang,
+          embeddable: true,
+        }));
+        trackSearchQuery(cleanQuery, effectiveLang, fallback.length);
+        return res.json({
+          source: 'curated_library',
+          retryable: true,
+          error: err?.message || 'Live YouTube Data API search temporarily unavailable.',
+          notice: 'YouTube Data API search encountered a temporary error — showing curated OpenFrame lectures with retry option.',
+          detectedLanguage: effectiveLang,
+          nextPageToken: null,
+          videos: fallback,
+        });
       }
     }
     const fallback = selectCuratedFallbackVideos(cleanQuery, String(category)).map((v) => ({
@@ -1674,10 +1978,12 @@ async function startServer() {
       detectedLanguage: effectiveLang,
       embeddable: true,
     }));
-    trackSearchQuery(cleanQuery, effectiveLang, fallback.length);
+    trackSearchQuery(cleanQuery || cleanChannel, effectiveLang, fallback.length);
     return res.json({
       source: 'curated_library',
+      retryable: false,
       detectedLanguage: effectiveLang,
+      nextPageToken: null,
       videos: fallback,
     });
   });
@@ -2603,6 +2909,537 @@ ${JSON.stringify(videoMetadataList, null, 2)}`,
   });
 
   // ------------------------------------------------------------------
+  // Quinn AI Intelligent Education Discovery & 8-Category Recommendation + Roadmap
+  // ------------------------------------------------------------------
+  app.post('/api/quinn/discover-and-recommend', async (req, res) => {
+    const {
+      query = '',
+      studentProfile = null,
+      filters = {},
+      maxPerGroup = 4,
+    } = req.body || {};
+
+    const rawQuery = String(query || '').trim();
+    const intent = parseEducationalIntent(rawQuery, studentProfile);
+    const index = getBaseCatalogIndex();
+    const excludeSet = new Set<string>();
+    const perGroup = Math.min(8, Math.max(2, Number(maxPerGroup) || 4));
+
+    const intentTerms = Array.from(
+      new Set([
+        ...(intent.intentPriorityTerms || []).map((t) => t.toLowerCase()),
+        ...(intent.searchKeywords || []).map((t) => t.toLowerCase()),
+      ])
+    ).filter((t) => t.length >= 2);
+
+    const degreeLower = (intent.degreeOrClass || '').toLowerCase();
+    const profileSkills = Array.isArray(studentProfile?.skills)
+      ? (studentProfile.skills as string[]).map((s) => s.toLowerCase())
+      : [];
+
+    // Respect optional explicit filters while ranking by current query intent first
+    const baseFiltered = filterBaseIndex(
+      {
+        ...filters,
+        query: '', // Score ourselves so conversational sentences never return 0 strict AND hits
+        status: filters.status || 'Published',
+      },
+      excludeSet
+    );
+    const candidatePool = baseFiltered.length > 0 ? baseFiltered : index.items.map((i) => i.course);
+
+    const scoreCourse = (course: MarketplaceCourse) => {
+      const subjectBlob = [
+        course.title,
+        course.category,
+        ...(course.categories || []),
+        course.subcategory,
+        course.shortDesc,
+        ...(course.keywords || []),
+        ...(course.skillsAcquired || []),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      const levelBlob = [
+        ...(course.degreeProgrammes || []),
+        ...(course.educationLevels || []),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      const titleLower = course.title.toLowerCase();
+      const catLower = course.category.toLowerCase();
+      const subLower = (course.subcategory || '').toLowerCase();
+
+      let searchScore = 0;
+      const desiredLower = (intent.desiredSkill || '').toLowerCase();
+      const subDesired = desiredLower
+        .split(/[&,/]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 2 && s !== 'taxation');
+
+      if (desiredLower && desiredLower.length >= 2 && subjectBlob.includes(desiredLower)) {
+        searchScore += 65;
+      }
+      for (const sd of subDesired) {
+        if (catLower === sd || catLower.includes(sd)) searchScore += 75;
+        else if (titleLower.includes(sd)) searchScore += 60;
+        else if (subLower.includes(sd)) searchScore += 40;
+      }
+
+      for (const term of intentTerms) {
+        if (term.length < 2) continue;
+        if (catLower === term || catLower.includes(term)) searchScore += 32;
+        else if (titleLower.includes(term)) searchScore += 24;
+        else if (subLower.includes(term)) searchScore += 18;
+        else if (subjectBlob.includes(term)) searchScore += 9;
+      }
+
+      // Degree context bonus (strictly smaller than search intent so current search always wins!)
+      let degreeScore = 0;
+      if (degreeLower && (levelBlob.includes(degreeLower) || subjectBlob.includes(degreeLower))) {
+        degreeScore += 18;
+      }
+      if (intent.educationLevelCode === 'A') {
+        if (/(school education|spoken english|alphabet|phonics|early|kids|story|creative writing)/i.test(subjectBlob)) degreeScore += 28;
+        if (course.level === 'Beginner' || course.level === 'All Levels') degreeScore += 12;
+        if (/(machine learning|deep learning|distributed networks|industrial capstone|enterprise implementation|devsecops|business meeting|auth & security|high-performance system|high-impact resumes|high-impact)/i.test(titleLower)) {
+          searchScore -= 150;
+        }
+      }
+      if (intent.educationLevelCode === 'B') {
+        if (/(school education|mathematics|science|spoken english|foundation|fractions)/i.test(subjectBlob)) degreeScore += 24;
+        if (course.level === 'Beginner' || course.level === 'All Levels') degreeScore += 10;
+        if (/(machine learning|deep learning|devsecops|enterprise implementation|business meeting|auth & security)/i.test(titleLower)) {
+          searchScore -= 120;
+        }
+      }
+      if ((intent.educationLevelCode === 'C' || intent.educationLevelCode === 'D') && /(science|math|physics|chemistry|biology|coding|school education)/i.test(subjectBlob)) degreeScore += 16;
+      if (intent.educationLevelCode === 'E' && /(accounting|economics|commerce|physics|chemistry|math|puc|finance)/i.test(subjectBlob)) degreeScore += 16;
+      if (degreeLower.includes('bca') && /(programming|web|software|python|digital|database|ai|it)/i.test(subjectBlob)) degreeScore += 14;
+      if (degreeLower.includes('bcom') && /(accounting|finance|excel|commerce|python|analytics|gst|tally)/i.test(subjectBlob)) degreeScore += 14;
+      if (degreeLower.includes('mba') && /(finance|management|leadership|strategy|marketing|analytics)/i.test(subjectBlob)) degreeScore += 14;
+      if ((degreeLower.includes('btech') || degreeLower.includes('engineering')) && /(engineering|ai|machine learning|python|robotics|cloud|iot)/i.test(subjectBlob)) degreeScore += 14;
+      if ((intent.educationLevelCode === 'H' || intent.educationLevelCode === 'I') && /(research|statistics|analytics|academic|writing|python|data|finance)/i.test(subjectBlob)) degreeScore += 16;
+
+      let profileBonus = 0;
+      for (const sk of profileSkills) {
+        if (subjectBlob.includes(sk)) profileBonus += 5;
+      }
+
+      const popularityBoost = Math.min(6, Math.floor((course.enrolledCount || 0) / 20000));
+      const totalScore = searchScore * 2 + degreeScore + profileBonus + popularityBoost;
+      return { course, searchScore, degreeScore, totalScore };
+    };
+
+    const scored = candidatePool
+      .map(scoreCourse)
+      .sort((a, b) => b.totalScore - a.totalScore);
+
+    const pickDistinct = (
+      predicate: (s: ReturnType<typeof scoreCourse>) => boolean,
+      categoryId: string,
+      makeWhy: (s: ReturnType<typeof scoreCourse>) => string,
+      limitCount = perGroup
+    ) => {
+      const seenTitles = new Set<string>();
+      const items: ReturnType<typeof scoreCourse>[] = [];
+      for (const s of scored) {
+        if (!predicate(s)) continue;
+        const normTitle = s.course.title.trim().toLowerCase();
+        if (seenTitles.has(normTitle)) continue;
+        seenTitles.add(normTitle);
+        items.push(s);
+        if (items.length >= limitCount) break;
+      }
+      return items.map((s) => ({
+        course: s.course,
+        whyRecommended: makeWhy(s),
+        matchScore: s.totalScore,
+        recommendationCategory: categoryId,
+      }));
+    };
+
+    const topicLabel = intent.desiredSkill || intent.cleanedQuery || 'Core Foundations';
+    const eduBadge = intent.degreeOrClass || intent.educationLevelLabel || 'Your Learning Goal';
+
+    const recommendedForYou = pickDistinct(
+      (s) => s.searchScore > 0 || scored.indexOf(s) < 12,
+      'recommended_for_you',
+      () =>
+        `Prioritizes your current goal "${topicLabel}"${intent.degreeOrClass ? ` while adapting pacing for ${intent.degreeOrClass}` : ''}.`
+    );
+
+    const relatedToDegree = pickDistinct(
+      (s) => s.degreeScore > 0 || (degreeLower ? s.course.categoryGroup === 'Academic' || s.course.categoryGroup === 'Business' || s.course.categoryGroup === 'Technology' : true),
+      'related_to_degree',
+      (s) => `Aligned with ${eduBadge} academic and practical competencies (${s.course.category}).`
+    );
+
+    const relatedToSearch = pickDistinct(
+      (s) => s.searchScore > 0,
+      'related_to_search',
+      () => `Direct curriculum match for "${rawQuery || topicLabel}".`
+    );
+
+    const careerDevelopment = pickDistinct(
+      (s) => s.course.isCareerTrack || s.course.categoryGroup === 'Professional' || s.course.categoryGroup === 'Business',
+      'career_development',
+      () => `Builds workplace readiness, interview confidence, and portfolio proof alongside ${topicLabel}.`
+    );
+
+    const additionalSkills = pickDistinct(
+      (s) => s.searchScore > 0 || s.course.category === 'Communication Skills' || s.course.category === 'Data Analytics' || s.course.category.includes('Excel'),
+      'additional_skills',
+      () => `High-leverage complementary skill that multiplies your career edge with ${topicLabel}.`
+    );
+
+    const beginnerCourses = pickDistinct(
+      (s) => (s.course.level === 'Beginner' || s.course.level === 'All Levels') && (s.searchScore > 0 || scored.indexOf(s) < 40),
+      'beginner_courses',
+      () => `Accessible entry point with step-by-step foundations in ${topicLabel}.`
+    );
+
+    const advancedCourses = pickDistinct(
+      (s) => s.course.level === 'Advanced' || s.course.level === 'Intermediate',
+      'advanced_courses',
+      () => `Applied capstone and deeper mastery track once you finish core ${topicLabel} basics.`
+    );
+
+    // Fetch real YouTube educational videos (API first if configured, curated fallback otherwise)
+    let youtubeResources = selectCuratedFallbackVideos(`${topicLabel} ${intent.degreeOrClass || ''}`, '').map((v) => ({
+      ...v,
+      detectedLanguage: intent.preferredLanguage || 'English',
+      embeddable: true,
+    }));
+    let youtubeSource = 'curated_library';
+
+    const quota = youtubeDiscoveryEngine.getQuotaStatus();
+    if (quota.apiKeyConfigured && topicLabel) {
+      try {
+        const ytPage = await youtubeDiscoveryEngine.discoverPage({
+          query: `${topicLabel} ${intent.educationLevelCode === 'A' || intent.educationLevelCode === 'B' ? intent.degreeOrClass || '' : ''} tutorial`,
+          category: intent.primarySubject || 'Education',
+          languageLabel: intent.preferredLanguage || 'English',
+          searchType: 'video',
+          maxResults: 6,
+        });
+        if (ytPage.items.length > 0) {
+          youtubeSource = 'youtube_data_api';
+          youtubeResources = ytPage.items.map((item) => ({
+            id: item.youtubeVideoId || item.id,
+            videoId: item.youtubeVideoId || '',
+            youtubeId: item.youtubeVideoId || '',
+            title: item.title,
+            channelTitle: item.youtubeChannelName,
+            thumbnail: item.thumbnailUrl,
+            thumbnailUrl: item.thumbnailUrl,
+            duration: item.duration || 'N/A',
+            level: item.level === 'All Levels' ? 'Beginner' : item.level,
+            recommendedReason: `External YouTube lecture supporting ${topicLabel} mastery.`,
+            embedUrl: `https://www.youtube-nocookie.com/embed/${item.youtubeVideoId}`,
+            source: 'External YouTube Resource',
+          }));
+        }
+      } catch (err) {
+        console.warn('Discover endpoint YouTube lookup fallback:', err);
+      }
+    }
+
+    // Build 8-Stage Visual Learning Roadmap
+    const stageTemplates = [
+      { title: `Orientation & Foundations of ${topicLabel}`, dur: 'Week 1 · 3–4 hrs', focus: 'Core terminology, mental models, and why the discipline matters.' },
+      { title: `Core Concepts & Key Principles`, dur: 'Week 2 · 4–5 hrs', focus: `Structured breakdown of essential frameworks in ${topicLabel}.` },
+      { title: `Tools, Workflows & Guided Exercises`, dur: 'Week 3 · 5 hrs', focus: `Hands-on walkthroughs applying ${topicLabel} step by step.` },
+      { title: `Applied Practice & Problem Solving`, dur: 'Week 4 · 5–6 hrs', focus: 'Worked examples and practice scenarios tuned to real questions.' },
+      { title: `Intermediate Techniques & Strategy`, dur: 'Week 5 · 6 hrs', focus: 'Analytical workflows, optimization patterns, and edge cases.' },
+      { title: `Cross-Disciplinary Application${intent.degreeOrClass ? ` for ${intent.degreeOrClass}` : ''}`, dur: 'Week 6 · 6 hrs', focus: `Connecting ${topicLabel} directly to ${eduBadge} projects.` },
+      { title: `Portfolio Mini-Project & Peer Review`, dur: 'Week 7 · 6–8 hrs', focus: 'Complete an independent build or analytical report.' },
+      { title: `Capstone Verification & Career Readiness`, dur: 'Week 8 · 5 hrs', focus: 'Verification quiz, presentation defense, and next-level goals.' },
+    ];
+
+    const stages = stageTemplates.map((st, idx) => {
+      const courseSlice = (idx < 3 ? beginnerCourses : idx < 6 ? recommendedForYou : advancedCourses)
+        .slice(idx % 2, (idx % 2) + 2)
+        .map((r) => r.course.id);
+      const vid = youtubeResources[idx % Math.max(1, youtubeResources.length)];
+      return {
+        stageNumber: idx + 1,
+        title: st.title,
+        focusSummary: st.focus,
+        estimatedDuration: st.dur,
+        topics: [
+          `${topicLabel} Stage ${idx + 1} Core Ideas`,
+          idx < 4 ? 'Concept Drills & Walkthroughs' : 'Applied Case Scenarios',
+        ],
+        milestoneAssignment: `Stage ${idx + 1} Milestone: Complete practice deliverable & 5-minute summary for "${st.title}".`,
+        recommendedCourseIds: courseSlice,
+        youtubeResources: vid ? [vid] : [],
+      };
+    });
+
+    const relatedSkills = Array.from(
+      new Set([
+        topicLabel,
+        ...scored.slice(0, 8).flatMap((s) => s.course.skillsAcquired || [s.course.category]),
+        'Communication Skills',
+        'Problem Solving',
+      ])
+    ).slice(0, 10);
+
+    trackSearchQuery(rawQuery || topicLabel, intent.preferredLanguage || 'English', scored.filter((s) => s.searchScore > 0).length);
+
+    return res.json({
+      parsedIntent: intent,
+      recommendationGroups: [
+        { id: 'recommended_for_you', title: 'Recommended for You', subtitle: `Prioritizing "${topicLabel}" tailored to ${eduBadge}`, courses: recommendedForYou },
+        { id: 'related_to_degree', title: 'Related to Your Degree / Level', subtitle: `Academic alignment for ${eduBadge}`, courses: relatedToDegree },
+        { id: 'related_to_search', title: 'Related to Your Search', subtitle: `Closest curriculum matches for "${rawQuery || topicLabel}"`, courses: relatedToSearch },
+        { id: 'career_development', title: 'Career Development', subtitle: 'Workplace skills, communication & interview preparation', courses: careerDevelopment },
+        { id: 'additional_skills', title: 'Additional Complementary Skills', subtitle: 'Cross-functional capabilities that stand out', courses: additionalSkills },
+        { id: 'beginner_courses', title: 'Beginner Courses', subtitle: 'Start cleanly with structured prerequisites', courses: beginnerCourses },
+        { id: 'advanced_courses', title: 'Advanced & Applied Courses', subtitle: 'Deep specialization & real-world capstones', courses: advancedCourses },
+      ],
+      youtubeResources,
+      youtubeSource,
+      relatedSkills,
+      totalMatchedCourses: scored.filter((s) => s.searchScore > 0).length || recommendedForYou.length,
+      roadmap: {
+        id: `roadmap-${Date.now().toString(36)}`,
+        topic: topicLabel,
+        targetOutcome: `Build confident practical mastery in ${topicLabel}${intent.degreeOrClass ? ` as a ${intent.degreeOrClass} learner` : ''}`,
+        educationContext: eduBadge,
+        totalEstimatedDuration: '8 Weeks · Self-Paced (~40 Hours)',
+        stages,
+        nonDegreeDisclaimer: 'Self-paced OpenFrame Skill Roadmap for guided learning & OpenFrame course certification — not an accredited university degree programme.',
+        generatedBy: 'structured_engine',
+        createdAt: new Date().toISOString(),
+      },
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // Quinn AI Academic & Skill Q&A Endpoint (Structured Sections A-F)
+  // ------------------------------------------------------------------
+  app.post('/api/quinn/qa', async (req, res) => {
+    const { question = '', studentProfile = null, educationContext = '', language = 'English' } = req.body || {};
+    const cleanQ = String(question || '').trim();
+    if (!cleanQ) {
+      return res.status(400).json({ error: 'Please provide an academic or skill question.' });
+    }
+
+    const intent = parseEducationalIntent(cleanQ, studentProfile);
+    const effectiveContext = String(educationContext || intent.degreeOrClass || intent.educationLevelLabel || 'General Learner');
+    const topicLabel = intent.desiredSkill || intent.primarySubject || cleanQ;
+    const effectiveLang =
+      language && language !== 'auto' && language !== 'Auto-Detect Language'
+        ? String(language)
+        : intent.preferredLanguage || 'English';
+
+    // Match real catalog courses
+    const index = getBaseCatalogIndex();
+    const terms = (intent.intentPriorityTerms || []).map((t) => t.toLowerCase()).filter((t) => t.length >= 2);
+    const matchedCourses = index.items
+      .filter((i) => i.course.status === 'Published')
+      .map((i) => {
+        const score = terms.reduce((acc, term) => (i.searchBlob.includes(term) ? acc + 10 : acc), 0);
+        return { course: i.course, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map((m) => ({
+        course: m.course,
+        rationale: `Recommended to explore "${topicLabel}" through structured OpenFrame lessons and quizzes.`,
+      }));
+
+    // Real YouTube videos
+    let youtubeVideos = selectCuratedFallbackVideos(cleanQ, topicLabel).map((v) => ({
+      ...v,
+      source: 'External YouTube Resource',
+      embeddable: true,
+    }));
+    const quota = youtubeDiscoveryEngine.getQuotaStatus();
+    if (quota.apiKeyConfigured) {
+      try {
+        const ytPage = await youtubeDiscoveryEngine.discoverPage({
+          query: `${topicLabel} explained tutorial`,
+          category: intent.primarySubject || 'Education',
+          languageLabel: effectiveLang,
+          maxResults: 4,
+        });
+        if (ytPage.items.length > 0) {
+          youtubeVideos = ytPage.items.slice(0, 4).map((item) => ({
+            id: item.youtubeVideoId || item.id,
+            videoId: item.youtubeVideoId || '',
+            youtubeId: item.youtubeVideoId || '',
+            title: item.title,
+            channelTitle: item.youtubeChannelName,
+            thumbnail: item.thumbnailUrl,
+            thumbnailUrl: item.thumbnailUrl,
+            duration: item.duration || 'N/A',
+            level: item.level === 'All Levels' ? 'Beginner' : item.level,
+            recommendedReason: `External YouTube lecture covering ${topicLabel}.`,
+            embedUrl: `https://www.youtube-nocookie.com/embed/${item.youtubeVideoId}`,
+            source: 'External YouTube Resource',
+          }));
+        }
+      } catch (err) {
+        console.warn('Q&A YouTube lookup fallback:', err);
+      }
+    }
+
+    const fallbackResponse = {
+      question: cleanQ,
+      subject: intent.primarySubject || 'General Studies',
+      topic: topicLabel,
+      educationContext: effectiveContext,
+      language: effectiveLang,
+      answer: `${topicLabel} can be understood clearly by separating its core definition, how it operates in practice, and when learners at the ${effectiveContext} level apply it. Start by anchoring the foundational vocabulary, inspect a concrete real-world example, and verify understanding with short active-recall checks.`,
+      examples: [
+        `Real-world application of ${topicLabel}: breaking a practical problem into clear inputs, governing rules, and measurable outcomes.`,
+        `Study application for ${effectiveContext}: mapping core principles of ${topicLabel} directly onto exam problems or portfolio deliverables.`,
+      ],
+      keyTakeaways: [
+        `Anchor core definitions and terminology of ${topicLabel} before moving to complex variations.`,
+        `Verify every concept with at least one worked example or hands-on exercise.`,
+        `Pair conceptual Q&A with a structured OpenFrame course for certification readiness.`,
+      ],
+      relatedConcepts: [
+        `${topicLabel} Fundamentals`,
+        `Applied ${intent.primarySubject || topicLabel}`,
+        'Problem Solving & Quantitative Reasoning',
+        'Practical Case Analysis',
+      ],
+      recommendedCourses: matchedCourses,
+      youtubeVideos,
+      suggestedLearningPathTitle: `${topicLabel} — Step-by-Step Study Path`,
+      suggestedLearningPathSteps: [
+        `Step 1: Review conceptual overview and core definitions of ${topicLabel}`,
+        `Step 2: Watch the curated video lecture & write 3 summary bullets`,
+        `Step 3: Enroll in a structured OpenFrame ${topicLabel} course for practice & verification`,
+      ],
+      practiceQuiz: [
+        {
+          id: 'qa-q1',
+          question: `When mastering ${topicLabel} for the first time, what approach builds the strongest long-term recall?`,
+          options: [
+            'Combining conceptual explanation with worked examples and active self-testing',
+            'Memorizing definitions without checking real examples',
+            'Skipping foundational concepts to attempt advanced problems immediately',
+            'Avoiding practice exercises after reading notes',
+          ],
+          correctIndex: 0,
+          explanation: 'Connecting core intuition, real examples, and active-recall quizzes ensures transferable understanding.',
+        },
+        {
+          id: 'qa-q2',
+          question: `Which next step turns conceptual understanding of ${topicLabel} into verified competency?`,
+          options: [
+            'Applying the concept inside a structured lesson, quiz, or small practical project',
+            'Closing the notes without testing comprehension',
+            'Reading unrelated topics simultaneously',
+            'Ignoring prerequisite concepts',
+          ],
+          correctIndex: 0,
+          explanation: 'Applied exercises and verification quizzes validate practical mastery.',
+        },
+      ],
+      generatedBy: 'structured_engine',
+      honestyNote: 'Educational synthesis powered by OpenFrame Discovery Engine. External YouTube resources are linked for supplementary viewing; no external academic citations fabricated.',
+    };
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json(fallbackResponse);
+    }
+
+    try {
+      const response = await withGeminiTimeout(
+        (abortSignal) =>
+          ai.models.generateContent({
+            model: MODEL_TEXT,
+            contents: `You are Quinn AI, the Educational Mentor for OpenFrame Education.
+Answer the following learner question clearly, accurately, and at an appropriate depth for their educational level.
+
+Learner Question: "${cleanQ}"
+Learner Education Context: "${effectiveContext}"
+Preferred Language: "${effectiveLang}"
+
+STRICT GROUNDING & HONESTY RULES:
+- Never invent or fabricate academic paper citations, DOIs, or external URLs.
+- Give a crisp, accurate, structured educational explanation with 2 concrete real-world examples.
+- Include 4 related concepts, 3 key takeaways, 3 suggested study steps, and 2 multiple-choice practice questions.`,
+            config: {
+              abortSignal,
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  subject: { type: Type.STRING },
+                  topic: { type: Type.STRING },
+                  answer: { type: Type.STRING },
+                  examples: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  keyTakeaways: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  relatedConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  suggestedLearningPathTitle: { type: Type.STRING },
+                  suggestedLearningPathSteps: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  practiceQuiz: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        question: { type: Type.STRING },
+                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        correctIndex: { type: Type.NUMBER },
+                        explanation: { type: Type.STRING },
+                      },
+                      required: ['question', 'options', 'correctIndex', 'explanation'],
+                    },
+                  },
+                },
+                required: ['subject', 'topic', 'answer', 'examples', 'keyTakeaways', 'relatedConcepts', 'suggestedLearningPathTitle', 'suggestedLearningPathSteps', 'practiceQuiz'],
+              },
+            },
+          }),
+        8500,
+        'quinn-qa'
+      );
+
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      if (parsed && parsed.answer) {
+        return res.json({
+          ...fallbackResponse,
+          subject: parsed.subject || fallbackResponse.subject,
+          topic: parsed.topic || fallbackResponse.topic,
+          answer: parsed.answer,
+          examples: Array.isArray(parsed.examples) && parsed.examples.length > 0 ? parsed.examples : fallbackResponse.examples,
+          keyTakeaways: Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0 ? parsed.keyTakeaways : fallbackResponse.keyTakeaways,
+          relatedConcepts: Array.isArray(parsed.relatedConcepts) && parsed.relatedConcepts.length > 0 ? parsed.relatedConcepts : fallbackResponse.relatedConcepts,
+          suggestedLearningPathTitle: parsed.suggestedLearningPathTitle || fallbackResponse.suggestedLearningPathTitle,
+          suggestedLearningPathSteps: Array.isArray(parsed.suggestedLearningPathSteps) && parsed.suggestedLearningPathSteps.length > 0 ? parsed.suggestedLearningPathSteps : fallbackResponse.suggestedLearningPathSteps,
+          practiceQuiz:
+            Array.isArray(parsed.practiceQuiz) && parsed.practiceQuiz.length > 0
+              ? parsed.practiceQuiz.map((q: any, i: number) => ({
+                  id: `qa-ai-${i + 1}`,
+                  question: q.question,
+                  options: Array.isArray(q.options) ? q.options.slice(0, 4) : [],
+                  correctIndex: Math.max(0, Math.min(3, Number(q.correctIndex) || 0)),
+                  explanation: q.explanation || '',
+                }))
+              : fallbackResponse.practiceQuiz,
+          generatedBy: 'gemini',
+        });
+      }
+    } catch (err) {
+      console.warn('Gemini quinn-qa warning, returning structured fallback:', err);
+    }
+
+    return res.json(fallbackResponse);
+  });
+
+  // ------------------------------------------------------------------
   // AI Lesson Summary & Study Guide Generator
   // ------------------------------------------------------------------
   app.post('/api/quinn/lesson-summary', async (req, res) => {
@@ -2783,39 +3620,666 @@ SAFETY & ACCURACY RULES:
   });
 
   // ------------------------------------------------------------------
-  // Module 11: Email Notification Hook
+  // Quinn AI Practice Questions Generator (On-Demand Lesson Self-Check)
+  // ------------------------------------------------------------------
+  app.post('/api/quinn/practice-questions', async (req, res) => {
+    const {
+      courseTitle = 'Course Study',
+      lessonTopic = '',
+      language = 'English',
+      objectives = [],
+    } = req.body || {};
+
+    const topic = String(lessonTopic || courseTitle).trim();
+    const fallbackQuestions = [
+      {
+        question: `Define the primary workflow or problem solved by "${topic}" in practical settings.`,
+        hint: `Focus on inputs, core transformation logic, and expected outcomes.`,
+        sampleAnswer: `${topic} provides a repeatable methodology to translate raw inputs into structured, verifiable results in ${courseTitle}.`,
+        difficulty: 'Basic',
+      },
+      {
+        question: `What is one common mistake learners make when applying "${topic}", and how do you verify against it?`,
+        hint: `Think about edge cases, validation checks, or baseline comparisons.`,
+        sampleAnswer: `Skipping validation of boundary conditions or source assumptions; always test with a clean control example.`,
+        difficulty: 'Intermediate',
+      },
+      {
+        question: `Design a short real-world mini-exercise applying "${topic}" within "${courseTitle}".`,
+        hint: `Identify dataset/scenario, key formula/component, and measurable evaluation metric.`,
+        sampleAnswer: `Define clear acceptance criteria, implement one end-to-end sample workflow, and compare outputs against rubric benchmarks.`,
+        difficulty: 'Applied',
+      },
+    ];
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({ source: 'structured_fallback', questions: fallbackQuestions });
+    }
+
+    try {
+      const response = await withGeminiTimeout(
+        (abortSignal) =>
+          ai.models.generateContent({
+            model: MODEL_TEXT,
+            contents: `Generate 4 structured practice self-check questions for a student learning "${topic}" inside "${courseTitle}".
+Respond in "${language}". Objectives: ${Array.isArray(objectives) ? objectives.join('; ') : ''}.
+Do NOT invent claims about unseen video captions. Keep each question concise, educational, and provide a helpful hint + concise sample answer.`,
+            config: {
+              abortSignal,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  questions: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        question: { type: Type.STRING },
+                        hint: { type: Type.STRING },
+                        sampleAnswer: { type: Type.STRING },
+                        difficulty: { type: Type.STRING },
+                      },
+                      required: ['question', 'hint', 'sampleAnswer', 'difficulty'],
+                    },
+                  },
+                },
+                required: ['questions'],
+              },
+            },
+          }),
+        7000,
+        'practice-questions'
+      );
+      const parsed = JSON.parse(response.text || '{}');
+      const items = Array.isArray(parsed.questions) && parsed.questions.length > 0 ? parsed.questions : fallbackQuestions;
+      return res.json({ source: 'gemini_practice_questions', questions: items });
+    } catch {
+      return res.json({ source: 'structured_fallback', questions: fallbackQuestions });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Quinn AI Universal Category Recommendation Engine (Section 3 & Admin)
+  // ------------------------------------------------------------------
+  app.post('/api/quinn/recommend-category', async (req, res) => {
+    const {
+      title = '',
+      description = '',
+      availableCategories = [],
+    } = req.body || {};
+
+    const combinedText = `${title} ${description}`.toLowerCase();
+    const fallbackMatch = (): { primaryCategory: string; subcategory: string; additionalCategories: string[]; reason: string } => {
+      const catList = Array.isArray(availableCategories) && availableCategories.length > 0 ? availableCategories : [
+        'Artificial Intelligence',
+        'Information Technology',
+        'Coding & Programming',
+        'Business Management & Entrepreneurship',
+        'Finance & Accounting',
+        'Excel & Data Analytics',
+        'Digital Marketing',
+        'Graphic Designing & Media',
+        'Communication & Personality Development',
+        'School Education (Class 1–12)',
+        'Robotics & STEM',
+        'Parenting & Wellbeing',
+      ];
+      let matched = catList[0];
+      if (/excel|spreadsheet|pivot|xlookup|data analy/i.test(combinedText)) matched = catList.find((c) => /excel|data/i.test(c)) || matched;
+      else if (/python|react|javascript|coding|program|web dev|software/i.test(combinedText)) matched = catList.find((c) => /coding|program|information tech/i.test(c)) || matched;
+      else if (/ai|machine learn|deep learn|neural|gpt|llm/i.test(combinedText)) matched = catList.find((c) => /artificial intelligence/i.test(c)) || matched;
+      else if (/finance|account|tax|gst|tally|invest|microeconom/i.test(combinedText)) matched = catList.find((c) => /finance|account|business/i.test(c)) || matched;
+      else if (/marketing|seo|social media|brand|sales/i.test(combinedText)) matched = catList.find((c) => /marketing/i.test(c)) || matched;
+      else if (/graphic|photoshop|figma|video edit|design/i.test(combinedText)) matched = catList.find((c) => /graphic|design/i.test(c)) || matched;
+      else if (/speak|english|communication|interview|personality|motivation/i.test(combinedText)) matched = catList.find((c) => /communication|personality/i.test(c)) || matched;
+      else if (/class |ncert|cbse|physics|chemistry|math|school/i.test(combinedText)) matched = catList.find((c) => /school|academ/i.test(c)) || matched;
+      else if (/robot|arduino|iot|stem/i.test(combinedText)) matched = catList.find((c) => /robot|stem/i.test(c)) || matched;
+
+      return {
+        primaryCategory: matched,
+        subcategory: title.split(/[:\-–]/)[0].trim().slice(0, 48) || matched,
+        additionalCategories: [matched],
+        reason: `Matched course metadata keywords against OpenFrame's universal taxonomy.`,
+      };
+    };
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({ source: 'keyword_heuristic', ...fallbackMatch() });
+    }
+
+    try {
+      const catChoices = Array.isArray(availableCategories) && availableCategories.length > 0
+        ? availableCategories.slice(0, 60)
+        : ['Artificial Intelligence', 'Coding & Programming', 'Excel & Data Analytics', 'Business Management & Entrepreneurship', 'Finance & Accounting', 'Digital Marketing', 'Graphic Designing & Media', 'Communication & Personality Development', 'School Education (Class 1–12)', 'Robotics & STEM'];
+
+      const response = await withGeminiTimeout(
+        (abortSignal) =>
+          ai.models.generateContent({
+            model: MODEL_TEXT,
+            contents: `Classify this OpenFrame Education course into the best matching category from the list below.
+Course Title: "${title}"
+Description: "${description}"
+Allowed Categories: ${catChoices.join(', ')}`,
+            config: {
+              abortSignal,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  primaryCategory: { type: Type.STRING },
+                  subcategory: { type: Type.STRING },
+                  additionalCategories: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  reason: { type: Type.STRING },
+                },
+                required: ['primaryCategory', 'subcategory', 'additionalCategories', 'reason'],
+              },
+            },
+          }),
+        6500,
+        'recommend-category'
+      );
+      const parsed = JSON.parse(response.text || '{}');
+      return res.json({ source: 'gemini_category_classifier', ...fallbackMatch(), ...parsed });
+    } catch {
+      return res.json({ source: 'keyword_heuristic', ...fallbackMatch() });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Module 11: Honest Email Notification Hook (Nodemailer SMTP / Webhook)
   // ------------------------------------------------------------------
   app.post('/api/notifications/email', async (req, res) => {
     const rawBody = req.body || {};
-    const recipientEmail = rawBody.recipientEmail || rawBody.to;
-    const recipientName = rawBody.recipientName;
-    const subject = rawBody.subject;
-    const message = rawBody.message || rawBody.body;
-    const type = rawBody.type;
-    const actionUrl = rawBody.actionUrl;
+    const recipientEmail = String(rawBody.recipientEmail || rawBody.to || '').trim();
+    const recipientName = String(rawBody.recipientName || '').trim();
+    const subject = String(rawBody.subject || '').trim();
+    const message = String(rawBody.message || rawBody.body || '').trim();
+    const type = String(rawBody.type || 'notification');
+    const actionUrl = String(rawBody.actionUrl || '');
 
     if (!recipientEmail || !subject) {
       return res.status(400).json({ error: 'recipientEmail and subject are required.' });
     }
 
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpPort = Number(process.env.SMTP_PORT || 587);
+    const smtpFrom = process.env.SMTP_FROM || 'no-reply@openframeitsolutions.com';
+
+    if (smtpHost && smtpUser && smtpPass) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: { user: smtpUser, pass: smtpPass },
+        });
+        const info = await transporter.sendMail({
+          from: smtpFrom,
+          to: recipientName ? `"${recipientName}" <${recipientEmail}>` : recipientEmail,
+          subject,
+          text: `${message}${actionUrl ? `\n\nAction Link: ${actionUrl}` : ''}`,
+        });
+        return res.json({
+          dispatched: true,
+          channel: 'smtp',
+          messageId: info.messageId,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        return res.status(502).json({
+          dispatched: false,
+          channel: 'smtp_error',
+          error: 'SMTP server unreachable or invalid; saved to in-app feed only.',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
     const webhookUrl = process.env.NOTIFICATION_EMAIL_WEBHOOK_URL;
     if (webhookUrl) {
       try {
-        await fetch(webhookUrl, {
+        const whResp = await fetch(webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ recipientEmail, recipientName, subject, message, type, actionUrl }),
           signal: AbortSignal.timeout(5000),
         });
-      } catch (err) {
-        console.warn('Webhook dispatch warning:', err);
+        return res.json({
+          dispatched: whResp.ok,
+          channel: 'webhook',
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        return res.status(502).json({
+          dispatched: false,
+          channel: 'webhook_error',
+          error: err?.message || 'Webhook delivery failed.',
+          timestamp: new Date().toISOString(),
+        });
       }
     }
 
     return res.json({
-      dispatched: true,
-      channel: webhookUrl ? 'webhook' : 'recorded_in_app',
+      dispatched: false,
+      channel: 'in_app_only',
+      note: 'SMTP email provider not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS to enable live email delivery).',
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // RAZORPAY PAYMENT GATEWAY & INSTITUTIONAL SCHOOL PARTNER APIs
+  // ------------------------------------------------------------------
+  app.get('/api/payments/razorpay/config', (_req, res) => {
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    return res.json({
+      ok: true,
+      gateway: 'razorpay',
+      configured: Boolean(keyId && keySecret),
+      keyId: keyId && keySecret ? keyId : null,
+      currency: 'INR',
+      note: keyId && keySecret
+        ? 'Razorpay server-side verification active.'
+        : 'Razorpay credentials not configured. Authorized offline/bank challan ledger entry remains available.',
+    });
+  });
+
+  app.post('/api/payments/razorpay/order', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ error: 'Valid Firebase authentication token required.' });
+    }
+
+    const { amountInr, receipt, institutionId, purpose, notes, courseId } = req.body || {};
+    const numAmount = Number(amountInr);
+    if (!Number.isFinite(numAmount) || numAmount <= 0 || numAmount > 10000000) {
+      return res.status(400).json({ error: 'Valid positive amountInr is required.' });
+    }
+    const effectiveInstitutionId =
+      typeof institutionId === 'string' && institutionId.trim()
+        ? institutionId.trim()
+        : 'OPENFRAME_MARKETPLACE';
+
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!keyId || !keySecret) {
+      return res.status(503).json({
+        ok: false,
+        configured: false,
+        error: 'Razorpay credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are not configured on the server.',
+      });
+    }
+
+    try {
+      const authBasic = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+      const rzpResp = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${authBasic}`,
+        },
+        body: JSON.stringify({
+          amount: Math.round(numAmount * 100),
+          currency: 'INR',
+          receipt: String(receipt || `OFRCP_${Date.now()}`).slice(0, 40),
+          notes: {
+            institutionId: String(effectiveInstitutionId).slice(0, 80),
+            courseId: courseId ? String(courseId).slice(0, 80) : undefined,
+            purpose: String(purpose || 'Course Enrollment Fee').slice(0, 120),
+            requestedByUid: caller.uid,
+            ...(notes && typeof notes === 'object' ? notes : {}),
+          },
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = (await rzpResp.json()) as any;
+      if (!rzpResp.ok) {
+        return res.status(rzpResp.status).json({
+          ok: false,
+          error: data?.error?.description || 'Failed to create Razorpay order.',
+        });
+      }
+      return res.json({ ok: true, keyId, order: data });
+    } catch (err: any) {
+      return res.status(502).json({
+        ok: false,
+        error: err?.message || 'Razorpay gateway request failed.',
+      });
+    }
+  });
+
+  app.post('/api/payments/razorpay/verify', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ error: 'Valid Firebase authentication token required.' });
+    }
+
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        verified: false,
+        error: 'razorpay_order_id, razorpay_payment_id, and razorpay_signature are required.',
+      });
+    }
+
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!keySecret) {
+      return res.status(503).json({
+        verified: false,
+        error: 'RAZORPAY_KEY_SECRET is not configured on the server.',
+      });
+    }
+
+    const expectedHex = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${String(razorpay_order_id)}|${String(razorpay_payment_id)}`)
+      .digest('hex');
+
+    const providedBuf = Buffer.from(String(razorpay_signature).toLowerCase(), 'utf8');
+    const expectedBuf = Buffer.from(expectedHex.toLowerCase(), 'utf8');
+    const isMatch =
+      providedBuf.length === expectedBuf.length &&
+      crypto.timingSafeEqual(providedBuf, expectedBuf);
+
+    if (!isMatch) {
+      return res.status(400).json({
+        verified: false,
+        error: 'Razorpay payment signature verification failed.',
+      });
+    }
+
+    const verifiedAt = new Date().toISOString();
+    const tokenPayload = `${String(razorpay_order_id)}|${String(razorpay_payment_id)}|${caller.uid}|${verifiedAt}`;
+    const enrollmentVerificationToken = crypto
+      .createHmac('sha256', keySecret)
+      .update(tokenPayload)
+      .digest('hex');
+
+    return res.json({
+      verified: true,
+      orderId: String(razorpay_order_id),
+      paymentId: String(razorpay_payment_id),
+      verifiedByUid: caller.uid,
+      verifiedAt,
+      enrollmentVerificationToken,
+    });
+  });
+
+  app.post('/api/enrollments/verify-payment', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, verified: false, error: 'Authentication required.' });
+    }
+    const { orderId, paymentId, verifiedAt, token } = req.body || {};
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!keySecret || !orderId || !paymentId || !verifiedAt || !token) {
+      return res.status(400).json({ ok: false, verified: false, error: 'Missing payment verification fields.' });
+    }
+    const expected = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${String(orderId)}|${String(paymentId)}|${caller.uid}|${String(verifiedAt)}`)
+      .digest('hex');
+    const a = Buffer.from(String(token).toLowerCase(), 'utf8');
+    const b = Buffer.from(expected.toLowerCase(), 'utf8');
+    const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+    if (!valid) {
+      return res.status(403).json({ ok: false, verified: false, error: 'Invalid enrollment payment token.' });
+    }
+    return res.json({ ok: true, verified: true, orderId, paymentId, uid: caller.uid });
+  });
+
+  app.post('/api/payments/razorpay/webhook', (req: any, res) => {
+    const signature = String(req.headers['x-razorpay-signature'] || '');
+    const webhookSecret =
+      process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET || '';
+    if (!webhookSecret) {
+      return res.status(503).json({
+        ok: false,
+        error: 'Razorpay webhook secret is not configured on the server.',
+      });
+    }
+    if (!signature) {
+      return res.status(400).json({ ok: false, error: 'Missing x-razorpay-signature header.' });
+    }
+
+    const rawBytes: Buffer = Buffer.isBuffer(req.rawBody)
+      ? req.rawBody
+      : Buffer.from(JSON.stringify(req.body || {}), 'utf8');
+    const expectedHex = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawBytes)
+      .digest('hex');
+
+    const sigBuf = Buffer.from(signature.toLowerCase(), 'utf8');
+    const expBuf = Buffer.from(expectedHex.toLowerCase(), 'utf8');
+    const isValid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+
+    if (!isValid) {
+      return res.status(400).json({ ok: false, error: 'Invalid webhook signature.' });
+    }
+
+    return res.json({
+      ok: true,
+      verified: true,
+      event: req.body?.event || 'unknown',
+      receivedAt: new Date().toISOString(),
+    });
+  });
+
+  app.post('/api/school-partner/upload-check', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    }
+
+    const { fileName = '', mimeType = '', sizeBytes = 0, purpose = 'document' } = req.body || {};
+    const cleanName = path
+      .basename(String(fileName))
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 120);
+    const ext = path.extname(cleanName).toLowerCase();
+    const numericSize = Number(sizeBytes);
+
+    const allowedDocs = new Set([
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ]);
+    const allowedSpreadsheets = new Set([
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]);
+
+    const isBulk = purpose === 'bulk_import';
+    const maxBytes = isBulk ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (!cleanName || !ext) {
+      return res.status(400).json({ ok: false, error: 'Valid filename with extension is required.' });
+    }
+    if (!Number.isFinite(numericSize) || numericSize <= 0 || numericSize > maxBytes) {
+      return res.status(400).json({
+        ok: false,
+        error: `File size must be between 1 byte and ${isBulk ? '5 MB' : '10 MB'}.`,
+      });
+    }
+
+    const extValid = isBulk
+      ? ['.csv', '.xlsx', '.xls'].includes(ext)
+      : ['.pdf', '.jpg', '.jpeg', '.png', '.webp'].includes(ext);
+    const mimeValid = isBulk
+      ? allowedSpreadsheets.has(mimeType) || mimeType === 'application/octet-stream' || mimeType === ''
+      : allowedDocs.has(mimeType);
+
+    if (!extValid || !mimeValid) {
+      return res.status(400).json({
+        ok: false,
+        error: isBulk
+          ? 'Unsupported bulk import file. Allowed formats: CSV, XLSX.'
+          : 'Unsupported document file. Allowed formats: PDF, JPG, PNG, WEBP.',
+      });
+    }
+
+    return res.json({
+      ok: true,
+      sanitizedFileName: cleanName,
+      maxAllowedBytes: maxBytes,
+      validatedByUid: caller.uid,
+    });
+  });
+
+  app.post('/api/school-partner/validate-registration', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    }
+
+    const payload = req.body || {};
+    const name = String(payload.name || '').trim();
+    const registrationNumber = String(payload.registrationNumber || '').trim();
+    const officialEmail = String(payload.officialEmail || '').trim().toLowerCase();
+    const officialPhone = String(payload.officialPhone || '').replace(/[^0-9+]/g, '');
+    const city = String(payload.city || '').trim();
+    const state = String(payload.state || '').trim();
+    const principalName = String(payload.principalName || '').trim();
+    const boardAffiliation = String(payload.boardAffiliation || '').trim();
+
+    const errors: string[] = [];
+    if (name.length < 3 || name.length > 200) errors.push('School legal name must be 3-200 characters.');
+    if (!registrationNumber || registrationNumber.length < 4) {
+      errors.push('UDISE Code or Board Affiliation Number is required.');
+    }
+    if (!officialEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(officialEmail)) {
+      errors.push('Valid official school email address is required.');
+    }
+    if (officialPhone.replace(/\D/g, '').length < 10) {
+      errors.push('Valid 10-digit school contact phone is required.');
+    }
+    if (city.length < 2 || state.length < 2) errors.push('City and State are required.');
+    if (principalName.length < 2) errors.push('Principal or Authorized Representative name is required.');
+    if (!boardAffiliation) errors.push('Education board affiliation is required.');
+
+    if (errors.length > 0) {
+      return res.status(400).json({ ok: false, errors, error: errors[0] });
+    }
+
+    return res.json({
+      ok: true,
+      normalized: {
+        name,
+        registrationNumberUpper: registrationNumber.toUpperCase(),
+        officialEmail,
+        officialPhone,
+        city,
+        state,
+        principalName,
+        boardAffiliation,
+      },
+      validatedByUid: caller.uid,
+    });
+  });
+
+  app.post('/api/school-partner/admin/review', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication token required.' });
+    }
+
+    const isAdmin = await isVerifiedPlatformAdmin(caller);
+    if (!isAdmin) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Forbidden: Only verified Platform Admins or Education Admins can review school applications.',
+      });
+    }
+
+    const { institutionId, nextStatus, reviewComment = '', schoolCode } = req.body || {};
+    const validStatuses = new Set([
+      'Under Review',
+      'Approved',
+      'Rejected',
+      'More Information Required',
+      'Suspended',
+      'Submitted',
+    ]);
+    if (!institutionId || typeof institutionId !== 'string' || !validStatuses.has(nextStatus)) {
+      return res.status(400).json({ ok: false, error: 'Valid institutionId and nextStatus are required.' });
+    }
+    if (
+      (nextStatus === 'Rejected' || nextStatus === 'More Information Required' || nextStatus === 'Suspended') &&
+      String(reviewComment).trim().length < 5
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: 'A review comment of at least 5 characters is required for rejection, correction request, or suspension.',
+      });
+    }
+
+    const resolvedCode =
+      nextStatus === 'Approved'
+        ? String(schoolCode || `OF-SCH-${institutionId.slice(-5).toUpperCase()}`).replace(/[^A-Z0-9-]/g, '')
+        : undefined;
+
+    return res.json({
+      ok: true,
+      institutionId,
+      verificationStatus: nextStatus,
+      reviewComment: String(reviewComment).trim(),
+      schoolCode: resolvedCode,
+      reviewedByUid: caller.uid,
+      reviewedByEmail: caller.email,
+      reviewedAt: new Date().toISOString(),
+    });
+  });
+
+  app.get('/api/school-partner/assessment-sheet', (req, res) => {
+    const dim = String(req.query.dimension || 'IQ').toUpperCase();
+    const dimension: AssessmentDimension = dim === 'EQ' || dim === 'SQ' ? dim : 'IQ';
+    const rawBand = String(req.query.gradeBand || 'Middle (6-8)');
+    const gradeBand: IqEqSqGradeBand =
+      rawBand === 'Primary (1-5)' || rawBand === 'Secondary (9-12)'
+        ? rawBand
+        : 'Middle (6-8)';
+
+    const questions = stripQuestionAnswers(getQuestionBank(dimension, gradeBand));
+    return res.json({
+      ok: true,
+      dimension,
+      gradeBand,
+      disclaimer: NON_CLINICAL_EDUCATIONAL_DISCLAIMER,
+      questions,
+    });
+  });
+
+  app.post('/api/school-partner/score-assessment', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required to score assessments.' });
+    }
+    const { dimension = 'IQ', gradeBand = 'Middle (6-8)', answers = {}, nonClinicalDisclaimerAccepted } = req.body || {};
+    if (!['IQ', 'EQ', 'SQ'].includes(dimension)) {
+      return res.status(400).json({ ok: false, error: 'dimension must be IQ, EQ, or SQ.' });
+    }
+    if (nonClinicalDisclaimerAccepted !== true) {
+      return res.status(400).json({ ok: false, error: 'Non-clinical educational disclaimer must be acknowledged.' });
+    }
+
+    const validBand: IqEqSqGradeBand =
+      gradeBand === 'Primary (1-5)' || gradeBand === 'Secondary (9-12)'
+        ? gradeBand
+        : 'Middle (6-8)';
+    const evaluation = evaluateIqEqSqResponses(dimension, validBand, answers || {});
+    return res.json({
+      ok: true,
+      evaluatedByServer: true,
+      evaluatedByUid: caller.uid,
+      ...evaluation,
     });
   });
 
@@ -3643,14 +5107,42 @@ ${JSON.stringify({
     }
   });
 
+  const httpServer = http.createServer(app);
+
   // ------------------------------------------------------------------
   // Vite Dev Middleware or Production Static Assets
   // ------------------------------------------------------------------
   if (process.env.NODE_ENV !== 'production') {
+    const disableHmr = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ...(disableHmr
+          ? { hmr: false, ws: false }
+          : { ws: { server: httpServer } }),
+      },
       appType: 'spa',
     });
+
+    if (disableHmr) {
+      app.get('/@vite/client', async (_req, res, next) => {
+        try {
+          const transformed = await vite.transformRequest('/@vite/client');
+          if (!transformed?.code) return next();
+          const patched = transformed.code
+            .replace(
+              /transport\.connect\([^;]+\);/g,
+              '/* HMR WebSocket disabled */'
+            )
+            .replace(/setupForwardConsoleHandler\([^;]+\);/g, '')
+            .replace(/throw new SendBeforeConnectError\([^)]*\);/g, 'return;');
+          res.type('application/javascript').send(patched);
+        } catch {
+          next();
+        }
+      });
+    }
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
@@ -3660,7 +5152,7 @@ ${JSON.stringify({
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`OpenFrame Education & Corporate Server listening on http://0.0.0.0:${PORT}`);
   });
 }

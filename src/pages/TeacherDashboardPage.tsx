@@ -3,46 +3,49 @@ import {
   FileCheck,
   Star,
   ExternalLink,
-  Award,
   BookOpen,
   History,
   Settings,
   Users,
-  ArrowRight,
   CheckCircle2,
   X,
-  Plus
+  Plus,
+  UserCheck,
 } from 'lucide-react';
-import { useRouter } from '../router/RouterContext';
+import { useRouter, Link } from '../router/RouterContext';
 import { useAuth } from '../context/AuthContext';
 import { lmsService } from '../services/lmsService';
 import { marketplaceService } from '../services/marketplaceService';
 import { TeacherSchoolPanel } from '../components/school/TeacherSchoolPanel';
+import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
+import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
 import {
   TeacherEvaluationRubricScores,
   TeacherEvaluation,
   QuizConfigDoc,
   StudentProfile,
   MarketplaceCourse,
-  CertificateType
+  CertificateType,
 } from '../types';
 
-type TeacherTab = 'queue' | 'history' | 'curriculum' | 'students' | 'school';
+type TeacherNavId =
+  | 'my_classes'
+  | 'my_students'
+  | 'assignments'
+  | 'examinations'
+  | 'student_reports'
+  | 'my_profile';
 
 export const TeacherDashboardPage: React.FC = () => {
   const { navigate } = useRouter();
-  const { currentUser, lmsUser, teacherProfile, portalRole, isSuperAdmin, loading: authLoading } = useAuth();
+  const { currentUser, lmsUser, teacherProfile, portalRole, isSuperAdmin, logout, loading: authLoading } = useAuth();
 
   const isAuthorizedEducator = Boolean(
-    currentUser &&
-      (isSuperAdmin ||
-        portalRole === 'teacher' ||
-        portalRole === 'admin' ||
-        lmsUser?.roles?.includes('teacher') ||
-        lmsUser?.roles?.includes('admin'))
+    currentUser && (lmsUser?.role === 'teacher' || lmsUser?.role === 'admin' || lmsUser?.roles?.includes('teacher') || isSuperAdmin)
   );
 
-  const [activeTab, setActiveTab] = useState<TeacherTab>('queue');
+  const [activeNav, setActiveNav] = useState<TeacherNavId>('my_classes');
+  const [assignmentSubTab, setAssignmentSubTab] = useState<'queue' | 'history'>('queue');
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [history, setHistory] = useState<TeacherEvaluation[]>([]);
   const [students, setStudents] = useState<StudentProfile[]>([]);
@@ -50,7 +53,6 @@ export const TeacherDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  // Evaluation Modal state
   const [evalModalOpen, setEvalModalOpen] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null);
   const [rubricScores, setRubricScores] = useState<TeacherEvaluationRubricScores>({
@@ -71,7 +73,6 @@ export const TeacherDashboardPage: React.FC = () => {
   const [actionItems, setActionItems] = useState('');
   const [submittingEval, setSubmittingEval] = useState(false);
 
-  // Quiz & Lesson Organization Config
   const [configCourseId, setConfigCourseId] = useState('OF-AI-001');
   const [quizCfg, setQuizCfg] = useState<QuizConfigDoc>({
     id: 'OF-AI-001_lesson_1',
@@ -114,7 +115,7 @@ export const TeacherDashboardPage: React.FC = () => {
     }
 
     loadEducatorData();
-  }, [currentUser?.uid, authLoading, isAuthorizedEducator]);
+  }, [currentUser?.uid, authLoading, isAuthorizedEducator, isSuperAdmin, portalRole]);
 
   useEffect(() => {
     if (!configCourseId) return;
@@ -240,80 +241,126 @@ export const TeacherDashboardPage: React.FC = () => {
     setTimeout(() => setStatusMessage(null), 5000);
   };
 
-  if (authLoading || loading) {
+  if (!authLoading && (!currentUser || !isAuthorizedEducator)) {
     return (
-      <div className="min-h-[70vh] bg-[#F8FAFC] flex items-center justify-center p-8">
-        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!currentUser || !isAuthorizedEducator) {
-    return (
-      <div className="min-h-[75vh] bg-[#F8FAFC] flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
-            <Award className="w-6 h-6" />
+      <div className="min-h-screen bg-[#FAF7F2] flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-4 shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-[#123D32]/10 text-[#123D32] flex items-center justify-center mx-auto">
+            <BookOpen className="w-6 h-6" />
           </div>
-          <h1 className="text-xl font-bold text-slate-900">Faculty Evaluation Portal</h1>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Sign in with a Teacher or Administrator account to evaluate practical projects, grade live or recorded presentations, and organize course assessments.
+          <h1 className="text-xl font-editorial font-semibold text-[#18221F]">
+            Faculty Evaluation &amp; Academic Dashboard
+          </h1>
+          <p className="text-xs text-[#64748B] leading-relaxed">
+            Sign in with your Teacher account to evaluate student submissions, grade rubrics, configure course assessments, and manage class lessons.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/portal?role=teacher&redirect=/teacher/dashboard')}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-          >
-            <span>Sign In as Teacher</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => navigate('/portal/teacher')}
+              className="flex-1 py-2.5 px-4 bg-[#123D32] hover:bg-[#0D2E25] text-white rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              Sign In as Teacher
+            </button>
+            <Link
+              to="/"
+              className="py-2.5 px-4 border border-slate-200 text-[#18221F] hover:bg-[#FAF7F2] rounded-xl text-xs font-semibold"
+            >
+              Return Home
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
+
+  const navItems: WorkspaceNavItem[] = [
+    { id: 'my_classes', label: 'My Classes', icon: BookOpen },
+    { id: 'my_students', label: 'My Students', icon: Users, badge: students.length },
+    { id: 'assignments', label: 'Evaluations Queue', icon: FileCheck, badge: submissions.length },
+    { id: 'examinations', label: 'Quiz Rules', icon: Settings },
+    { id: 'student_reports', label: 'Evaluation History', icon: History, badge: history.length },
+    { id: 'my_profile', label: 'Faculty Profile', icon: UserCheck },
+  ];
+
+  const approvedCount = history.filter((ev) => ev.isApproved || ev.decision === 'Approved').length;
+  const approvalRate = history.length > 0 ? Math.round((approvedCount / history.length) * 100) : 0;
+  const teacherNotifications = submissions.slice(0, 5).map((sub) => ({
+    id: sub.submissionId,
+    title: `${sub.studentName} submitted ${sub.type || 'deliverable'}`,
+    message: sub.courseTitle || sub.courseId,
+    time: sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : 'Pending',
+    read: false,
+  }));
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Top Educator Bar */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+    <SocialAppShell
+      roleLabel="Teacher"
+      userName={teacherProfile?.fullName || lmsUser?.displayName || currentUser?.displayName || 'Faculty Evaluator'}
+      userEmail={lmsUser?.email || currentUser?.email || ''}
+      registrationId={teacherProfile?.registrationNumber || lmsUser?.registrationNumber}
+      navItems={navItems}
+      activeNavId={activeNav}
+      onSelectNav={(id) => setActiveNav(id as TeacherNavId)}
+      notifications={teacherNotifications}
+      onLogout={() => logout().then(() => navigate('/portal'))}
+    >
+      <div className="space-y-6">
+        {/* Top Educator Workspace Banner */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="text-xs font-medium text-blue-600">
-              OpenFrame Faculty Workspace · {teacherProfile?.registrationNumber || lmsUser?.registrationNumber || 'Faculty'}
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[#123D32]">
+              Faculty Academic Workspace
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 mt-1">Teacher Evaluation Dashboard</h1>
-            <p className="text-xs text-slate-500 mt-1">
-              Review submitted deliverables, grade with the 100-mark 6-criteria rubric, manage quiz benchmarks, and approve certifications.
+            <h1 className="text-xl sm:text-2xl font-editorial font-semibold text-[#18221F] mt-1">
+              Welcome, {teacherProfile?.fullName || lmsUser?.displayName || currentUser?.displayName || 'Faculty Evaluator'}
+            </h1>
+            <p className="text-xs text-[#64748B] mt-1">
+              Manage school classes, review 6-criteria student deliverables, and configure verification quizzes.
             </p>
           </div>
-
-          {/* Interactive Tabs */}
-          <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl text-xs self-start">
-            {[
-              { id: 'queue', label: `Pending Queue (${submissions.length})`, icon: FileCheck },
-              { id: 'history', label: `Evaluated (${history.length})`, icon: History },
-              { id: 'curriculum', label: 'Lessons & Quiz Config', icon: Settings },
-              { id: 'students', label: `Students (${students.length})`, icon: Users },
-              { id: 'school', label: 'School (LKG–12)', icon: BookOpen },
-            ].map((t) => {
-              const Icon = t.icon;
-              const active = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setActiveTab(t.id as TeacherTab)}
-                  className={`px-3.5 py-2 rounded-lg font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                    active ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{t.label}</span>
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveNav('assignments')}
+              className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+            >
+              Review Queue ({submissions.length})
+            </button>
           </div>
         </div>
+
+        {/* Visual Faculty Metrics */}
+        {!loading && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="bg-white border border-slate-200/80 rounded-3xl p-5">
+              <DonutRingChart
+                percent={approvalRate}
+                label="Certification Approval Rate"
+                sublabel={`${approvedCount} approved out of ${history.length} completed rubric reviews`}
+                color="#123D32"
+              />
+            </div>
+            <div className="bg-white border border-slate-200/80 rounded-3xl p-5">
+              <div className="text-xs font-bold uppercase tracking-wider text-[#64748B] mb-3">
+                Workload Snapshot
+              </div>
+              <MiniBarChart
+                items={[
+                  { label: 'Active Student Roster', value: students.length, color: '#2563EB' },
+                  { label: 'Pending Evaluations', value: submissions.length, color: '#D97706' },
+                  { label: 'Completed Reviews', value: history.length, color: '#123D32' },
+                ]}
+              />
+            </div>
+          </div>
+        )}
+
+        {loading && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 flex items-center justify-center">
+            <div className="w-7 h-7 border-2 border-[#123D32] border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
 
         {statusMessage && (
           <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 flex items-center justify-between">
@@ -327,92 +374,152 @@ export const TeacherDashboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 1: PENDING SUBMISSIONS QUEUE */}
-        {activeTab === 'queue' && (
-          <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">Pending Projects & Presentations</h2>
-              <span className="text-xs text-slate-500">Minimum 70/100 required for certificate approval</span>
+        {!loading && activeNav === 'assignments' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAssignmentSubTab('queue')}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
+                  assignmentSubTab === 'queue'
+                    ? 'bg-[#0B1930] border-[#0B1930] text-white'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                Pending Queue ({submissions.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssignmentSubTab('history')}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
+                  assignmentSubTab === 'history'
+                    ? 'bg-[#0B1930] border-[#0B1930] text-white'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                Evaluated History ({history.length})
+              </button>
             </div>
 
-            {submissions.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-500">
-                No pending project or presentation submissions in your evaluation queue right now.
+            {assignmentSubTab === 'queue' && (
+              <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                  <h2 className="text-base font-bold text-slate-900">Pending Projects &amp; Presentations</h2>
+                  <span className="text-xs text-slate-500">Minimum 70/100 required for certificate approval</span>
+                </div>
+
+                {submissions.length === 0 ? (
+                  <div className="p-12 text-center text-xs text-slate-500">
+                    No pending project or presentation submissions in your evaluation queue right now.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {submissions.map((sub) => {
+                      const fileLink =
+                        sub.projectData?.fileUrl ||
+                        sub.projectData?.githubOrProjectUrl ||
+                        sub.presentationData?.slidesUrl ||
+                        sub.presentationData?.videoUrl ||
+                        sub.presentationData?.meetingLink;
+                      return (
+                        <div
+                          key={sub.submissionId}
+                          className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
+                        >
+                          <div className="space-y-1 text-xs">
+                            <div className="font-bold text-slate-900 text-sm">
+                              {sub.studentName} · {sub.type} · {sub.status}
+                            </div>
+                            <div className="text-slate-600 font-medium">{sub.courseTitle}</div>
+                            <div className="text-slate-500">
+                              Submitted {new Date(sub.submittedAt).toLocaleString()}
+                            </div>
+                            {(sub.projectData?.submissionNotes || sub.presentationData?.notes) && (
+                              <p className="text-slate-600 pt-1 max-w-2xl">
+                                {sub.projectData?.submissionNotes || sub.presentationData?.notes}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap items-center gap-3 pt-1">
+                              {fileLink && (
+                                <a
+                                  href={fileLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-600 hover:underline font-medium flex items-center gap-1"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  <span>Open Submitted Deliverable</span>
+                                </a>
+                              )}
+                              {sub.projectData?.demoVideoUrl && (
+                                <a
+                                  href={sub.projectData.demoVideoUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-600 hover:underline font-medium flex items-center gap-1"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  <span>Watch Demo Video</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEvaluation(sub)}
+                            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 self-start sm:self-center cursor-pointer"
+                          >
+                            <Star className="w-3.5 h-3.5" />
+                            <span>Evaluate Rubric</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {submissions.map((sub) => {
-                  const fileLink =
-                    sub.projectData?.fileUrl ||
-                    sub.projectData?.githubOrProjectUrl ||
-                    sub.presentationData?.slidesUrl ||
-                    sub.presentationData?.videoUrl ||
-                    sub.presentationData?.meetingLink;
-                  return (
-                    <div
-                      key={sub.submissionId}
-                      className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
-                    >
-                      <div className="space-y-1 text-xs">
-                        <div className="font-bold text-slate-900 text-sm">
-                          {sub.studentName} · {sub.type} · {sub.status}
+            )}
+
+            {assignmentSubTab === 'history' && (
+              <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">
+                <div className="p-6 border-b border-slate-100">
+                  <h2 className="text-base font-bold text-slate-900">Evaluated Submissions History</h2>
+                </div>
+                {history.length === 0 ? (
+                  <div className="p-10 text-center text-xs text-slate-500">No completed evaluations recorded yet.</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {history.map((ev) => (
+                      <div key={ev.evaluationId || ev.id} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div className="space-y-1">
+                          <div className="font-bold text-slate-900 text-sm">
+                            {ev.studentName} · {ev.courseName || ev.courseId}
+                          </div>
+                          <div className="text-slate-500">
+                            Evaluated by {ev.teacherName} on {new Date(ev.evaluatedAt || ev.evaluationDate || '').toLocaleString()}
+                          </div>
+                          <p className="text-slate-600 max-w-2xl">{ev.writtenFeedback}</p>
                         </div>
-                        <div className="text-slate-600 font-medium">{sub.courseTitle}</div>
-                        <div className="text-slate-500">
-                          Submitted {new Date(sub.submittedAt).toLocaleString()}
-                        </div>
-                        {(sub.projectData?.submissionNotes || sub.presentationData?.notes) && (
-                          <p className="text-slate-600 pt-1 max-w-2xl">
-                            {sub.projectData?.submissionNotes || sub.presentationData?.notes}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap items-center gap-3 pt-1">
-                          {fileLink && (
-                            <a
-                              href={fileLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-blue-600 hover:underline font-medium flex items-center gap-1"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                              <span>Open Submitted Deliverable</span>
-                            </a>
-                          )}
-                          {sub.projectData?.demoVideoUrl && (
-                            <a
-                              href={sub.projectData.demoVideoUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-blue-600 hover:underline font-medium flex items-center gap-1"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                              <span>Watch Demo Video</span>
-                            </a>
-                          )}
+                        <div className="text-right shrink-0">
+                          <div className="text-lg font-bold text-slate-900 tabular-nums">{ev.totalScore}/100</div>
+                          <div className={`font-semibold ${ev.isApproved ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {ev.decision || (ev.isApproved ? 'Approved' : 'Revision Requested')}
+                          </div>
                         </div>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEvaluation(sub)}
-                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 self-start sm:self-center"
-                      >
-                        <Star className="w-3.5 h-3.5" />
-                        <span>Evaluate Rubric</span>
-                      </button>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* TAB 2: EVALUATION HISTORY */}
-        {activeTab === 'history' && (
+        {!loading && activeNav === 'student_reports' && (
           <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">
             <div className="p-6 border-b border-slate-100">
-              <h2 className="text-base font-bold text-slate-900">Evaluation History & Accountability</h2>
+              <h2 className="text-base font-bold text-slate-900">Student Evaluation Reports &amp; Accountability</h2>
             </div>
             {history.length === 0 ? (
               <div className="p-10 text-center text-xs text-slate-500">No completed evaluations recorded yet.</div>
@@ -442,11 +549,10 @@ export const TeacherDashboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 3: LESSONS & QUIZ CONFIGURATION */}
-        {activeTab === 'curriculum' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
+        {!loading && activeNav === 'examinations' && (
+          <div className="max-w-2xl text-xs">
             <form onSubmit={handleSaveQuizConfig} className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
-              <h2 className="text-base font-bold text-slate-900">Quiz Question Count & Passing Rules</h2>
+              <h2 className="text-base font-bold text-slate-900">Quiz Question Count &amp; Passing Rules</h2>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Course</label>
                 <select
@@ -523,57 +629,15 @@ export const TeacherDashboardPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={savingQuizCfg}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold"
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold cursor-pointer"
               >
                 {savingQuizCfg ? 'Saving...' : 'Save Quiz Configuration'}
-              </button>
-            </form>
-
-            <form onSubmit={handleAddLesson} className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-slate-900">Add Custom Lesson to Course</h2>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/learn/${configCourseId}`)}
-                  className="text-blue-600 hover:underline font-medium"
-                >
-                  Open Course Workspace
-                </button>
-              </div>
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Lesson Topic Title *</label>
-                <input
-                  type="text"
-                  required
-                  value={newLessonTitle}
-                  onChange={(e) => setNewLessonTitle(e.target.value)}
-                  placeholder="e.g. Evaluating Model Bias & Safety Benchmarks"
-                  className="w-full p-2.5 border border-slate-200 rounded-xl"
-                />
-              </div>
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Learning Objectives (one per line)</label>
-                <textarea
-                  rows={3}
-                  value={newLessonObjectives}
-                  onChange={(e) => setNewLessonObjectives(e.target.value)}
-                  placeholder="Design repeatable evaluation benchmarks&#10;Measure precision and recall trade-offs"
-                  className="w-full p-2.5 border border-slate-200 rounded-xl"
-                />
-              </div>
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold flex items-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Lesson to {configCourseId}</span>
               </button>
             </form>
           </div>
         )}
 
-        {/* TAB 4: STUDENT ROSTER */}
-        {activeTab === 'students' && (
+        {!loading && activeNav === 'my_students' && (
           <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">
             <div className="p-6 border-b border-slate-100">
               <h2 className="text-base font-bold text-slate-900">Student Learning Roster</h2>
@@ -607,20 +671,112 @@ export const TeacherDashboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 5: SCHOOL EDUCATION LKG-12 */}
-        {activeTab === 'school' && (
-          <TeacherSchoolPanel
-            teacherUid={currentUser.uid}
-            teacherName={teacherProfile?.fullName || lmsUser?.displayName || currentUser.displayName || 'Faculty Evaluator'}
-            onStatus={(msg) => {
-              setStatusMessage(msg);
-              setTimeout(() => setStatusMessage(null), 5000);
-            }}
-          />
+        {!loading && activeNav === 'my_classes' && currentUser && (
+          <div className="space-y-6">
+            <TeacherSchoolPanel
+              teacherUid={currentUser.uid}
+              teacherName={teacherProfile?.fullName || lmsUser?.displayName || currentUser.displayName || 'Faculty Evaluator'}
+              onStatus={(msg) => {
+                setStatusMessage(msg);
+                setTimeout(() => setStatusMessage(null), 5000);
+              }}
+            />
+
+            <form onSubmit={handleAddLesson} className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base font-bold text-slate-900">Add Custom Lesson to Course</h2>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/learn/${configCourseId}`)}
+                  className="text-blue-600 hover:underline font-medium cursor-pointer"
+                >
+                  Open Course Workspace
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Course</label>
+                  <select
+                    value={configCourseId}
+                    onChange={(e) => setConfigCourseId(e.target.value)}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl"
+                  >
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.id} — {c.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Lesson Topic Title *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newLessonTitle}
+                    onChange={(e) => setNewLessonTitle(e.target.value)}
+                    placeholder="e.g. Evaluating Model Bias & Safety Benchmarks"
+                    className="w-full p-2.5 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Learning Objectives (one per line)</label>
+                <textarea
+                  rows={3}
+                  value={newLessonObjectives}
+                  onChange={(e) => setNewLessonObjectives(e.target.value)}
+                  placeholder="Design repeatable evaluation benchmarks&#10;Measure precision and recall trade-offs"
+                  className="w-full p-2.5 border border-slate-200 rounded-xl"
+                />
+              </div>
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Lesson to {configCourseId}</span>
+              </button>
+            </form>
+          </div>
+        )}
+
+        {!loading && activeNav === 'my_profile' && (
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 text-xs">
+            <h2 className="text-base font-bold text-[#0B1930] flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-blue-600" />
+              <span>Verified Faculty Profile</span>
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 bg-slate-50 rounded-2xl">
+                <div className="text-slate-500">Faculty Name</div>
+                <div className="font-bold text-slate-900 mt-1">
+                  {teacherProfile?.fullName || lmsUser?.displayName || currentUser?.displayName || 'Faculty Educator'}
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-2xl">
+                <div className="text-slate-500">Faculty ID</div>
+                <div className="font-mono font-bold text-blue-700 mt-1">
+                  {teacherProfile?.registrationNumber || lmsUser?.registrationNumber || 'VERIFIED'}
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-2xl">
+                <div className="text-slate-500">Registered Email</div>
+                <div className="font-mono text-slate-800 mt-1 truncate">
+                  {lmsUser?.email || currentUser?.email}
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-2xl">
+                <div className="text-slate-500">Specialization</div>
+                <div className="font-semibold text-slate-800 mt-1">
+                  {teacherProfile?.specialization || teacherProfile?.qualification || 'Academic & Technology Faculty'}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* 6-CRITERIA RUBRIC EVALUATION MODAL */}
       {evalModalOpen && selectedSubmission && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <form
@@ -699,7 +855,7 @@ export const TeacherDashboardPage: React.FC = () => {
 
               <div>
                 <div className="flex justify-between font-medium text-slate-700 mb-1">
-                  <span>4. Creativity & Innovation (Max 15)</span>
+                  <span>4. Creativity &amp; Innovation (Max 15)</span>
                   <span className="font-bold tabular-nums">{rubricScores.creativityInnovation}</span>
                 </div>
                 <input
@@ -807,14 +963,14 @@ export const TeacherDashboardPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setEvalModalOpen(false)}
-                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl font-semibold"
+                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl font-semibold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submittingEval}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold disabled:opacity-50"
+                className="px-5 py-2.5 bg-[#2563EB] hover:bg-blue-700 text-white rounded-xl font-semibold disabled:opacity-50 cursor-pointer"
               >
                 {submittingEval ? 'Saving Grade...' : 'Record Evaluation'}
               </button>
@@ -822,6 +978,6 @@ export const TeacherDashboardPage: React.FC = () => {
           </form>
         </div>
       )}
-    </div>
+    </SocialAppShell>
   );
 };

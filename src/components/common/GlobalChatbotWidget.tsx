@@ -108,20 +108,19 @@ export const GlobalChatbotWidget: React.FC = () => {
           <button
             onClick={() => setIsOpen(true)}
             className="flex items-center space-x-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-xs shadow-2xl shadow-cyan-500/30 hover:scale-105 active:scale-95 transition-all duration-300 border border-white/20 cursor-pointer"
-            aria-label="Open Qwen AI Chatbot"
+            aria-label="Open Quinn AI Chatbot"
           >
             <div className="relative">
               <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
                 <Brain className="w-4 h-4 text-white" />
               </div>
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-900 animate-pulse" />
             </div>
             <div className="text-left">
               <div className="text-[9px] uppercase font-mono tracking-wider text-cyan-200 font-semibold leading-none">
-                AI Assistant
+                AI Course Tutor
               </div>
               <div className="text-xs font-bold leading-tight">
-                Ask Qwen AI
+                Ask Quinn AI
               </div>
             </div>
           </button>
@@ -139,11 +138,10 @@ export const GlobalChatbotWidget: React.FC = () => {
               </div>
               <div className="text-left">
                 <div className="text-xs font-bold text-white flex items-center space-x-1.5">
-                  <span>Qwen AI</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Quinn AI</span>
                 </div>
                 <div className="text-[10px] text-cyan-400">
-                  OpenFrame Academic & Career Assistant
+                  Personal AI Course Tutor &amp; Career Advisor
                 </div>
               </div>
             </div>
@@ -236,8 +234,7 @@ export const GlobalChatbotWidget: React.FC = () => {
 
             {isTyping && (
               <div className="flex items-center space-x-2 text-slate-400 text-xs">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                <span>Qwen AI is thinking...</span>
+                <span>Quinn AI is thinking...</span>
               </div>
             )}
 

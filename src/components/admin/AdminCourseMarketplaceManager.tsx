@@ -46,8 +46,17 @@ import {
   MarketplaceCategory,
   CourseImportLog,
   MarketplaceCourseStatus,
+  EducationCategoryCode,
+  EducationTaxonomyItem,
+  RecommendationAnalyticsEvent,
 } from '../../types';
+import {
+  EDUCATION_CLASSIFICATION_CATEGORIES,
+  EDUCATION_CATEGORY_BY_CODE,
+} from '../../data/educationClassificationData';
 import { seedCoursesToFirestore } from '../../services/courseSeedService';
+import { quinnAiService } from '../../services/quinnAiService';
+import { lmsService } from '../../services/lmsService';
 
 interface AdminCourseMarketplaceManagerProps {
   adminEmail: string;
@@ -62,6 +71,8 @@ type ManagerSubTab =
   | 'discovery'
   | 'drafts'
   | 'categories'
+  | 'taxonomy'
+  | 'discovery_analytics'
   | 'import'
   | 'history'
   | 'analytics';
@@ -118,6 +129,56 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
   const [importProgress, setImportProgress] = useState<BatchImportProgress | null>(null);
   const [lastImportLog, setLastImportLog] = useState<CourseImportLog | null>(null);
 
+  // Education Taxonomy (A–J) & Discovery Analytics State
+  const [taxonomyItems, setTaxonomyItems] = useState<EducationTaxonomyItem[]>([]);
+  const [loadingTaxonomy, setLoadingTaxonomy] = useState(false);
+  const [savingTaxonomy, setSavingTaxonomy] = useState(false);
+  const [taxonomyForm, setTaxonomyForm] = useState<{
+    categoryCode: EducationCategoryCode;
+    itemType: EducationTaxonomyItem['itemType'];
+    name: string;
+    parentGroup: string;
+    description: string;
+  }>({
+    categoryCode: 'G',
+    itemType: 'degree',
+    name: '',
+    parentGroup: '',
+    description: '',
+  });
+  const [discoverySummary, setDiscoverySummary] = useState<{
+    totalSearches: number;
+    totalEvents: number;
+    totalEnrollments: number;
+    youtubeClicks: number;
+    qaCount: number;
+    topSearchedSubjects: Array<{ label: string; count: number }>;
+    popularDegrees: Array<{ label: string; count: number }>;
+    topRequestedSkills: Array<{ label: string; count: number }>;
+    recentEvents: RecommendationAnalyticsEvent[];
+  } | null>(null);
+  const [loadingDiscoverySummary, setLoadingDiscoverySummary] = useState(false);
+
+  const loadTaxonomy = async () => {
+    setLoadingTaxonomy(true);
+    try {
+      const list = await marketplaceService.getCustomEducationTaxonomy();
+      setTaxonomyItems(list);
+    } finally {
+      setLoadingTaxonomy(false);
+    }
+  };
+
+  const loadDiscoveryAnalytics = async () => {
+    setLoadingDiscoverySummary(true);
+    try {
+      const summary = await lmsService.getDiscoveryAnalyticsSummary();
+      setDiscoverySummary(summary);
+    } finally {
+      setLoadingDiscoverySummary(false);
+    }
+  };
+
   // Import history & duplicate checker
   const [importLogs, setImportLogs] = useState<CourseImportLog[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -130,6 +191,7 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
   const [ytResolveInput, setYtResolveInput] = useState('');
   const [resolvingYt, setResolvingYt] = useState(false);
   const [savingCourse, setSavingCourse] = useState(false);
+  const [suggestingCategory, setSuggestingCategory] = useState(false);
   const [modalDupWarning, setModalDupWarning] = useState<DuplicateCheckResult | null>(null);
   const [isSeeding100, setIsSeeding100] = useState(false);
 
@@ -215,6 +277,33 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
   const availableCategoryNames = categories.length > 0
     ? categories.map((c) => c.name)
     : ALL_MARKETPLACE_CATEGORIES;
+
+  const handleSuggestCategoryWithQuinn = async () => {
+    if (!editingCourse?.title?.trim()) {
+      onNotify('Enter a Course Title first so Quinn AI can suggest the best category.');
+      return;
+    }
+    setSuggestingCategory(true);
+    try {
+      const rec = await quinnAiService.recommendCategory({
+        title: editingCourse.title,
+        description: editingCourse.description || editingCourse.shortDesc || '',
+        availableCategories: availableCategoryNames,
+      });
+      const prevCats = editingCourse.categories || [];
+      setEditingCourse({
+        ...editingCourse,
+        category: rec.primaryCategory,
+        subcategory: rec.subcategory || editingCourse.subcategory,
+        categories: Array.from(new Set([rec.primaryCategory, ...(rec.additionalCategories || []), ...prevCats])),
+      });
+      onNotify(`Quinn AI suggested "${rec.primaryCategory}" (${rec.subcategory}): ${rec.reason}`);
+    } catch {
+      onNotify('Unable to generate AI category suggestion right now.');
+    } finally {
+      setSuggestingCategory(false);
+    }
+  };
 
   // Resolve YouTube URL in Add/Edit Modal
   const handleResolveYouTubeForModal = async () => {
@@ -650,6 +739,8 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
             { id: 'discovery', label: 'YouTube Discovery (100K)', icon: Compass },
             { id: 'drafts', label: `Draft Courses (${counters?.draftCourses ?? 0})`, icon: Eye },
             { id: 'categories', label: `Categories (${counters?.categoriesCount ?? ALL_MARKETPLACE_CATEGORIES.length})`, icon: Layers },
+            { id: 'taxonomy', label: 'Education Taxonomy (A–J)', icon: Tag },
+            { id: 'discovery_analytics', label: 'Discovery Analytics', icon: BarChart3 },
             { id: 'import', label: 'Bulk Import & YouTube', icon: Upload },
             { id: 'history', label: 'Import History & Dedup', icon: History },
             { id: 'analytics', label: 'Scale & Analytics', icon: BarChart3 },
@@ -663,6 +754,8 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                 onClick={() => {
                   setSubTab(t.id as ManagerSubTab);
                   setPage(1);
+                  if (t.id === 'taxonomy') loadTaxonomy();
+                  if (t.id === 'discovery_analytics') loadDiscoveryAnalytics();
                 }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
                   active
@@ -1604,6 +1697,242 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
         />
       )}
 
+      {/* TAB 8: EDUCATION TAXONOMY (A–J) GOVERNANCE */}
+      {subTab === 'taxonomy' && (
+        <div className="space-y-6 text-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Add Custom Qualification, Degree, Stream, Subject or Specialization
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Extends OpenFrame Categories A–J (Early Childhood LKG through Doctoral &amp; Skill Development).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadTaxonomy}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer self-start"
+              >
+                Refresh Taxonomy
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!taxonomyForm.name.trim()) return;
+                setSavingTaxonomy(true);
+                try {
+                  const catInfo = EDUCATION_CATEGORY_BY_CODE[taxonomyForm.categoryCode];
+                  await marketplaceService.saveEducationTaxonomyItem({
+                    categoryCode: taxonomyForm.categoryCode,
+                    categoryTitle: catInfo?.title || `Category ${taxonomyForm.categoryCode}`,
+                    itemType: taxonomyForm.itemType,
+                    name: taxonomyForm.name,
+                    parentGroup: taxonomyForm.parentGroup || undefined,
+                    description: taxonomyForm.description || undefined,
+                    createdByUid: adminUid,
+                  });
+                  await onLogActivity('CREATE_TAXONOMY', 'education_taxonomy', taxonomyForm.name, `Added ${taxonomyForm.itemType} under ${taxonomyForm.categoryCode}`);
+                  onNotify(`Added "${taxonomyForm.name}" to Category ${taxonomyForm.categoryCode}.`);
+                  setTaxonomyForm((prev) => ({ ...prev, name: '', parentGroup: '', description: '' }));
+                  await loadTaxonomy();
+                } catch (err: any) {
+                  onNotify(err?.message || 'Unable to save taxonomy entry.');
+                } finally {
+                  setSavingTaxonomy(false);
+                }
+              }}
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"
+            >
+              <select
+                value={taxonomyForm.categoryCode}
+                onChange={(e) => setTaxonomyForm((p) => ({ ...p, categoryCode: e.target.value as EducationCategoryCode }))}
+                className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+              >
+                {EDUCATION_CLASSIFICATION_CATEGORIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code}. {c.shortTitle}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={taxonomyForm.itemType}
+                onChange={(e) => setTaxonomyForm((p) => ({ ...p, itemType: e.target.value as EducationTaxonomyItem['itemType'] }))}
+                className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+              >
+                <option value="degree">Degree / Class</option>
+                <option value="stream">Academic Stream</option>
+                <option value="subject">Core Subject</option>
+                <option value="specialization">Specialization / Skill</option>
+                <option value="qualification">Qualification</option>
+              </select>
+
+              <input
+                type="text"
+                required
+                value={taxonomyForm.name}
+                onChange={(e) => setTaxonomyForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. B.Sc. Data Science / PUC Bio"
+                className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+              />
+
+              <input
+                type="text"
+                value={taxonomyForm.parentGroup}
+                onChange={(e) => setTaxonomyForm((p) => ({ ...p, parentGroup: e.target.value }))}
+                placeholder="Parent group (e.g. Science)"
+                className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+              />
+
+              <button
+                type="submit"
+                disabled={savingTaxonomy}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer disabled:opacity-50"
+              >
+                {savingTaxonomy ? 'Saving...' : 'Add Taxonomy Item'}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
+            <h3 className="text-sm font-bold text-slate-900">
+              Custom Taxonomy Entries ({taxonomyItems.length})
+            </h3>
+            {loadingTaxonomy ? (
+              <div className="py-6 text-slate-500">Loading education taxonomy...</div>
+            ) : taxonomyItems.length === 0 ? (
+              <div className="py-6 text-slate-500">
+                Using baseline Categories A–J (LKG through PhD &amp; Professional Skills). Add custom entries above to extend dynamically.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {taxonomyItems.map((item) => (
+                  <div key={item.id} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] font-bold text-[#123D32]">
+                        {item.categoryCode} · {item.itemType.toUpperCase()}
+                      </div>
+                      <div className="font-bold text-slate-900 mt-0.5">{item.name}</div>
+                      {item.parentGroup && <div className="text-[11px] text-slate-500">Group: {item.parentGroup}</div>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await marketplaceService.deleteEducationTaxonomyItem(item.id);
+                        setTaxonomyItems((prev) => prev.filter((x) => x.id !== item.id));
+                        onNotify(`Removed "${item.name}".`);
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"
+                      title="Delete taxonomy item"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 9: DISCOVERY & RECOMMENDATION ANALYTICS */}
+      {subTab === 'discovery_analytics' && (
+        <div className="space-y-6 text-xs">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900">
+              Search, Q&amp;A, Enrollment &amp; YouTube Discovery Analytics
+            </h3>
+            <button
+              type="button"
+              onClick={loadDiscoveryAnalytics}
+              disabled={loadingDiscoverySummary}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-semibold cursor-pointer disabled:opacity-50"
+            >
+              {loadingDiscoverySummary ? 'Refreshing...' : 'Refresh Analytics'}
+            </button>
+          </div>
+
+          {discoverySummary ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 tabular-nums">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] text-slate-500">Total Searches</div>
+                  <div className="text-xl font-bold text-slate-900 mt-1">{discoverySummary.totalSearches}</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] text-slate-500">Discovery Events</div>
+                  <div className="text-xl font-bold text-blue-600 mt-1">{discoverySummary.totalEvents}</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] text-slate-500">Course Enrollments</div>
+                  <div className="text-xl font-bold text-emerald-700 mt-1">{discoverySummary.totalEnrollments}</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] text-slate-500">YouTube Engagement</div>
+                  <div className="text-xl font-bold text-rose-600 mt-1">{discoverySummary.youtubeClicks}</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                  <div className="text-[11px] text-slate-500">Q&amp;A Questions Asked</div>
+                  <div className="text-xl font-bold text-indigo-700 mt-1">{discoverySummary.qaCount}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-2.5">
+                  <h4 className="font-bold text-slate-900">Top Searched Subjects</h4>
+                  {discoverySummary.topSearchedSubjects.length === 0 ? (
+                    <p className="text-slate-500">No search logs recorded yet.</p>
+                  ) : (
+                    discoverySummary.topSearchedSubjects.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between py-1 border-b border-slate-100">
+                        <span className="truncate pr-2 text-slate-700">{item.label}</span>
+                        <span className="font-bold tabular-nums text-slate-900">{item.count}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-2.5">
+                  <h4 className="font-bold text-slate-900">Popular Degree Programmes</h4>
+                  {discoverySummary.popularDegrees.length === 0 ? (
+                    <p className="text-slate-500">No degree queries recorded yet.</p>
+                  ) : (
+                    discoverySummary.popularDegrees.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between py-1 border-b border-slate-100">
+                        <span className="truncate pr-2 text-slate-700">{item.label}</span>
+                        <span className="font-bold tabular-nums text-slate-900">{item.count}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-2.5">
+                  <h4 className="font-bold text-slate-900">Top Requested Skills</h4>
+                  {discoverySummary.topRequestedSkills.length === 0 ? (
+                    <p className="text-slate-500">No skill queries recorded yet.</p>
+                  ) : (
+                    discoverySummary.topRequestedSkills.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between py-1 border-b border-slate-100">
+                        <span className="truncate pr-2 text-slate-700">{item.label}</span>
+                        <span className="font-bold tabular-nums text-slate-900">{item.count}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
+              Loading discovery analytics...
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ADD / EDIT COURSE MODAL */}
       {editingCourse && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
@@ -1674,7 +2003,18 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Primary Category *</label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="font-bold text-slate-700">Primary Category *</label>
+                    <button
+                      type="button"
+                      disabled={suggestingCategory}
+                      onClick={handleSuggestCategoryWithQuinn}
+                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>{suggestingCategory ? 'Suggesting...' : 'Quinn AI Suggest'}</span>
+                    </button>
+                  </div>
                   <select
                     value={editingCourse.category || availableCategoryNames[0]}
                     onChange={(e) => {
@@ -1788,6 +2128,77 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                 </div>
               </div>
 
+              {/* Education Classification Categories (A–J) + Degree Programmes */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                <div>
+                  <label className="block font-bold text-[#123D32] mb-1">
+                    Applicable Education Levels (Categories A–J)
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {EDUCATION_CLASSIFICATION_CATEGORIES.map((cat) => {
+                      const active = (editingCourse.educationLevels || []).includes(cat.code);
+                      return (
+                        <button
+                          key={cat.code}
+                          type="button"
+                          onClick={() => {
+                            const current = editingCourse.educationLevels || [];
+                            const next = active
+                              ? current.filter((c) => c !== cat.code)
+                              : [...current, cat.code];
+                            setEditingCourse({ ...editingCourse, educationLevels: next });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border cursor-pointer ${
+                            active
+                              ? 'bg-[#123D32] text-white border-[#123D32]'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {cat.code}. {cat.shortTitle}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Degree / Class Programmes (comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={(editingCourse.degreeProgrammes || []).join(', ')}
+                      onChange={(e) =>
+                        setEditingCourse({
+                          ...editingCourse,
+                          degreeProgrammes: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                        })
+                      }
+                      placeholder="e.g. BCA, B.Com, PUC, Class 10"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      Prerequisites
+                    </label>
+                    <input
+                      type="text"
+                      value={editingCourse.prerequisites || ''}
+                      onChange={(e) =>
+                        setEditingCourse({
+                          ...editingCourse,
+                          prerequisites: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. Basic Mathematics, Beginner Friendly"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Difficulty</label>
@@ -1814,7 +2225,7 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Course Fee (INR)</label>
+                  <label className="block font-bold text-slate-700 mb-1">Course Fee (INR · 0 = Free)</label>
                   <input
                     type="number"
                     min="0"
@@ -1824,9 +2235,9 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                       setEditingCourse({
                         ...editingCourse,
                         price: val,
-                        isFree: false,
+                        isFree: val === 0,
                         pricingTier:
-                            val === 0
+                          val === 0
                             ? 'Academic Access'
                             : String(editingCourse.pricingTier) === 'Free' || editingCourse.pricingTier === 'Academic Access'
                             ? 'Basic'
@@ -1859,6 +2270,22 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                     onChange={(e) => setEditingCourse({ ...editingCourse, certificateEligibility: e.target.checked })}
                   />
                   <span>Certificate Available</span>
+                </label>
+                <label className="flex items-center gap-2 font-semibold text-emerald-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(editingCourse.price ?? 0) === 0}
+                    onChange={(e) => {
+                      const makeFree = e.target.checked;
+                      setEditingCourse({
+                        ...editingCourse,
+                        price: makeFree ? 0 : (editingCourse.price && editingCourse.price > 0 ? editingCourse.price : 499),
+                        isFree: makeFree,
+                        pricingTier: makeFree ? 'Academic Access' : 'Basic',
+                      });
+                    }}
+                  />
+                  <span>Free Access Course (Price = ₹0)</span>
                 </label>
               </div>
 

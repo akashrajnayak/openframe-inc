@@ -2,16 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, Link } from '../router/RouterContext';
 import {
   Shield,
-  KeyRound,
-  ClipboardList,
   ShieldAlert,
+  ClipboardList,
   Search,
   Plus,
   Trash2,
   Edit,
   ExternalLink,
   CheckCircle2,
-  AlertTriangle,
   RefreshCw,
   Clock,
   Sparkles,
@@ -33,12 +31,16 @@ import {
   Tag,
   Filter,
   Globe,
-  ChevronLeft,
-  ChevronRight,
   Check,
-  X
+  X,
+  Users,
+  ShieldCheck,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { AdminSidebar, AdminModuleKey } from '../components/admin/AdminSidebar';
+import { AdminTopNav } from '../components/admin/AdminTopNav';
+import { AdminLoginPage } from './AdminLoginPage';
 import {
   getAllAdminUsers,
   updateAdminUserRole,
@@ -51,6 +53,7 @@ import {
 import { storageService } from '../services/storageService';
 import { marketplaceService } from '../services/marketplaceService';
 import { lmsService } from '../services/lmsService';
+import { AdminSchoolPartnerGovernance } from '../components/school-partner/AdminSchoolPartnerGovernance';
 import {
   InquirySubmission,
   BlogPost,
@@ -87,8 +90,6 @@ import {
   MarketplacePricingTier
 } from '../types';
 import { OFFICIAL_PRICING_PLANS, OFFICIAL_BROCHURES } from '../data/educationData';
-import { AdminSidebar, AdminModuleKey } from '../components/admin/AdminSidebar';
-import { AdminTopNav } from '../components/admin/AdminTopNav';
 import {
   AdminDashboardOverview,
   DashboardMetricCounts,
@@ -107,19 +108,17 @@ import { AdminSchoolManagement } from '../components/admin/AdminSchoolManagement
 
 export const AdminPage: React.FC = () => {
   const { navigate } = useRouter();
-
-  // Firebase Auth Context
   const {
     currentUser,
     adminProfile,
-    role,
     isSuperAdmin,
-    logout
+    logout,
+    loading: authLoading,
   } = useAuth();
 
   // Navigation & UI States
   const [activeModule, setActiveModule] = useState<AdminModuleKey>('dashboard');
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -189,8 +188,7 @@ export const AdminPage: React.FC = () => {
   };
 
   const effectiveRole: AdminRole =
-    adminProfile?.role ||
-    (isSuperAdmin ? 'Super Admin' : storageService.isAdminLoggedIn() ? 'Super Admin' : 'Sales Admin');
+    adminProfile?.role || (isSuperAdmin ? 'Super Admin' : 'Sales Admin');
 
   // Load all data
   const loadData = () => {
@@ -322,13 +320,7 @@ export const AdminPage: React.FC = () => {
     }
   }, [activeModule]);
 
-  // Check login state: if not logged in, redirect to /admin/login
-  const isAuthenticated = Boolean(currentUser || storageService.isAdminLoggedIn());
-  useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/admin/login');
-    }
-  }, [isAuthenticated, navigate]);
+  // Auth & RBAC gating are enforced uniformly by DashboardShell
 
   // Role Based Access Control
   const canAccess = (moduleKey: AdminModuleKey): boolean => {
@@ -355,10 +347,11 @@ export const AdminPage: React.FC = () => {
           effectiveRole === 'HR Admin' ||
           effectiveRole === 'Sales Admin'
         );
+      case 'school_partners':
+        return effectiveRole === 'HR Admin' || effectiveRole === 'Education Admin';
       case 'internships':
       case 'jobs':
       case 'professionals':
-      case 'school_partners':
       case 'ngo_partners':
         return effectiveRole === 'HR Admin';
       case 'hopenest_management':
@@ -377,17 +370,6 @@ export const AdminPage: React.FC = () => {
       default:
         return false;
     }
-  };
-
-  // Sign out handler
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      // ignore
-    }
-    storageService.setAdminLoggedIn(false);
-    navigate('/admin/login');
   };
 
   // Combined metrics calculation
@@ -813,7 +795,7 @@ export const AdminPage: React.FC = () => {
   // Save Blog Post
   const handleSaveBlogPost = (status: 'Draft' | 'Published') => {
     if (!editingPost || !editingPost.title) {
-      alert('Article title is mandatory.');
+      showToast('Article title is mandatory.');
       return;
     }
 
@@ -963,52 +945,48 @@ export const AdminPage: React.FC = () => {
     showToast(`Branch "${payload.name}" saved.`);
   };
 
-  // If unauthenticated, redirect or don't render protected content
-  if (!isAuthenticated) {
-    return null;
+  if (!authLoading && (!currentUser || !(adminProfile?.isActive || isSuperAdmin))) {
+    return <AdminLoginPage />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-[#071326] border border-blue-500 text-white px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-2">
-          <CheckCircle2 className="w-4 h-4 text-sky-400" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
-      {/* Enterprise Left Sidebar Drawer */}
+    <div className="min-h-screen bg-slate-50 flex">
       <AdminSidebar
         activeModule={activeModule}
-        onSelectModule={(key) => setActiveModule(key)}
+        onSelectModule={setActiveModule}
         counts={sidebarCounts}
         role={effectiveRole}
-        isSuperAdmin={isSuperAdmin || effectiveRole === 'Super Admin'}
-        isOpen={isMobileSidebarOpen}
-        onClose={() => setIsMobileSidebarOpen(false)}
+        isSuperAdmin={isSuperAdmin}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         canAccess={canAccess}
-        onLogout={handleLogout}
+        onLogout={() => logout().then(() => navigate('/admin/login'))}
       />
 
-      {/* Main Administrative Workspace */}
-      <div className="lg:pl-72 flex flex-col min-h-screen">
-        {/* Sticky Top Bar */}
+      <div className="flex-1 lg:pl-72 flex flex-col min-w-0">
         <AdminTopNav
           activeModule={activeModule}
-          onSelectModule={(key) => setActiveModule(key)}
-          onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-          userEmail={currentUser?.email || (storageService.isAdminLoggedIn() ? 'admin@openframeitsolutions.com' : 'Administrator')}
+          onSelectModule={setActiveModule}
+          onToggleMobileSidebar={() => setSidebarOpen((p) => !p)}
+          userEmail={currentUser?.email || null}
           role={effectiveRole}
-          isSuperAdmin={isSuperAdmin || effectiveRole === 'Super Admin'}
-          onLogout={handleLogout}
+          isSuperAdmin={isSuperAdmin}
+          onLogout={() => logout().then(() => navigate('/admin/login'))}
           recentNotifications={recentNotifications}
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
         />
 
-        {/* Content View Routing based on activeModule */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        {/* Toast Notification */}
+        {toastMessage && (
+          <div className="fixed bottom-5 right-5 z-50 bg-[#071326] border border-blue-500 text-white px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-2">
+            <CheckCircle2 className="w-4 h-4 text-sky-400" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        <main className="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto">
+          <div className="space-y-6">
           {/* MODULE 1: DASHBOARD OVERVIEW */}
           {activeModule === 'dashboard' && (
             <AdminDashboardOverview
@@ -1437,43 +1415,17 @@ export const AdminPage: React.FC = () => {
 
           {/* MODULE 11: SCHOOL PARTNERSHIPS */}
           {activeModule === 'school_partners' && (
-            <AdminDataTable<SchoolPartnerEnquiry>
-              title="School & Institutional Partnerships"
-              description="K-12 schools and colleges seeking computer education, STEM labs, and digital infrastructure."
-              data={schoolPartners}
-              exportFileName="school_partnerships.csv"
-              columns={[
-                {
-                  header: 'School / Institution',
-                  accessor: (row) => (
-                    <div>
-                      <div className="font-bold text-slate-900">{row.organizationName}</div>
-                      <div className="text-[11px] text-slate-500">{row.city}, {row.state}</div>
-                    </div>
-                  )
-                },
-                {
-                  header: 'Head / Contact',
-                  accessor: (row) => (
-                    <div>
-                      <div className="font-medium text-slate-800">{row.contactPerson}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">{row.emailAddress}</div>
-                    </div>
-                  )
-                },
-                {
-                  header: 'Institution Type',
-                  accessor: (row) => (
-                    <span className="font-mono text-slate-700 font-semibold">
-                      {row.institutionType}
-                    </span>
-                  )
-                }
-              ]}
-              onInspect={(row) => setInspectedRecord({ data: row, moduleKey: 'school_partners' })}
-              onStatusChange={(id, status) => handleUpdateRecordStatus(id, status, '')}
-              canDelete={isSuperAdmin}
-              onDelete={handleDeleteRecord}
+            <AdminSchoolPartnerGovernance
+              enquiries={schoolPartners}
+              actor={{
+                uid: currentUser?.uid || 'admin',
+                email: currentUser?.email || 'admin@openframeitsolutions.com',
+                role: effectiveRole,
+              }}
+              isSuperAdmin={isSuperAdmin}
+              onInspectEnquiry={(row) => setInspectedRecord({ data: row, moduleKey: 'school_partners' })}
+              onEnquiryStatusChange={(id, status) => handleUpdateRecordStatus(id, status, '')}
+              onDeleteEnquiry={handleDeleteRecord}
             />
           )}
 
@@ -2726,7 +2678,6 @@ export const AdminPage: React.FC = () => {
               </form>
             </div>
           )}
-        </main>
       </div>
 
       {/* Record Detail Modal */}
@@ -3123,6 +3074,8 @@ export const AdminPage: React.FC = () => {
           </div>
         </div>
       )}
+        </main>
+      </div>
     </div>
   );
 };

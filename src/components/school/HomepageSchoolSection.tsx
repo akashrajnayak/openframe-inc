@@ -21,23 +21,23 @@ export const HomepageSchoolSection: React.FC = () => {
   return (
     <section
       id="school-education-section"
-      className="py-20 bg-white border-y border-slate-200 relative overflow-hidden"
+      className="py-20 bg-[#FAF7F2] border-b border-slate-200/80 relative overflow-hidden"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-10">
           <div className="max-w-3xl space-y-2.5">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-blue-600">
-              <GraduationCap className="w-4 h-4 text-blue-600" />
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#123D32]">
+              <GraduationCap className="w-4 h-4 text-[#123D32]" />
               <span>OpenFrame School Academic System</span>
             </div>
-            <h2 className="text-3xl sm:text-4xl font-heading font-extrabold text-slate-900 tracking-tight">
-              SCHOOL EDUCATION <span className="text-blue-600">· LKG – CLASS 12</span>
+            <h2 className="text-3xl sm:text-4xl font-editorial font-semibold text-[#18221F] tracking-tight">
+              School Education <span className="text-[#123D32]">· LKG – Class 12</span>
             </h2>
-            <p className="text-base sm:text-lg text-slate-600 font-medium leading-relaxed">
+            <p className="text-base sm:text-lg text-[#18221F]/80 font-medium leading-relaxed">
               Complete School Learning – From Basic Concepts to Advanced Education.
             </p>
-            <p className="text-xs sm:text-sm text-slate-500">
+            <p className="text-xs sm:text-sm text-[#64748B]">
               Dedicated class dashboards with board-isolated syllabi across {ALL_INDIA_BOARD_STATS.total} verified authorities (National CBSE/CISCE/NIOS, IB &amp; Cambridge, all {ALL_INDIA_BOARD_STATS.stateCount} Indian States &amp; {ALL_INDIA_BOARD_STATS.utCount} Union Territories), multilingual learning in Kannada, English &amp; Hindi, AI Tutor, 8-format quizzes, and Virtual Labs.
             </p>
           </div>
@@ -45,16 +45,16 @@ export const HomepageSchoolSection: React.FC = () => {
           <div className="shrink-0 flex flex-wrap items-center gap-3">
             <Link
               to="/school?tab=boards"
-              className="inline-flex items-center gap-2 px-4 py-3.5 rounded-xl bg-white border border-slate-300 hover:border-blue-600 text-slate-800 hover:text-blue-700 font-bold text-xs sm:text-sm transition-all whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-300 hover:border-[#123D32] text-[#18221F] font-semibold text-xs sm:text-sm transition-all whitespace-nowrap shrink-0"
             >
-              <Landmark className="w-4 h-4 text-blue-600" />
+              <Landmark className="w-4 h-4 text-[#123D32]" />
               <span>All-India Boards ({ALL_INDIA_BOARD_STATS.total})</span>
             </Link>
             <Link
               to={`/school?board=${selectedBoard}`}
-              className="inline-flex items-center gap-2.5 px-6 py-4 rounded-xl bg-gradient-to-r from-[#0B1930] via-blue-700 to-indigo-700 hover:from-blue-700 hover:to-sky-600 text-white font-bold text-sm shadow-lg shadow-blue-900/20 hover:shadow-blue-600/30 transition-all group whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white font-semibold text-sm shadow-sm transition-all group whitespace-nowrap shrink-0"
             >
-              <Sparkles className="w-4 h-4 text-amber-300" />
+              <Sparkles className="w-4 h-4 text-emerald-300" />
               <span>Explore School Education</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>
@@ -62,14 +62,14 @@ export const HomepageSchoolSection: React.FC = () => {
         </div>
 
         {/* Education Board Switcher Bar */}
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 mb-8">
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 mb-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-blue-600" />
+              <div className="text-xs font-bold uppercase tracking-wider text-[#123D32] flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-[#123D32]" />
                 <span>Select Curriculum Board (Strictly Isolated Syllabi)</span>
               </div>
-              <p className="text-xs text-slate-600 mt-1">
+              <p className="text-xs text-[#64748B] mt-1">
                 {activeBoard.name} — Supported Mediums: {activeBoard.supportedMediums.join(' · ')}
               </p>
             </div>
@@ -81,10 +81,10 @@ export const HomepageSchoolSection: React.FC = () => {
                     key={b.id}
                     type="button"
                     onClick={() => setSelectedBoard(b.id)}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
                       isSelected
-                        ? 'bg-[#0B1930] text-white border-[#0B1930] shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:text-blue-700'
+                        ? 'bg-[#123D32] text-white border-[#123D32] shadow-xs'
+                        : 'bg-[#FAF7F2] text-[#18221F] border-slate-200 hover:border-[#123D32]'
                     }`}
                   >
                     {b.shortName}
@@ -93,9 +93,9 @@ export const HomepageSchoolSection: React.FC = () => {
               })}
             </div>
           </div>
-          <div className="mt-3 pt-3 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#64748B]">
             <span className="flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-blue-600" />
+              <Globe className="w-3.5 h-3.5 text-[#123D32]" />
               <span>Multilingual Mode: English · ಕನ್ನಡ (Kannada) · हिन्दी (Hindi) with Voice TTS &amp; STT</span>
             </span>
             <span>{activeBoard.gradingRuleSummary}</span>

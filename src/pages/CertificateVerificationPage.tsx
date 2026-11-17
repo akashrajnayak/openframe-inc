@@ -34,7 +34,7 @@ export const CertificateVerificationPage: React.FC = () => {
     let active = true;
     async function loadCert() {
       setLoading(true);
-      const res = await lmsService.getCertificate(certIdParam);
+      const res = await lmsService.getCertificate(certIdParam).catch(() => null);
       if (active) {
         setCert(res);
         setLoading(false);
@@ -123,11 +123,24 @@ export const CertificateVerificationPage: React.FC = () => {
                       ? 'Credential Revoked'
                       : cert.status === 'Pending Admin Approval'
                       ? 'Pending Final Institutional Seal'
+                      : (cert.status as string) === 'Corrected'
+                      ? 'Authentic Credential (Corrected Revision)'
                       : 'Authentic & Verified Credential'}
                   </h2>
                   <p className="text-xs text-slate-600 mt-0.5">
                     Serial {cert.certificateId} · Recorded on OpenFrame Academic Registry
+                    {(cert as any).schoolName ? ` · ${(cert as any).schoolName}` : ''}
                   </p>
+                  {cert.status === 'Revoked' && (cert as any).revocationReason && (
+                    <p className="text-xs text-rose-700 font-medium mt-1">
+                      Revocation Reason: {(cert as any).revocationReason}
+                    </p>
+                  )}
+                  {(cert as any).correctionNote && cert.status !== 'Revoked' && (
+                    <p className="text-xs text-blue-700 font-medium mt-1">
+                      Correction Note: {(cert as any).correctionNote}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -165,7 +178,7 @@ export const CertificateVerificationPage: React.FC = () => {
 
               <div className="max-w-2xl mx-auto space-y-3">
                 <div className="text-xs font-semibold text-slate-500">
-                  OpenFrame IT Solutions Private Limited
+                  OpenFrame IT Solutions Private Limited (OpenFrame Education)
                 </div>
                 <div className="text-[11px] text-slate-400">
                   {cert.accreditationBody || 'Academic Alliance with HopeNest Global Foundation'}
@@ -182,8 +195,8 @@ export const CertificateVerificationPage: React.FC = () => {
                 </div>
 
                 <p className="text-xs text-slate-600 max-w-lg mx-auto leading-relaxed pt-2">
-                  has completed all mandatory coursework, verified theoretical comprehension through Quinn AI assessments, and passed faculty rubric evaluation with{' '}
-                  <strong>{cert.grade}</strong> ({cert.score ?? cert.finalScore ?? 0}/100) in:
+                  has completed all mandatory coursework, verified theoretical comprehension through Quinn AI assessments, and achieved{' '}
+                  <strong>{cert.grade}</strong> ({cert.score ?? cert.finalScore ?? 0}%) in:
                 </p>
 
                 <h3 className="text-xl font-bold text-slate-900 py-1">
@@ -191,13 +204,23 @@ export const CertificateVerificationPage: React.FC = () => {
                 </h3>
 
                 <div className="pt-8 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-6 items-center text-xs">
-                  <div className="text-center sm:text-left">
-                    <div className="text-slate-400">Issue Date</div>
-                    <div className="font-semibold text-slate-800 mt-0.5 tabular-nums">
-                      {cert.issuedDate ||
-                        (cert.completionDate && !Number.isNaN(new Date(cert.completionDate).getTime())
+                  <div className="text-center sm:text-left space-y-1">
+                    <div>
+                      <div className="text-slate-400">Completion Date</div>
+                      <div className="font-semibold text-slate-800 tabular-nums">
+                        {cert.completionDate && !Number.isNaN(new Date(cert.completionDate).getTime())
                           ? new Date(cert.completionDate).toLocaleDateString()
-                          : 'Verified Credential')}
+                          : cert.issuedDate || 'Verified'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400">Issue Date</div>
+                      <div className="font-semibold text-slate-800 tabular-nums">
+                        {cert.issuedDate ||
+                          (cert.completionDate && !Number.isNaN(new Date(cert.completionDate).getTime())
+                            ? new Date(cert.completionDate).toLocaleDateString()
+                            : 'Verified Credential')}
+                      </div>
                     </div>
                   </div>
 
@@ -219,7 +242,7 @@ export const CertificateVerificationPage: React.FC = () => {
                       {cert.teacherName || 'OpenFrame Academic Board'}
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5">
-                      {cert.authorizedSignatory || 'Authorized Signatory'}
+                      {cert.authorizedSignatory || 'Authorized Signatory · OpenFrame Education'}
                     </div>
                   </div>
                 </div>
@@ -228,10 +251,10 @@ export const CertificateVerificationPage: React.FC = () => {
 
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-1 text-xs text-slate-500">
               <p className="font-semibold text-slate-700">
-                Issuance Basis & Statutory Clarification
+                Issuance Basis &amp; Institutional Clarification
               </p>
               <p>
-                Issued by OpenFrame IT Solutions Private Limited (OpenFrame Education) based on internal assessments, coursework completion, and faculty evaluation rubrics. This credential is an institutional skill & course completion certificate and does not constitute a university degree or statutory government accreditation.
+                Issued by OpenFrame IT Solutions Private Limited (OpenFrame Education) based on internal assessments, coursework completion, and evaluation rubrics. This credential is an institutional skill &amp; course completion certificate and does not imply university accreditation, government recognition, or endorsement by YouTube or third-party video creators.
               </p>
               <p className="text-[11px] text-slate-400">
                 Public registry verification displays validated academic credentials without exposing private learner contact details.

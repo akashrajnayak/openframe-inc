@@ -26,6 +26,8 @@ import {
   StudentFavoriteCourse,
   MarketplaceAutocompleteSuggestion,
   MarketplaceFilterParams,
+  EducationTaxonomyItem,
+  EducationCategoryCode,
 } from '../types';
 import {
   ALL_90_CATEGORIES,
@@ -210,7 +212,7 @@ class MarketplaceService {
       (youtubePlaylistId ? 'youtube_playlist' : youtubeVideoId ? 'youtube_video' : 'standard');
 
     const price = Math.max(0, Number(input.price ?? 0));
-    const isFree = false;
+    const isFree = price === 0 || Boolean(input.isFree);
     const rawTier = input.pricingTier as string | undefined;
     const pricingTier: MarketplacePricingTier =
       rawTier && rawTier !== 'Free'
@@ -360,7 +362,12 @@ class MarketplaceService {
       isCareerTrack: Boolean(input.isCareerTrack),
       isCustomAdded: options?.isCustomAdded !== undefined ? options.isCustomAdded : Boolean(input.isCustomAdded ?? true),
       isBaseOverride: options?.isBaseOverride !== undefined ? options.isBaseOverride : Boolean(input.isBaseOverride ?? false),
-      rating: Number(input.rating ?? 4.85),
+      rating: Number(input.rating ?? 0),
+      reviewCount: Number(input.reviewCount ?? 0),
+      hasVerifiedReviews: Boolean(input.hasVerifiedReviews && Number(input.reviewCount ?? 0) > 0),
+      educationLevels: Array.isArray(input.educationLevels) ? input.educationLevels : undefined,
+      degreeProgrammes: Array.isArray(input.degreeProgrammes) ? input.degreeProgrammes : undefined,
+      prerequisites: input.prerequisites,
       enrolledCount: Number(input.enrolledCount ?? 0),
       createdAt: input.createdAt || nowIso,
       updatedAt: nowIso,
@@ -678,6 +685,30 @@ class MarketplaceService {
         const ms = dt ? Date.parse(dt) : 0;
         if (!ms || ms < cutoff) return false;
       }
+    }
+    if (params.instructor && params.instructor.trim()) {
+      const target = params.instructor.trim().toLowerCase();
+      const instr = (course.instructorName || course.instructor?.name || '').toLowerCase();
+      if (!instr.includes(target)) return false;
+    }
+    if (params.channel && params.channel.trim()) {
+      const targetCh = params.channel.trim().toLowerCase();
+      const ch = (course.youtubeChannelName || '').toLowerCase();
+      if (!ch.includes(targetCh)) return false;
+    }
+    if (params.accessType === 'free' && course.price > 0) return false;
+    if (params.accessType === 'paid' && course.price <= 0) return false;
+    if (params.educationLevel && params.educationLevel !== 'All') {
+      const targetLvl = params.educationLevel.toLowerCase();
+      const levels = (course.educationLevels || []).map((l) => l.toLowerCase());
+      const tokens = `${course.title} ${course.category} ${course.shortDesc}`.toLowerCase();
+      if (levels.length > 0 && !levels.some((l) => l.includes(targetLvl)) && !tokens.includes(targetLvl)) return false;
+    }
+    if (params.degree && params.degree !== 'All') {
+      const targetDeg = params.degree.toLowerCase();
+      const progs = (course.degreeProgrammes || []).map((p) => p.toLowerCase());
+      const tokens = `${course.title} ${course.category} ${course.shortDesc}`.toLowerCase();
+      if (progs.length > 0 && !progs.some((p) => p.includes(targetDeg)) && !tokens.includes(targetDeg)) return false;
     }
     if (params.status && params.status !== 'All') {
       if (course.status !== params.status) return false;
@@ -1927,7 +1958,7 @@ class MarketplaceService {
       courseType: course.courseType || 'standard',
       level: course.level,
       duration: course.duration,
-      isFree: false,
+      isFree: Number(course.price || 0) === 0 || Boolean(course.isFree),
       price: Number(course.price || 0),
       savedAt: new Date().toISOString(),
     });
@@ -1994,6 +2025,61 @@ class MarketplaceService {
       ].join(',')
     );
     return [headers.join(','), ...rows].join('\n');
+  }
+
+  /**
+   * Education Taxonomy Management (Firestore `/education_taxonomy`)
+   * Allows Admins to dynamically add qualifications, degrees, streams, subjects, or specializations.
+   */
+  async getCustomEducationTaxonomy(): Promise<EducationTaxonomyItem[]> {
+    try {
+      const snap = await getDocs(query(collection(db, 'education_taxonomy'), limit(500)));
+      return snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) } as EducationTaxonomyItem))
+        .sort((a, b) => a.categoryCode.localeCompare(b.categoryCode) || a.name.localeCompare(b.name));
+    } catch (err) {
+      console.warn('Could not read education_taxonomy:', err);
+      return [];
+    }
+  }
+
+  async saveEducationTaxonomyItem(input: {
+    id?: string;
+    categoryCode: EducationCategoryCode;
+    categoryTitle: string;
+    itemType: EducationTaxonomyItem['itemType'];
+    name: string;
+    parentGroup?: string;
+    description?: string;
+    isActive?: boolean;
+    createdByUid?: string;
+  }): Promise<EducationTaxonomyItem> {
+    const cleanName = input.name.trim();
+    if (!cleanName) throw new Error('Taxonomy item name is required.');
+    const nowIso = new Date().toISOString();
+    const id =
+      input.id ||
+      `edu_${input.categoryCode}_${slugifyCategory(cleanName)}_${Date.now().toString(36).slice(-4)}`;
+    const record: EducationTaxonomyItem = removeUndefinedDeep({
+      id,
+      categoryCode: input.categoryCode,
+      categoryTitle: input.categoryTitle,
+      itemType: input.itemType,
+      name: cleanName,
+      parentGroup: input.parentGroup?.trim() || undefined,
+      description: input.description?.trim() || undefined,
+      isActive: input.isActive !== undefined ? Boolean(input.isActive) : true,
+      createdByUid: input.createdByUid,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    await setDoc(doc(db, 'education_taxonomy', id), record, { merge: true });
+    return record;
+  }
+
+  async deleteEducationTaxonomyItem(id: string): Promise<void> {
+    if (!id) return;
+    await deleteDoc(doc(db, 'education_taxonomy', id));
   }
 }
 

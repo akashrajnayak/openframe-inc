@@ -95,7 +95,7 @@ export const ChatbotPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `qwen_ai_transcript_${Date.now()}.txt`;
+    a.download = `quinn_ai_transcript_${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -139,16 +139,11 @@ export const ChatbotPage: React.FC = () => {
             <Brain className="w-5 h-5 text-white" />
           </div>
           <div className="text-left">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-bold flex items-center space-x-1.5">
-              <span>OpenFrame Dedicated Intelligence</span>
-              <span>•</span>
-              <span className="text-emerald-400 flex items-center space-x-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Online 24/7</span>
-              </span>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-bold">
+              OpenFrame Dedicated Academic Intelligence
             </div>
             <h1 className="text-base sm:text-lg font-extrabold text-white leading-tight">
-              Qwen AI • Dedicated Learning & Corporate Chatbot
+              Quinn AI • Personal AI Course Tutor &amp; Career Assistant
             </h1>
           </div>
         </div>
@@ -217,7 +212,7 @@ export const ChatbotPage: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Qwen AI (Quinn AI) provides authoritative guidance across OpenFrame's 15,500-course catalog, 110+ learning categories, corporate role training, IT solutions, and expert phone counseling.
+              Quinn AI provides authoritative guidance across OpenFrame&apos;s 15,500-course catalog, 110+ learning categories, corporate role training, IT solutions, and expert phone counseling.
             </p>
 
             <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
@@ -301,7 +296,7 @@ export const ChatbotPage: React.FC = () => {
                   >
                     <div className="flex items-center justify-between gap-4 pb-1 border-b border-white/10 text-[10px] text-slate-400">
                       <span className="font-semibold text-cyan-400">
-                        {isQwen ? 'Qwen AI (Academic & Career Assistant)' : 'You'}
+                        {isQwen ? 'Quinn AI (Personal Course Tutor)' : 'You'}
                       </span>
                       <div className="flex items-center space-x-2">
                         <span>{msg.timestamp.slice(11, 16)}</span>
@@ -439,11 +434,10 @@ export const ChatbotPage: React.FC = () => {
             {isTyping && (
               <div className="flex items-center space-x-3 text-left">
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
-                  <Bot className="w-4 h-4 animate-spin" />
+                  <Bot className="w-4 h-4" />
                 </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 flex items-center space-x-2 text-xs text-slate-400">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                  <span>Qwen AI is analyzing curriculum & synthesizing recommendations...</span>
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 text-xs text-slate-400">
+                  <span>Quinn AI is analyzing curriculum &amp; synthesizing guidance...</span>
                 </div>
               </div>
             )}
@@ -464,7 +458,7 @@ export const ChatbotPage: React.FC = () => {
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Ask Qwen AI about 15,500 courses, corporate training, roadmaps, coding, or IT solutions..."
+                placeholder="Ask Quinn AI about 15,500+ courses, roadmaps, Excel formulas, coding, or IT solutions..."
                 className="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all"
               />
 
@@ -479,7 +473,7 @@ export const ChatbotPage: React.FC = () => {
             </form>
 
             <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 px-1">
-              <span>Qwen AI (Quinn AI) provides verified OpenFrame academic & enterprise intelligence.</span>
+              <span>Quinn AI provides verified OpenFrame academic &amp; enterprise guidance.</span>
               <span className="hidden sm:inline">Press Enter to send</span>
             </div>
           </div>

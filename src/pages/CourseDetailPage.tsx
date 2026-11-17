@@ -41,8 +41,9 @@ import {
 import { marketplaceService } from '../services/marketplaceService';
 import { lmsService } from '../services/lmsService';
 import { quinnAiService } from '../services/quinnAiService';
-import { IssuedCertificate, MarketplaceCourse } from '../types';
-import { StudentRegistrationModal } from '../components/common/StudentRegistrationModal';
+import { IssuedCertificate, MarketplaceCourse, EducationCategoryCode } from '../types';
+import { EDUCATION_CATEGORY_BY_CODE } from '../data/educationClassificationData';
+import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
@@ -60,6 +61,7 @@ export const CourseDetailPage: React.FC = () => {
   const [isFavUpdating, setIsFavUpdating] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [earnedCert, setEarnedCert] = useState<IssuedCertificate | null>(null);
+  const [relatedCourses, setRelatedCourses] = useState<MarketplaceCourse[]>([]);
 
   // Inline Quinn AI Tutor drawer
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
@@ -163,6 +165,15 @@ export const CourseDetailPage: React.FC = () => {
               return true;
             });
             setCourseVideos(merged);
+
+            marketplaceService
+              .filterCourses({ category: found.category, page: 1, pageSize: 6 })
+              .then((rel) => {
+                if (isMounted) {
+                  setRelatedCourses((rel.courses || []).filter((c) => c.id !== found.id).slice(0, 3));
+                }
+              })
+              .catch(() => {});
           }
         }
       } catch (err) {
@@ -401,13 +412,44 @@ export const CourseDetailPage: React.FC = () => {
                 {course.shortDesc}
               </p>
 
+              {/* Education Levels & Degree Programmes */}
+              {(course.educationLevels?.length || course.degreeProgrammes?.length) ? (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {course.educationLevels?.map((lvl) => (
+                    <span
+                      key={lvl}
+                      className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-900/50 text-emerald-200 border border-emerald-500/30"
+                    >
+                      {EDUCATION_CATEGORY_BY_CODE[lvl as EducationCategoryCode]?.shortTitle || `Category ${lvl}`}
+                    </span>
+                  ))}
+                  {course.degreeProgrammes?.slice(0, 6).map((deg) => (
+                    <span
+                      key={deg}
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800/90 text-slate-200 border border-slate-700"
+                    >
+                      {deg}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
               {/* Meta metrics */}
               <div className="pt-2 flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-slate-300">
-                <div className="flex items-center space-x-1.5">
-                  <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
-                  <span className="font-bold text-white text-sm tabular-nums">{course.rating}</span>
-                  <span className="text-slate-400 tabular-nums">({course.enrolledCount} enrolled)</span>
-                </div>
+                {course.hasVerifiedReviews && (course.reviewCount ?? 0) > 0 && (
+                  <div className="flex items-center space-x-1.5">
+                    <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                    <span className="font-bold text-white text-sm tabular-nums">{course.rating}</span>
+                    <span className="text-slate-400 tabular-nums">({course.reviewCount} verified reviews)</span>
+                  </div>
+                )}
+
+                {course.enrolledCount > 0 && (
+                  <div className="flex items-center space-x-1.5">
+                    <Users className="w-4 h-4 text-cyan-400" />
+                    <span className="tabular-nums">{course.enrolledCount.toLocaleString()} enrolled</span>
+                  </div>
+                )}
 
                 <div className="flex items-center space-x-1.5">
                   <Clock className="w-4 h-4 text-cyan-400" />
@@ -544,7 +586,9 @@ export const CourseDetailPage: React.FC = () => {
               <div className="space-y-2">
                 <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Prerequisites</h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  {course.level === 'Beginner' || course.level === 'All Levels'
+                  {course.prerequisites && course.prerequisites.trim().length > 0
+                    ? course.prerequisites
+                    : course.level === 'Beginner' || course.level === 'All Levels'
                     ? 'No prior specialized background required. Basic familiarity with digital reading and web browsing is sufficient.'
                     : `Recommended foundational familiarity with ${course.category} concepts before attempting advanced modules.`}
                 </p>
@@ -853,19 +897,19 @@ export const CourseDetailPage: React.FC = () => {
                 </span>
               </div>
 
-              {/* Consultation & Fee Guidance Card */}
+              {/* Fee & Enrollment Policy Card */}
               <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50/80 border border-blue-200 space-y-1.5">
                 <div className="flex items-center space-x-1.5 text-[11px] font-mono uppercase tracking-wider text-blue-700 font-bold">
-                  <PhoneCall className="w-3.5 h-3.5 text-blue-600" />
-                  <span>{course.price > 0 ? 'Fee & Admission Policy' : 'Academic Access Policy'}</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{course.price > 0 ? 'Paid Course Checkout' : 'Free Access Programme'}</span>
                 </div>
-                <div className="text-xl font-extrabold text-slate-900 leading-tight">
-                  {course.price > 0 ? `₹${course.price.toLocaleString()} Programme` : 'Open Academic Programme'}
+                <div className="text-xl font-extrabold text-slate-900 leading-tight tabular-nums">
+                  {course.price > 0 ? `₹${course.price.toLocaleString()}` : 'Free'}
                 </div>
                 <p className="text-[11px] text-slate-600 leading-relaxed pt-0.5">
                   {course.price === 0
-                    ? 'Watch curated lectures, bookmark this course, and complete Quinn AI verification assessments immediately.'
-                    : 'Course fees, customized project roadmap, batch timings, and merit scholarships are finalized during your 1-on-1 counseling call with our academic expert.'}
+                    ? 'Complimentary instant enrollment. Watch curated lectures, complete Quinn AI verification quizzes, and earn certificate eligibility.'
+                    : 'Secure one-time checkout via Razorpay. Unlocks all curriculum modules, practical project review, presentation evaluation, and verified certification.'}
                 </p>
               </div>
 
@@ -910,7 +954,7 @@ export const CourseDetailPage: React.FC = () => {
                   className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md shadow-blue-500/25 cursor-pointer"
                 >
                   <GraduationCap className="w-4 h-4 text-cyan-200" />
-                  <span>4. Enroll in OpenFrame Learning Path</span>
+                  <span>{course.price > 0 ? `4. Enroll & Pay ₹${course.price.toLocaleString()}` : '4. Enroll Now (Free)'}</span>
                 </button>
 
                 <Link
@@ -1029,15 +1073,60 @@ export const CourseDetailPage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* RELATED COURSES GRID */}
+        {relatedCourses.length > 0 && (
+          <section className="mt-12 pt-8 border-t border-slate-200 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-extrabold text-slate-900">
+                Related Courses in {course.category}
+              </h2>
+              <Link to={`/marketplace?cat=${encodeURIComponent(course.category)}`} className="text-xs font-semibold text-blue-600 hover:underline">
+                View All
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {relatedCourses.map((rc) => (
+                <Link
+                  key={rc.id}
+                  to={`/marketplace/${rc.id}`}
+                  className="bg-white rounded-2xl border border-slate-200 hover:border-blue-400 p-4 flex flex-col justify-between gap-3 transition-all shadow-xs"
+                >
+                  <div className="space-y-2.5">
+                    <div className="aspect-video rounded-xl overflow-hidden bg-slate-900">
+                      <CourseThumbnail
+                        src={rc.thumbnailUrl || rc.imageUrl}
+                        alt={rc.title}
+                        category={rc.category}
+                        categoryGroup={rc.categoryGroup}
+                        youtubeVideoId={rc.youtubeVideoId}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="text-[11px] font-semibold text-blue-600">{rc.subcategory || rc.category}</div>
+                    <h3 className="text-sm font-bold text-slate-900 line-clamp-2">{rc.title}</h3>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+                    <span>{rc.level} · {rc.duration}</span>
+                    <span className="font-semibold text-slate-800">{rc.language || 'English'}</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
-      {/* STUDENT REGISTRATION POP-UP MODAL */}
-      <StudentRegistrationModal
+      {/* COMPLETE COURSE ENROLLMENT & PAYMENT MODAL */}
+      <CourseEnrollmentModal
         isOpen={isRegModalOpen}
         onClose={() => setIsRegModalOpen(false)}
-        courseTitle={course.title}
-        courseId={course.id}
-        courseCategory={course.category}
+        course={course}
+        onEnrolled={() => {
+          setIsRegModalOpen(false);
+          setToastMessage('Enrollment confirmed! You can now start the learning workspace.');
+          setTimeout(() => setToastMessage(null), 5000);
+        }}
       />
 
       {/* "PLAY ON MY SITE" YOUTUBE VIDEO POP-UP MODAL */}

@@ -491,14 +491,16 @@
     },
     "LmsUserProfile": {
       "title": "LmsUserProfile",
-      "description": "Unified LMS role and identity record for students, teachers, parents, and admins.",
+      "description": "Unified LMS role and identity record for students, teachers, parents, institutions, field executives, NGO partners, and admins.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 120 },
         "displayName": { "type": "string", "maxLength": 120 },
-        "role": { "type": "string", "enum": ["student", "teacher", "parent", "admin"] },
+        "role": { "type": "string", "enum": ["student", "teacher", "parent", "institution_admin", "field_executive", "admin", "super_admin", "ngo_partner", "professional"] },
+        "status": { "type": "string", "enum": ["active", "disabled", "suspended"] },
         "registrationNumber": { "type": "string", "maxLength": 60 },
+        "institutionId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "maxLength": 50 },
         "updatedAt": { "type": "string", "maxLength": 50 }
       },
@@ -547,14 +549,45 @@
     },
     "CourseEnrollment": {
       "title": "CourseEnrollment",
-      "description": "Student enrollment record linking student, course, and assigned teacher.",
+      "description": "Student enrollment CRM record linking student, personal/address/academic profile, payment status, workflow state, coordinator, and audit history.",
       "type": "object",
       "properties": {
+        "enrollmentId": { "type": "string", "maxLength": 64 },
         "studentId": { "type": "string", "maxLength": 128 },
         "studentName": { "type": "string", "maxLength": 120 },
+        "studentEmail": { "type": "string", "maxLength": 120 },
+        "studentPhone": { "type": "string", "maxLength": 32 },
+        "country": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "educationLevel": { "type": "string", "maxLength": 80 },
+        "degreeOrClass": { "type": "string", "maxLength": 120 },
+        "institution": { "type": "string", "maxLength": 180 },
         "courseId": { "type": "string", "maxLength": 128 },
         "courseTitle": { "type": "string", "maxLength": 200 },
-        "status": { "type": "string", "enum": ["Active", "Completed", "Suspended"] },
+        "deliveryMethod": { "type": "string", "maxLength": 60 },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Submitted",
+            "Pending Verification",
+            "Verified",
+            "Pending Payment",
+            "Payment Completed",
+            "Approved",
+            "Rejected",
+            "Cancelled",
+            "Active",
+            "Completed",
+            "Suspended"
+          ]
+        },
+        "paymentStatus": { "type": "string", "enum": ["Free", "Paid", "Pending", "Scholarship", "Failed"] },
+        "feeAmount": { "type": "number" },
+        "razorpayOrderId": { "type": "string", "maxLength": 120 },
+        "razorpayPaymentId": { "type": "string", "maxLength": 120 },
+        "verifiedServerSide": { "type": "boolean" },
+        "assignedCoordinator": { "type": "string", "maxLength": 120 },
         "enrolledAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["studentId", "courseId", "status", "enrolledAt"]
@@ -1087,6 +1120,484 @@
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "courseId", "reason", "status", "createdAt"]
+    },
+    "ParentGuardianDoc": {
+      "title": "ParentGuardianDoc",
+      "description": "Parent or legal guardian details and consent for learners under 18.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "guardianName": { "type": "string", "maxLength": 120 },
+        "guardianMobile": { "type": "string", "maxLength": 30 },
+        "guardianConsentAccepted": { "type": "boolean" },
+        "recordedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "guardianName", "guardianMobile", "guardianConsentAccepted"]
+    },
+    "AddressDoc": {
+      "title": "AddressDoc",
+      "description": "Normalized student residential address including houseNumber and optional GPS opt-in.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "country": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "cityVillage": { "type": "string", "maxLength": 100 },
+        "houseNumber": { "type": "string", "maxLength": 60 },
+        "streetAddress": { "type": "string", "maxLength": 240 },
+        "pinCode": { "type": "string", "maxLength": 20 }
+      },
+      "required": ["id", "studentId", "country", "state", "cityVillage", "houseNumber"]
+    },
+    "YouTubeVideoDoc": {
+      "title": "YouTubeVideoDoc",
+      "description": "Indexed YouTube educational video metadata record from YouTube Data API v3.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 60 },
+        "videoId": { "type": "string", "maxLength": 60 },
+        "title": { "type": "string", "maxLength": 300 },
+        "channelId": { "type": "string", "maxLength": 80 },
+        "channelTitle": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["Active", "Removed"] }
+      },
+      "required": ["id", "videoId", "title", "channelTitle", "status"]
+    },
+    "YouTubeChannelDoc": {
+      "title": "YouTubeChannelDoc",
+      "description": "YouTube channel metadata including subscriber count and description.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 80 },
+        "channelId": { "type": "string", "maxLength": 80 },
+        "channelTitle": { "type": "string", "maxLength": 160 }
+      },
+      "required": ["id", "channelId", "channelTitle"]
+    },
+    "QuinnAiOrganizerDoc": {
+      "title": "QuinnAiOrganizerDoc",
+      "description": "Independent video-specific Quinn AI organized learning structure.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "organizerId": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 60 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "courseTitle": { "type": "string", "maxLength": 300 },
+        "subject": { "type": "string", "maxLength": 120 },
+        "approvedByAdmin": { "type": "boolean" }
+      },
+      "required": ["id", "organizerId", "videoId", "courseId", "courseTitle", "subject"]
+    },
+    "LearningResourceDoc": {
+      "title": "LearningResourceDoc",
+      "description": "Live YouTube supplementary video assigned to a specific course organizer module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "moduleId": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 60 },
+        "title": { "type": "string", "maxLength": 300 },
+        "status": { "type": "string", "enum": ["Active", "Removed"] }
+      },
+      "required": ["id", "courseId", "moduleId", "videoId", "title", "status"]
+    },
+    "LessonProgressDoc": {
+      "title": "LessonProgressDoc",
+      "description": "Explicit per-lesson watch time, notes/self-check verification, and completion status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 160 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "lessonId": { "type": "string", "maxLength": 128 },
+        "completed": { "type": "boolean" }
+      },
+      "required": ["id", "studentId", "courseId", "lessonId", "completed"]
+    },
+    "LearningHistoryDoc": {
+      "title": "LearningHistoryDoc",
+      "description": "Timestamped learning activity log supporting daily/weekly/monthly/yearly analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "dateKey": { "type": "string", "maxLength": 20 },
+        "studyMinutes": { "type": "number" }
+      },
+      "required": ["id", "studentId", "courseId", "dateKey", "studyMinutes"]
+    },
+    "AssessmentDoc": {
+      "title": "AssessmentDoc",
+      "description": "AI-generated course/video final assessment configuration and questions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "courseTitle": { "type": "string", "maxLength": 300 },
+        "passingScorePercent": { "type": "number" }
+      },
+      "required": ["id", "courseId", "courseTitle", "passingScorePercent"]
+    },
+    "AssessmentAttemptDoc": {
+      "title": "AssessmentAttemptDoc",
+      "description": "Student assessment attempt graded against configurable passing percentage.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "percentageScore": { "type": "number" },
+        "passed": { "type": "boolean" },
+        "submittedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "courseId", "percentageScore", "passed", "submittedAt"]
+    },
+    "CertificateVerificationDoc": {
+      "title": "CertificateVerificationDoc",
+      "description": "Public verification record keyed by Certificate ID for QR scan lookup.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "certificateId": { "type": "string", "maxLength": 80 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "courseTitle": { "type": "string", "maxLength": 300 },
+        "valid": { "type": "boolean" }
+      },
+      "required": ["id", "certificateId", "studentName", "courseTitle", "valid"]
+    },
+    "LearningAnalyticsDoc": {
+      "title": "LearningAnalyticsDoc",
+      "description": "Aggregated student study time, streak, and mastery counters.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "totalStudyMinutes": { "type": "number" },
+        "currentStreakDays": { "type": "number" }
+      },
+      "required": ["id", "studentId", "totalStudyMinutes", "currentStreakDays"]
+    },
+    "AiConversationDoc": {
+      "title": "AiConversationDoc",
+      "description": "Quinn AI tutoring conversation transcript scoped to student and course.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "courseId"]
+    },
+    "AuditLogDoc": {
+      "title": "AuditLogDoc",
+      "description": "System and user action audit trail.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "actorRole": { "type": "string", "maxLength": 30 },
+        "action": { "type": "string", "maxLength": 120 },
+        "entityType": { "type": "string", "maxLength": 80 },
+        "entityId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "actorRole", "action", "entityType", "entityId", "createdAt"]
+    },
+    "InstitutionDoc": {
+      "title": "InstitutionDoc",
+      "description": "Multi-tenant registered school, college, or university organization with onboarding status and reviewer trail.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "applicationRef": { "type": "string", "maxLength": 60 },
+        "institutionCode": { "type": "string", "maxLength": 60 },
+        "name": { "type": "string", "maxLength": 200 },
+        "udiseCode": { "type": "string", "maxLength": 40 },
+        "institutionType": { "type": "string", "maxLength": 80 },
+        "boardAffiliation": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 400 },
+        "state": { "type": "string", "maxLength": 80 },
+        "district": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "pinCode": { "type": "string", "maxLength": 15 },
+        "website": { "type": "string", "maxLength": 250 },
+        "principalName": { "type": "string", "maxLength": 120 },
+        "principalDesignation": { "type": "string", "maxLength": 100 },
+        "principalMobile": { "type": "string", "maxLength": 25 },
+        "principalEmail": { "type": "string", "maxLength": 120 },
+        "adminUid": { "type": "string", "maxLength": 128 },
+        "adminEmail": { "type": "string", "maxLength": 120 },
+        "verificationStatus": {
+          "type": "string",
+          "enum": [
+            "Draft",
+            "Submitted",
+            "Under Review",
+            "Approved",
+            "Rejected",
+            "More Information Required",
+            "Suspended",
+            "Pending Approval",
+            "Verified"
+          ]
+        },
+        "reviewerNotes": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "name", "institutionType", "adminUid", "verificationStatus"]
+    },
+    "InstitutionTenantRecord": {
+      "title": "InstitutionTenantRecord",
+      "description": "Tenant-isolated institutional academic, staff, student, attendance, exam, assignment, payment, or subscription record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "institutionId", "institutionAdminUid"]
+    },
+    "FieldExecutiveDoc": {
+      "title": "FieldExecutiveDoc",
+      "description": "Field executive profile, assigned targets, team leader, and earned incentives.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["Active", "Pending Approval", "Suspended"] }
+      },
+      "required": ["id", "uid", "fullName", "status"]
+    },
+    "SchoolVisitDoc": {
+      "title": "SchoolVisitDoc",
+      "description": "Field executive school visit log with GPS coordinates, photos, and collected student applications.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "executiveUid": { "type": "string", "maxLength": 128 },
+        "institutionName": { "type": "string", "maxLength": 200 },
+        "visitDate": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "executiveUid", "institutionName", "visitDate"]
+    },
+    "NgoPartnerOrgDoc": {
+      "title": "NgoPartnerOrgDoc",
+      "description": "NGO / institutional partner profile, volunteers, programmes, and community beneficiaries.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "organizationName": { "type": "string", "maxLength": 200 },
+        "verificationStatus": { "type": "string", "enum": ["Pending Review", "Active Alliance", "Suspended"] }
+      },
+      "required": ["id", "uid", "organizationName", "verificationStatus"]
+    },
+    "IqEqSqAssessmentDoc": {
+      "title": "IqEqSqAssessmentDoc",
+      "description": "Student IQ, EQ, and SQ educational assessment results scoped by school tenant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "dimension": { "type": "string", "enum": ["IQ", "EQ", "SQ"] },
+        "status": { "type": "string", "enum": ["Assigned", "In Progress", "Submitted"] },
+        "scorePercent": { "type": "number" }
+      },
+      "required": ["id", "studentId", "dimension", "scorePercent"]
+    },
+    "SchoolAssessmentAssignmentDoc": {
+      "title": "SchoolAssessmentAssignmentDoc",
+      "description": "School-level IQ/EQ/SQ assessment schedules and class assignments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "dimension": { "type": "string", "enum": ["IQ", "EQ", "SQ"] },
+        "durationMinutes": { "type": "number" },
+        "status": { "type": "string", "enum": ["Scheduled", "Active", "Closed"] }
+      },
+      "required": ["id", "institutionId", "institutionAdminUid", "title", "dimension", "status"]
+    },
+    "SchoolProgramEnrollmentDoc": {
+      "title": "SchoolProgramEnrollmentDoc",
+      "description": "Student enrollment in OpenFrame courses and skill programs managed via a School Partner.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 },
+        "courseId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["Enrolled", "In Progress", "Completed", "Withdrawn"] }
+      },
+      "required": ["id", "institutionId", "institutionAdminUid", "courseId", "studentId", "status"]
+    },
+    "SchoolPartnerCertificateDoc": {
+      "title": "SchoolPartnerCertificateDoc",
+      "description": "Tenant-isolated school certificate records linked to public verification hashes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "certificateId": { "type": "string", "maxLength": 80 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "programTitle": { "type": "string", "maxLength": 240 },
+        "status": { "type": "string", "enum": ["Issued", "Revoked", "Corrected"] }
+      },
+      "required": ["id", "certificateId", "institutionId", "institutionAdminUid", "studentId", "programTitle", "status"]
+    },
+    "SchoolPartnerAnnouncementDoc": {
+      "title": "SchoolPartnerAnnouncementDoc",
+      "description": "School-scoped announcements and communication delivery tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 2500 },
+        "priority": { "type": "string", "enum": ["Standard", "Important", "Urgent"] }
+      },
+      "required": ["id", "institutionId", "institutionAdminUid", "title", "message"]
+    },
+    "SchoolPartnerAuditLogDoc": {
+      "title": "SchoolPartnerAuditLogDoc",
+      "description": "Immutable school tenant audit log for sensitive student, staff, payment, and approval edits.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "institutionId": { "type": "string", "maxLength": 128 },
+        "institutionAdminUid": { "type": "string", "maxLength": 128 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 120 },
+        "entityType": { "type": "string", "maxLength": 80 },
+        "entityId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "institutionId", "institutionAdminUid", "actorUid", "action", "entityType", "createdAt"]
+    },
+    "UnifiedLiveClassDoc": {
+      "title": "UnifiedLiveClassDoc",
+      "description": "Zoom or Google Meet live classroom scheduled across Course, Institution, or School Batch scopes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "provider": { "type": "string", "enum": ["Zoom", "Google Meet"] },
+        "meetingUrl": { "type": "string", "maxLength": 500 },
+        "scheduledStartIso": { "type": "string", "maxLength": 50 },
+        "teacherUid": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["Scheduled", "Live", "Rescheduled", "Completed", "Cancelled"] }
+      },
+      "required": ["id", "title", "provider", "meetingUrl", "scheduledStartIso", "teacherUid", "status"]
+    },
+    "LiveClassAttendanceDoc": {
+      "title": "LiveClassAttendanceDoc",
+      "description": "Verified student check-in, heartbeat duration, and faculty attendance verification for live classes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "liveClassId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["Present", "Late", "Partially Attended", "Absent"] }
+      },
+      "required": ["id", "liveClassId", "studentId", "status"]
+    },
+    "EcosystemNotificationAndSettingsDoc": {
+      "title": "EcosystemNotificationAndSettingsDoc",
+      "description": "Notification delivery deduplication logs, user notification preferences, and admin reminder rules.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id"]
+    },
+    "CommerceRevenueDoc": {
+      "title": "CommerceRevenueDoc",
+      "description": "Coupons, GST invoices, affiliates, commissions, payouts, refunds, and AI question papers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id"]
+    },
+    "EducationTaxonomyItemDoc": {
+      "title": "EducationTaxonomyItemDoc",
+      "description": "Admin-managed education classification item under Levels 1-10 / Categories A-J (qualification, degree, stream, subject, or specialization).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "levelNumber": { "type": "number" },
+        "categoryCode": { "type": "string", "enum": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"] },
+        "categoryTitle": { "type": "string", "maxLength": 120 },
+        "itemType": { "type": "string", "enum": ["qualification", "degree", "stream", "subject", "specialization"] },
+        "name": { "type": "string", "maxLength": 160 },
+        "parentGroup": { "type": "string", "maxLength": 120 },
+        "displayOrder": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "categoryCode", "categoryTitle", "itemType", "name", "isActive"]
+    },
+    "CourseRequestDoc": {
+      "title": "CourseRequestDoc",
+      "description": "Learner or visitor request for a course not currently listed in the OpenFrame catalogue.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "requestedTopic": { "type": "string", "maxLength": 240 },
+        "educationLevel": { "type": "string", "maxLength": 120 },
+        "deliveryMethod": { "type": "string", "maxLength": 80 },
+        "requesterName": { "type": "string", "maxLength": 120 },
+        "requesterEmail": { "type": "string", "maxLength": 120 },
+        "requesterPhone": { "type": "string", "maxLength": 32 },
+        "requesterUid": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 1200 },
+        "status": { "type": "string", "enum": ["Requested", "Under Review", "Planned", "Added to Catalogue", "Closed"] },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "requestedTopic", "requesterName", "requesterEmail", "status", "createdAt"]
+    },
+    "QaSavedEntryDoc": {
+      "title": "QaSavedEntryDoc",
+      "description": "Saved student Q&A study answer with linked courses and video references.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "question": { "type": "string", "maxLength": 600 },
+        "subject": { "type": "string", "maxLength": 160 },
+        "topic": { "type": "string", "maxLength": 160 },
+        "answer": { "type": "string", "maxLength": 6000 },
+        "savedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "question", "answer", "savedAt"]
+    },
+    "RecommendationAnalyticsEventDoc": {
+      "title": "RecommendationAnalyticsEventDoc",
+      "description": "Discovery search, course enroll click, YouTube watch, Q&A, and roadmap telemetry events.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "eventType": { "type": "string", "enum": ["search", "course_impression", "course_enroll_click", "youtube_watch", "qa_ask", "roadmap_save"] },
+        "query": { "type": "string", "maxLength": 250 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "eventType", "query", "createdAt"]
     }
   },
   "firestore": {
@@ -1109,7 +1620,7 @@
     "/ngo_updates/{id}": { "schema": { "$ref": "#/entities/HopeNestUpdate" }, "description": "HopeNest field bulletins" },
     "/blog_posts/{id}": { "schema": { "$ref": "#/entities/BlogPost" }, "description": "Knowledge centre and blog posts" },
     "/branches/{id}": { "schema": { "$ref": "#/entities/BranchLocation" }, "description": "Branch offices" },
-    "/courses/{id}": { "schema": { "$ref": "#/entities/Course" }, "description": "Courses catalog records with pricing and curriculum" },
+    "/courses/{id}": { "schema": { "$ref": "#/entities/Course" }, "description": "Courses catalog records with zero-fee complimentary access" },
     "/newsletter_subscribers/{id}": { "schema": { "$ref": "#/entities/NewsletterSubscriber" }, "description": "Newsletter email subscribers" },
     "/admin_users/{uid}": { "schema": { "$ref": "#/entities/AdminUser" }, "description": "Authorized administrators and RBAC roles" },
     "/activity_logs/{id}": { "schema": { "$ref": "#/entities/ActivityLog" }, "description": "Audit trails of admin operations" },
@@ -1117,22 +1628,39 @@
     "/student_profiles/{uid}": { "schema": { "$ref": "#/entities/StudentProfile" }, "description": "Student LMS profiles" },
     "/teacher_profiles/{uid}": { "schema": { "$ref": "#/entities/TeacherProfile" }, "description": "Teacher LMS profiles" },
     "/parent_links/{id}": { "schema": { "$ref": "#/entities/ParentStudentLink" }, "description": "Parent to student links" },
+    "/parent_guardians/{id}": { "schema": { "$ref": "#/entities/ParentGuardianDoc" }, "description": "Normalized minor student parent/guardian details and consent" },
+    "/addresses/{id}": { "schema": { "$ref": "#/entities/AddressDoc" }, "description": "Normalized student addresses including house number and optional GPS" },
     "/course_enrollments/{id}": { "schema": { "$ref": "#/entities/CourseEnrollment" }, "description": "Course enrollments" },
+    "/enrollments/{id}": { "schema": { "$ref": "#/entities/CourseEnrollment" }, "description": "Per-target course and Quinn AI video organizer enrollments" },
     "/course_modules/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Course modules edited or added by teachers/admins" },
     "/lessons/{id}": { "schema": { "$ref": "#/entities/LessonDoc" }, "description": "Course lessons and materials" },
+    "/course_lessons/{id}": { "schema": { "$ref": "#/entities/LessonDoc" }, "description": "Normalized course and organizer lesson documents" },
+    "/youtube_videos/{id}": { "schema": { "$ref": "#/entities/YouTubeVideoDoc" }, "description": "Indexed YouTube educational video records" },
+    "/youtube_channels/{id}": { "schema": { "$ref": "#/entities/YouTubeChannelDoc" }, "description": "Indexed YouTube channel records" },
+    "/quinn_ai_organizers/{id}": { "schema": { "$ref": "#/entities/QuinnAiOrganizerDoc" }, "description": "Independent per-video Quinn AI Course Organizer pathways" },
+    "/learning_resources/{id}": { "schema": { "$ref": "#/entities/LearningResourceDoc" }, "description": "Supplementary live YouTube videos assigned to modules" },
     "/youtube_recommendations/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Cached Quinn AI video recommendations" },
     "/video_learning_sessions/{id}": { "schema": { "$ref": "#/entities/VideoLearningSession" }, "description": "YouTube learning session telemetry" },
     "/lesson_completions/{id}": { "schema": { "$ref": "#/entities/VideoLearningSession" }, "description": "Verified lesson completions" },
+    "/lesson_progress/{id}": { "schema": { "$ref": "#/entities/LessonProgressDoc" }, "description": "Granular lesson completion & watch progress records" },
+    "/learning_history/{id}": { "schema": { "$ref": "#/entities/LearningHistoryDoc" }, "description": "Timestamped learning events for analytics charts" },
     "/quizzes/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Lesson quiz configurations" },
     "/quiz_questions/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Generated lesson verification question banks" },
     "/quiz_attempts/{id}": { "schema": { "$ref": "#/entities/QuizAttempt" }, "description": "Student quiz attempts and results" },
     "/quiz_responses/{id}": { "schema": { "$ref": "#/entities/QuizAttempt" }, "description": "Granular quiz question responses" },
+    "/assessments/{id}": { "schema": { "$ref": "#/entities/AssessmentDoc" }, "description": "Course-level AI assessments" },
+    "/assessment_questions/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Normalized assessment questions" },
+    "/assessment_attempts/{id}": { "schema": { "$ref": "#/entities/AssessmentAttemptDoc" }, "description": "Student final assessment attempts and rubric grades" },
     "/projects/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Assigned practical project variations" },
     "/project_submissions/{id}": { "schema": { "$ref": "#/entities/ProjectSubmission" }, "description": "Student practical project submissions" },
     "/presentations/{id}": { "schema": { "$ref": "#/entities/StudentPresentation" }, "description": "Student presentation submissions and live schedules" },
     "/teacher_evaluations/{id}": { "schema": { "$ref": "#/entities/TeacherEvaluation" }, "description": "Authorized teacher 6-criteria rubric evaluations" },
     "/certificates/{certId}": { "schema": { "$ref": "#/entities/IssuedCertificate" }, "description": "Issued certificates for public QR verification" },
     "/certificate_verifications/{id}": { "schema": { "$ref": "#/entities/IssuedCertificate" }, "description": "Public QR verification audit scans" },
+    "/certificate_verification/{certId}": { "schema": { "$ref": "#/entities/CertificateVerificationDoc" }, "description": "Public QR verification lookup directory" },
+    "/learning_analytics/{id}": { "schema": { "$ref": "#/entities/LearningAnalyticsDoc" }, "description": "Aggregated student study streaks & counters" },
+    "/ai_conversations/{id}": { "schema": { "$ref": "#/entities/AiConversationDoc" }, "description": "Quinn AI tutor conversation logs" },
+    "/audit_logs/{id}": { "schema": { "$ref": "#/entities/AuditLogDoc" }, "description": "System audit logs" },
     "/notifications/{id}": { "schema": { "$ref": "#/entities/LmsNotification" }, "description": "LMS notifications across roles" },
     "/student_progress/{id}": { "schema": { "$ref": "#/entities/StudentProgress" }, "description": "Aggregated 8-stage learning progress" },
     "/lms_settings/{id}": { "schema": { "$ref": "#/entities/CourseModule" }, "description": "Global Quinn AI and YouTube LMS settings" },
@@ -1166,6 +1694,46 @@
     "/search_history/{id}": { "schema": { "$ref": "#/entities/SearchHistoryEntry" }, "description": "Student and platform search query logs" },
     "/consent_records/{id}": { "schema": { "$ref": "#/entities/ConsentRecord" }, "description": "DPDP Act and minor parental consent audit records" },
     "/ai_learning_paths/{id}": { "schema": { "$ref": "#/entities/AiLearningPath" }, "description": "AI-organized structured multi-module learning paths" },
-    "/content_reports/{id}": { "schema": { "$ref": "#/entities/ContentReport" }, "description": "Reported videos or courses for admin moderation" }
+    "/content_reports/{id}": { "schema": { "$ref": "#/entities/ContentReport" }, "description": "Reported videos or courses for admin moderation" },
+    "/institutions/{id}": { "schema": { "$ref": "#/entities/InstitutionDoc" }, "description": "Multi-tenant registered schools, colleges, and universities" },
+    "/departments/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institution departments" },
+    "/classes/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institution classes and sections" },
+    "/subjects/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institution subjects and assigned teachers" },
+    "/institution_staff/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institution teachers and staff directory" },
+    "/institution_students/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institution enrolled students with IDs and fee balances" },
+    "/attendance/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Daily attendance ledger for students, staff, and field executives" },
+    "/examinations/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institution scheduled examinations" },
+    "/results/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Published student examination results" },
+    "/assignments/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Course and institutional assignments" },
+    "/payments/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Student fees, receipts, teacher salaries, and platform payments" },
+    "/subscriptions/{id}": { "schema": { "$ref": "#/entities/InstitutionTenantRecord" }, "description": "Institutional SaaS subscription plans" },
+    "/field_executives/{uid}": { "schema": { "$ref": "#/entities/FieldExecutiveDoc" }, "description": "Field executive profiles, daily targets, and incentives" },
+    "/school_visits/{id}": { "schema": { "$ref": "#/entities/SchoolVisitDoc" }, "description": "Field executive school visit reports with GPS coordinates" },
+    "/ngo_partners/{uid}": { "schema": { "$ref": "#/entities/NgoPartnerOrgDoc" }, "description": "NGO and social partner organization profiles" },
+    "/ngo_programmes/{id}": { "schema": { "$ref": "#/entities/NgoPartnerOrgDoc" }, "description": "NGO education and community development programmes" },
+    "/ngo_volunteers/{id}": { "schema": { "$ref": "#/entities/NgoPartnerOrgDoc" }, "description": "NGO registered volunteers" },
+    "/ngo_beneficiaries/{id}": { "schema": { "$ref": "#/entities/NgoPartnerOrgDoc" }, "description": "NGO community beneficiaries" },
+    "/iq_eq_sq_assessments/{id}": { "schema": { "$ref": "#/entities/IqEqSqAssessmentDoc" }, "description": "Student IQ, EQ, and SQ evaluation results" },
+    "/school_assessment_assignments/{id}": { "schema": { "$ref": "#/entities/SchoolAssessmentAssignmentDoc" }, "description": "School-level IQ, EQ, and SQ assessment schedules and assignments" },
+    "/school_program_enrollments/{id}": { "schema": { "$ref": "#/entities/SchoolProgramEnrollmentDoc" }, "description": "School-managed OpenFrame program and course enrollments" },
+    "/school_partner_certificates/{certId}": { "schema": { "$ref": "#/entities/SchoolPartnerCertificateDoc" }, "description": "School partner issued certificates with revocation and correction history" },
+    "/school_partner_announcements/{id}": { "schema": { "$ref": "#/entities/SchoolPartnerAnnouncementDoc" }, "description": "School partner announcements and operational alerts" },
+    "/school_partner_audit_logs/{id}": { "schema": { "$ref": "#/entities/SchoolPartnerAuditLogDoc" }, "description": "Immutable school partner audit log" },
+    "/unified_live_classes/{id}": { "schema": { "$ref": "#/entities/UnifiedLiveClassDoc" }, "description": "Zoom and Google Meet live classrooms across all portals" },
+    "/live_class_attendance/{id}": { "schema": { "$ref": "#/entities/LiveClassAttendanceDoc" }, "description": "Verified attendance records for live classes" },
+    "/notification_deliveries/{id}": { "schema": { "$ref": "#/entities/EcosystemNotificationAndSettingsDoc" }, "description": "Idempotent notification delivery log" },
+    "/user_notification_preferences/{uid}": { "schema": { "$ref": "#/entities/EcosystemNotificationAndSettingsDoc" }, "description": "User live reminder and web push preferences" },
+    "/admin_notification_settings/{id}": { "schema": { "$ref": "#/entities/EcosystemNotificationAndSettingsDoc" }, "description": "Global live reminder and attendance timing config" },
+    "/coupons/{id}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "Promotional discount coupons" },
+    "/gst_invoices/{id}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "GST tax invoices" },
+    "/affiliates/{uid}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "Teacher, field executive, and partner referral profiles" },
+    "/commissions/{id}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "Attributed affiliate commission ledger" },
+    "/payouts/{id}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "Admin-settled affiliate and educator payout batches" },
+    "/refunds/{id}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "Student and institution refund requests" },
+    "/generated_question_papers/{id}": { "schema": { "$ref": "#/entities/CommerceRevenueDoc" }, "description": "AI-generated faculty question papers and answer keys" },
+    "/education_taxonomy/{id}": { "schema": { "$ref": "#/entities/EducationTaxonomyItemDoc" }, "description": "Dynamic Levels 1-10 / Categories A-J qualifications, degrees, streams, subjects, and specializations" },
+    "/course_requests/{id}": { "schema": { "$ref": "#/entities/CourseRequestDoc" }, "description": "Learner requests for unavailable courses in the OpenFrame catalogue" },
+    "/qa_history/{id}": { "schema": { "$ref": "#/entities/QaSavedEntryDoc" }, "description": "Saved Quinn AI Q&A answers linked to student profiles" },
+    "/recommendation_analytics/{id}": { "schema": { "$ref": "#/entities/RecommendationAnalyticsEventDoc" }, "description": "Aggregated discovery search, degree, skill, enrollment, and YouTube telemetry" }
   }
 }

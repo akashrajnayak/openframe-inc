@@ -8,17 +8,19 @@ import {
   MapPin,
   Calendar,
   CheckCircle2,
-  Clock,
   Sparkles,
-  ShieldCheck,
   Send,
   HelpCircle,
-  FileCheck,
   Globe,
-  Navigation
+  ShieldCheck,
+  ArrowRight
 } from 'lucide-react';
+import { useRouter } from '../../router/RouterContext';
+import { useAuth } from '../../context/AuthContext';
 import { submitStudentRegistration } from '../../services/firebase';
 import { lmsService } from '../../services/lmsService';
+import { quinnAiService } from '../../services/quinnAiService';
+import { marketplaceService } from '../../services/marketplaceService';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../../utils/searchIntelligence';
 
 interface StudentRegistrationModalProps {
@@ -26,6 +28,7 @@ interface StudentRegistrationModalProps {
   onClose: () => void;
   courseTitle?: string;
   courseId?: string;
+  videoId?: string;
   courseCategory?: string;
 }
 
@@ -34,17 +37,24 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   onClose,
   courseTitle = 'General IT & Technology Programme',
   courseId = '',
+  videoId = '',
   courseCategory = 'Information Technology'
 }) => {
+  const { navigate } = useRouter();
+  const { currentUser } = useAuth();
+
   // Form fields
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [emailAddress, setEmailAddress] = useState('');
   const [dob, setDob] = useState('');
+  const [gender, setGender] = useState('');
   const [state, setState] = useState('Karnataka');
   const [district, setDistrict] = useState('');
   const [city, setCity] = useState('');
+  const [houseNumber, setHouseNumber] = useState('');
+  const [streetAddress, setStreetAddress] = useState('');
   const [pincode, setPincode] = useState('');
   const [preferredLanguage, setPreferredLanguage] = useState('English');
   const [parentName, setParentName] = useState('');
@@ -55,7 +65,6 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   const [currentQualification, setCurrentQualification] = useState('College / Engineering Student');
   const [schoolCollegeName, setSchoolCollegeName] = useState('');
   const [preferredLearningMode, setPreferredLearningMode] = useState<'Online Live Classes' | 'Recorded Lessons' | 'Hybrid / Practical Labs'>('Hybrid / Practical Labs');
-  const [preferredCallSlot, setPreferredCallSlot] = useState('Morning (09:00 AM – 12:00 PM)');
   const [notes, setNotes] = useState('');
   const [consentAccepted, setConsentAccepted] = useState(true);
 
@@ -98,6 +107,12 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
 
   if (!isOpen) return null;
 
+  const targetLearnPath = videoId
+    ? `/learn/video/${encodeURIComponent(videoId)}`
+    : courseId && courseId !== 'VIDEO-SELECT'
+    ? `/learn/${encodeURIComponent(courseId)}`
+    : '/marketplace';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -120,6 +135,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
     setIsSubmitting(true);
 
     const generatedId = `OF-APP-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+    const recordUid = currentUser?.uid || `reg_${generatedId}`;
 
     try {
       const payload = {
@@ -128,31 +144,35 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         whatsappNumber: whatsappNumber.trim() || mobileNumber.trim(),
         emailAddress: emailAddress.trim().toLowerCase(),
         dob: dob || '',
+        gender: gender || undefined,
         country: 'India',
         state: state.trim() || 'Karnataka',
         district: district.trim() || city.trim() || 'Bengaluru Urban',
         city: city.trim() || 'Bengaluru',
+        houseNumber: houseNumber.trim() || undefined,
+        streetAddress: streetAddress.trim() || undefined,
         pincode: pincode.trim() || undefined,
         preferredLanguage,
-        schoolCollegeName: schoolCollegeName.trim() || 'Not Specified',
+        schoolCollegeName: schoolCollegeName.trim() || 'Independent / Self-Paced',
         currentClassQualification: currentQualification,
-        interestedCourse: courseTitle ? `${courseTitle} (${courseId || 'OpenFrame'})` : 'Skill Development Programme',
+        interestedCourse: courseTitle ? `${courseTitle} (${courseId || 'OpenFrame'})` : 'Free OpenFrame Learning Programme',
         parentName: parentName.trim() || undefined,
         parentMobile: parentMobile.trim() || undefined,
         isMinor,
         guardianConsentAccepted: isMinor ? guardianConsentAccepted : undefined,
         gpsConsentAccepted,
         gpsCoordinates: gpsConsentAccepted ? gpsCoordinates : undefined,
-        preferredLearningMode: preferredLearningMode,
-        consentAccepted: consentAccepted,
+        preferredLearningMode,
+        consentAccepted,
         registeredAt: new Date().toISOString(),
         status: 'Registered' as const,
-        internalNotes: `Applied via Course Pop-up. Category: ${courseCategory}. Preferred Call Slot: ${preferredCallSlot}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
+        internalNotes: `100% Free Course Enrollment. Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
       };
 
       try {
         await submitStudentRegistration(payload);
         await lmsService.recordConsentRecord({
+          userId: recordUid,
           email: payload.emailAddress,
           fullName: payload.fullName,
           isMinor,
@@ -162,11 +182,41 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
           gpsOptInAccepted: gpsConsentAccepted,
           termsAccepted: consentAccepted,
         });
+
+        // Isolated single-target enrollment when signed in
+        if (currentUser?.uid) {
+          const targetCourseId = videoId ? `yt_${videoId}` : courseId;
+          if (targetCourseId && targetCourseId !== 'VIDEO-SELECT') {
+            const catalogCourse = videoId
+              ? null
+              : await marketplaceService.getCourseById(targetCourseId).catch(() => null);
+            const targetCourse = catalogCourse || ({
+              id: targetCourseId,
+              title: courseTitle,
+              category: courseCategory,
+              categoryGroup: 'Technology',
+              level: 'Beginner',
+              duration: 'Self-Paced',
+              price: 0,
+              isFree: true,
+              courseType: videoId ? 'youtube_video' : 'standard',
+              youtubeVideoId: videoId || undefined,
+              language: preferredLanguage,
+              description: `100% Free OpenFrame learning workspace for ${courseTitle}.`,
+              skillsAcquired: [courseCategory],
+              status: 'Published',
+            } as any);
+            await lmsService.enrollStudentInCourse(targetCourse, {
+              uid: currentUser.uid,
+              fullName: payload.fullName,
+              email: payload.emailAddress,
+            });
+          }
+        }
       } catch (firestoreErr) {
         console.warn('Firestore write fallback to local storage:', firestoreErr);
       }
 
-      // 2. Also save to local storage for offline resiliency & admin viewer
       try {
         const stored = JSON.parse(localStorage.getItem('openframe_student_applications') || '[]');
         stored.unshift({ id: generatedId, ...payload });
@@ -209,11 +259,11 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               <GraduationCap className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300 font-semibold">
-                OpenFrame Education • Official Admissions
+              <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 font-semibold">
+                100% Free Enrollment · Zero Course Fee
               </div>
               <h2 className="text-lg font-bold tracking-tight text-white leading-tight">
-                Student Programme Application
+                Student Programme Enrollment
               </h2>
             </div>
           </div>
@@ -230,7 +280,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         {/* Selected Course Banner */}
         <div className="bg-blue-50/90 border-b border-blue-100 px-6 py-2.5 flex items-center justify-between text-xs text-blue-900 shrink-0">
           <div className="flex items-center space-x-2 truncate">
-            <span className="font-semibold text-blue-800">Applying for:</span>
+            <span className="font-semibold text-blue-800">Selected Programme:</span>
             <span className="font-bold text-slate-900 truncate">{courseTitle}</span>
             {courseId && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-100 text-blue-800 border border-blue-200 shrink-0">
@@ -238,8 +288,8 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               </span>
             )}
           </div>
-          <span className="hidden sm:inline text-[11px] text-blue-700 font-medium shrink-0 ml-2">
-            Academic Year 2026–27
+          <span className="hidden sm:inline text-[11px] text-emerald-700 font-bold shrink-0 ml-2">
+            100% Free
           </span>
         </div>
 
@@ -252,62 +302,70 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               </div>
 
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Application Submitted Successfully!</h3>
+                <h3 className="text-xl font-bold text-slate-900">Free Enrollment Confirmed!</h3>
                 <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
-                  Thank you, <strong className="text-slate-800">{fullName}</strong>. Your application has been logged into the OpenFrame Academic Admissions Registry.
+                  Thank you, <strong className="text-slate-800">{fullName}</strong>. Your 100% free enrollment for <strong className="text-blue-700">{courseTitle}</strong> has been logged in OpenFrame Education.
                 </p>
               </div>
 
               {/* Reference Card */}
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 max-w-md mx-auto text-left space-y-2 text-xs">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                  <span className="text-slate-500 font-medium">Application Reference ID:</span>
+                  <span className="text-slate-500 font-medium">Enrollment Reference ID:</span>
                   <span className="font-mono font-bold text-blue-700 text-sm">{applicationId}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Selected Programme:</span>
+                  <span className="text-slate-500">Enrolled Programme:</span>
                   <span className="font-semibold text-slate-800 text-right truncate max-w-[220px]">{courseTitle}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Course Fee:</span>
+                  <span className="font-bold text-emerald-700">₹0 · 100% Free</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Registered Contact:</span>
                   <span className="font-medium text-slate-700">{mobileNumber}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Preferred Consultation Slot:</span>
-                  <span className="font-medium text-slate-700">{preferredCallSlot}</span>
-                </div>
               </div>
 
-              {/* Fee and Next Steps Clarification */}
-              <div className="p-4 rounded-xl bg-cyan-50 border border-cyan-200 text-left max-w-md mx-auto text-xs text-cyan-900 space-y-1.5">
-                <div className="flex items-center space-x-1.5 font-bold text-cyan-950">
-                  <Sparkles className="w-4 h-4 text-cyan-600" />
-                  <span>Next Step: 1-on-1 Academic Expert Call</span>
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-left max-w-md mx-auto text-xs text-emerald-950 space-y-1">
+                <div className="flex items-center space-x-1.5 font-bold">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span>Instant Access Ready</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-cyan-800">
-                  Our Senior Academic Counselor will call you at your preferred time slot to evaluate your learning goals, explain the detailed curriculum, and finalize your customized course fee and scholarship eligibility.
+                <p className="text-[11px] leading-relaxed text-emerald-900">
+                  Click &ldquo;Start Learning Now&rdquo; to launch your Quinn AI structured workspace, watch curated YouTube lectures, complete the 7-format assessment, and earn a QR-verified OpenFrame certificate.
                 </p>
               </div>
 
-              <div className="pt-2 flex justify-center">
+              <div className="pt-2 flex flex-wrap justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleResetAndClose();
+                    navigate(targetLearnPath);
+                  }}
+                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <span>Start Learning Now</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={handleResetAndClose}
-                  className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-colors cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs transition-colors cursor-pointer"
                 >
-                  Close & Explore More Courses
+                  Close
                 </button>
               </div>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Important Fee & Consultation Notice */}
-              <div className="p-3.5 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-xs text-blue-900 flex items-start space-x-3">
-                <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5 font-bold text-[11px]">
-                  i
-                </div>
+              {/* 100% Free Enrollment Notice */}
+              <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-200 text-xs text-emerald-950 flex items-start space-x-3">
+                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                 <div className="text-[11px] leading-relaxed">
-                  <strong className="text-blue-950">Official Fee & Consultation Policy:</strong> Course fee, personalized project roadmap, and merit/need-based scholarship options are not fixed on the website. They are customized and finalized during your personal consultation call with our academic expert. No payment is required today.
+                  <strong className="text-emerald-950">100% Free Enrollment · Zero Course Fee:</strong> All Quinn AI video learning paths, assessments, and certificates on OpenFrame Education are completely free. No payment or card is ever required.
                 </div>
               </div>
 
@@ -337,20 +395,21 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 <div className="space-y-1 text-left">
                   <label className="text-xs font-semibold text-slate-700 flex items-center space-x-1">
                     <Phone className="w-3.5 h-3.5 text-blue-600" />
-                    <span>WhatsApp / Mobile Number *</span>
+                    <span>Mobile Number *</span>
                   </label>
                   <input
                     type="tel"
                     required
+                    maxLength={10}
                     placeholder="e.g. 9876543210"
                     value={mobileNumber}
-                    onChange={(e) => setMobileNumber(e.target.value)}
+                    onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs text-slate-800"
                   />
                 </div>
               </div>
 
-              {/* Row 2: Email & Location */}
+              {/* Row 2: Email & City */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1 text-left">
                   <label className="text-xs font-semibold text-slate-700 flex items-center space-x-1">
@@ -370,7 +429,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 <div className="space-y-1 text-left">
                   <label className="text-xs font-semibold text-slate-700 flex items-center space-x-1">
                     <MapPin className="w-3.5 h-3.5 text-blue-600" />
-                    <span>City / District *</span>
+                    <span>City / Village *</span>
                   </label>
                   <input
                     type="text"
@@ -382,7 +441,41 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 </div>
               </div>
 
-              {/* Row 2b: DOB, WhatsApp, PIN, Language */}
+              {/* Row 2b: House No, Street Address, State, District */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="space-y-1 text-left">
+                  <label className="text-xs font-semibold text-slate-700">House / Flat No.</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. #42, 2nd Floor"
+                    value={houseNumber}
+                    onChange={(e) => setHouseNumber(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
+                  />
+                </div>
+                <div className="space-y-1 text-left sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-700">Street / Road / Locality</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 100 Feet Road, Indiranagar"
+                    value={streetAddress}
+                    onChange={(e) => setStreetAddress(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
+                  />
+                </div>
+                <div className="space-y-1 text-left">
+                  <label className="text-xs font-semibold text-slate-700">District</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Bengaluru Urban"
+                    value={district}
+                    onChange={(e) => setDistrict(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2c: DOB, WhatsApp, PIN, Language */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="space-y-1 text-left">
                   <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
@@ -499,11 +592,11 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
 
                 <div className="space-y-1 text-left">
                   <label className="text-xs font-semibold text-slate-700">
-                    School / College / Company Name (Optional)
+                    School / College / Organization (Optional)
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. OUTR, KIIT, Ravenshaw, TCS"
+                    placeholder="Optional — open to independent learners"
                     value={schoolCollegeName}
                     onChange={(e) => setSchoolCollegeName(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800"
@@ -511,50 +604,55 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 </div>
               </div>
 
-              {/* Row 4: Preferred Call Slot & Learning Mode */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Row 4: Gender, State & Delivery Format */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700 flex items-center space-x-1">
-                    <Clock className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Preferred Expert Call Slot</span>
-                  </label>
+                  <label className="text-xs font-semibold text-slate-700">Gender (Optional)</label>
                   <select
-                    value={preferredCallSlot}
-                    onChange={(e) => setPreferredCallSlot(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800"
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-800"
                   >
-                    <option value="Morning (09:00 AM – 12:00 PM)">Morning (09:00 AM – 12:00 PM)</option>
-                    <option value="Afternoon (12:00 PM – 04:00 PM)">Afternoon (12:00 PM – 04:00 PM)</option>
-                    <option value="Evening (04:00 PM – 08:00 PM)">Evening (04:00 PM – 08:00 PM)</option>
-                    <option value="Weekend Counseling Only">Weekend Counseling Only</option>
+                    <option value="">Prefer not to say</option>
+                    <option value="Female">Female</option>
+                    <option value="Male">Male</option>
+                    <option value="Non-Binary / Other">Non-Binary / Other</option>
                   </select>
                 </div>
 
                 <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700">
-                    Preferred Delivery Format
-                  </label>
+                  <label className="text-xs font-semibold text-slate-700">State / UT</label>
+                  <input
+                    type="text"
+                    value={state}
+                    onChange={(e) => setState(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
+                  />
+                </div>
+
+                <div className="space-y-1 text-left">
+                  <label className="text-xs font-semibold text-slate-700">Learning Mode</label>
                   <select
                     value={preferredLearningMode}
                     onChange={(e) => setPreferredLearningMode(e.target.value as any)}
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800"
                   >
-                    <option value="Hybrid / Practical Labs">Hybrid (Live Online + Practical Labs)</option>
-                    <option value="Online Live Classes">100% Live Online Interactive Mentorship</option>
-                    <option value="Recorded Lessons">Self-Paced Guided Projects + AI Tutor</option>
+                    <option value="Hybrid / Practical Labs">Hybrid (AI + Practical Labs)</option>
+                    <option value="Online Live Classes">Live Online Mentorship</option>
+                    <option value="Recorded Lessons">Self-Paced YouTube + Quinn AI</option>
                   </select>
                 </div>
               </div>
 
-              {/* Questions or Specific Objectives */}
+              {/* Learning Goals */}
               <div className="space-y-1 text-left">
                 <label className="text-xs font-semibold text-slate-700 flex items-center space-x-1">
                   <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Specific Questions / Career Goals for Academic Counselor (Optional)</span>
+                  <span>Learning Goals / Topics of Interest (Optional)</span>
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. Looking for practical capstone project and placement preparation; need scholarship details."
+                  placeholder="e.g. Build practical projects, pass final assessment, and earn a verified certificate."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800 resize-none"
@@ -570,14 +668,14 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span>
-                  Opt-In: Share approximate GPS coordinates for local counseling center matching (Optional
+                  Opt-In: Share approximate GPS coordinates for regional learning hub matching (Optional
                   {gpsCoordinates ? ` · ${gpsCoordinates.lat}, ${gpsCoordinates.lng}` : ''}).
                 </span>
               </label>
 
               {/* DPDP Notice + Consent checkbox */}
               <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] text-slate-600 text-left">
-                <strong>DPDP Act 2023 Notice:</strong> OpenFrame does not collect Aadhaar or government ID documents. Data is used strictly for educational onboarding.
+                <strong>DPDP Act 2023 Notice:</strong> OpenFrame does not collect Aadhaar or government ID documents. Data is used strictly for educational enrollment and certificate verification.
               </div>
               <label className="flex items-start space-x-2 text-[11px] text-slate-600 cursor-pointer text-left">
                 <input
@@ -587,7 +685,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span>
-                  I authorize OpenFrame IT Solutions &amp; OpenFrame Education academic advisors to contact me via phone call, WhatsApp, or email regarding course admissions and mentorship.
+                  I accept the DPDP Act 2023 privacy terms and agree to enroll in this 100% free OpenFrame Education programme.
                 </span>
               </label>
 
@@ -608,12 +706,12 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   {isSubmitting ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Submitting Application...</span>
+                      <span>Completing Enrollment...</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Submit Application & Schedule Call</span>
+                      <span>Complete Free Enrollment</span>
                     </>
                   )}
                 </button>
