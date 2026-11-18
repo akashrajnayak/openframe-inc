@@ -705,7 +705,7 @@ service cloud.firestore {
     // ====================================================
 
     match /school_enrollments/{id} {
-      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentUid == request.auth.uid || isLinkedParent(resource.data.studentUid) || resource.data.parentEmail == request.auth.token.email)));
+      allow get: if isValidId(id) && (isLmsEducatorOrAdmin() || (isSignedIn() && (id == request.auth.uid || (resource != null && (resource.data.studentUid == request.auth.uid || isLinkedParent(resource.data.studentUid) || resource.data.parentEmail == request.auth.token.email)))));
       allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentUid == request.auth.uid || isLinkedParent(resource.data.studentUid) || resource.data.parentEmail == request.auth.token.email));
       allow create, update: if isValidId(id) && isSignedIn() &&
         (incoming().studentUid == request.auth.uid || isLmsEducatorOrAdmin()) &&

@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   auth,
   ensureAdminRecord,
+  formatFirebaseAuthError,
   getCurrentAdminUser,
   loginWithGoogle,
   loginWithEmail,
@@ -17,9 +18,11 @@ import {
   AdminRole,
   LmsUserProfile,
   LmsUserRole,
+  SchoolStudentEnrollment,
   StudentProfile,
   TeacherProfile,
 } from '../types';
+import { getSchoolEnrollment, isSchoolQualificationLabel } from '../services/schoolService';
 
 export function getAuthorizedDashboardPath(role: LmsUserRole): string {
   switch (role) {
@@ -48,6 +51,8 @@ interface AuthContextType {
   adminProfile: AdminUser | null;
   lmsUser: LmsUserProfile | null;
   studentProfile: StudentProfile | null;
+  schoolEnrollment: SchoolStudentEnrollment | null;
+  isSchoolStudent: boolean;
   teacherProfile: TeacherProfile | null;
   portalRole: LmsUserRole;
   authorizedDashboardPath: string;
@@ -72,6 +77,7 @@ interface AuthContextType {
     }
   ) => Promise<LmsUserProfile>;
   refreshUserProfile: (expectedRole?: LmsUserRole) => Promise<LmsUserProfile | null>;
+  refreshSchoolEnrollment: () => Promise<SchoolStudentEnrollment | null>;
   switchPortalRole: (newRole: LmsUserRole) => void;
   logout: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
@@ -84,16 +90,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [adminProfile, setAdminProfile] = useState<AdminUser | null>(null);
   const [lmsUser, setLmsUser] = useState<LmsUserProfile | null>(null);
   const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(null);
+  const [schoolEnrollment, setSchoolEnrollment] = useState<SchoolStudentEnrollment | null>(null);
   const [teacherProfile, setTeacherProfile] = useState<TeacherProfile | null>(null);
   const [portalRole, setPortalRole] = useState<LmsUserRole>('student');
   const [loading, setLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // Prevents onAuthStateChanged from running a redundant/raced hydration pass while
+  // loginPortalGoogle / loginPortalEmail / registerPortalEmail is explicitly hydrating with expectedRole.
+  const manualAuthDepthRef = useRef<number>(0);
+
   const clearAuthError = () => setAuthError(null);
 
   const hydrateUserState = async (
     user: User,
-    expectedRole?: LmsUserRole
+    expectedRole?: LmsUserRole,
+    extra?: { displayName?: string; specialization?: string; parentStudentEmail?: string }
   ): Promise<LmsUserProfile> => {
     const email = (user.email || '').toLowerCase();
     const isSuper = SUPER_ADMIN_EMAILS.includes(email);
@@ -107,11 +119,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Your administrator account has been disabled. Contact root administration.');
     }
 
-    const synced = await syncLmsUserProfile(user, expectedRole);
+    const [synced, schoolEnr] = await Promise.all([
+      syncLmsUserProfile(user, expectedRole, extra),
+      getSchoolEnrollment(user.uid).catch(() => null),
+    ]);
 
+    setCurrentUser(user);
     setAdminProfile(adminRec);
     setLmsUser(synced.userProfile);
     setStudentProfile(synced.studentProfile);
+    setSchoolEnrollment(schoolEnr);
     setTeacherProfile(synced.teacherProfile);
     setPortalRole(synced.userProfile.role);
     setAuthError(null);
@@ -120,6 +137,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (manualAuthDepthRef.current > 0) {
+        if (!user) {
+          setCurrentUser(null);
+        }
+        setLoading(false);
+        return;
+      }
+
       setCurrentUser(user);
       if (user) {
         try {
@@ -132,12 +157,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setAdminProfile(null);
           setLmsUser(null);
           setStudentProfile(null);
+          setSchoolEnrollment(null);
           setTeacherProfile(null);
         }
       } else {
         setAdminProfile(null);
         setLmsUser(null);
         setStudentProfile(null);
+        setSchoolEnrollment(null);
         setTeacherProfile(null);
         setPortalRole('student');
       }
@@ -149,8 +176,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginGoogle = async (rememberMe = true) => {
     setAuthError(null);
-    const user = await loginWithGoogle(rememberMe);
+    manualAuthDepthRef.current += 1;
     try {
+      const user = await loginWithGoogle(rememberMe);
       const profile = await ensureAdminRecord(user);
       setAdminProfile(profile);
       await hydrateUserState(user, 'admin');
@@ -159,15 +187,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentUser(null);
       setAdminProfile(null);
       setLmsUser(null);
-      setAuthError(err?.message || 'Administrator authentication denied.');
+      setAuthError(formatFirebaseAuthError(err, 'google'));
       throw err;
+    } finally {
+      manualAuthDepthRef.current = Math.max(0, manualAuthDepthRef.current - 1);
     }
   };
 
   const loginEmail = async (email: string, pass: string, rememberMe = true) => {
     setAuthError(null);
-    const user = await loginWithEmail(email, pass, rememberMe);
+    manualAuthDepthRef.current += 1;
     try {
+      const user = await loginWithEmail(email, pass, rememberMe);
       const profile = await ensureAdminRecord(user);
       setAdminProfile(profile);
       await hydrateUserState(user, 'admin');
@@ -176,25 +207,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentUser(null);
       setAdminProfile(null);
       setLmsUser(null);
-      setAuthError(err?.message || 'Administrator authentication denied.');
+      setAuthError(formatFirebaseAuthError(err, 'email'));
       throw err;
+    } finally {
+      manualAuthDepthRef.current = Math.max(0, manualAuthDepthRef.current - 1);
     }
   };
 
   const loginPortalGoogle = async (expectedRole?: LmsUserRole, rememberMe = true): Promise<LmsUserProfile> => {
     setAuthError(null);
-    const user = await loginWithGoogle(rememberMe);
+    manualAuthDepthRef.current += 1;
     try {
+      const user = await loginWithGoogle(rememberMe);
       return await hydrateUserState(user, expectedRole);
     } catch (err: any) {
-      await logoutAdmin().catch(() => {});
+      if (auth.currentUser) {
+        await logoutAdmin().catch(() => {});
+      }
       setCurrentUser(null);
       setAdminProfile(null);
       setLmsUser(null);
       setStudentProfile(null);
+      setSchoolEnrollment(null);
       setTeacherProfile(null);
-      setAuthError(err?.message || 'Access denied for this portal.');
+      const friendly = formatFirebaseAuthError(err, 'google');
+      setAuthError(friendly);
       throw err;
+    } finally {
+      manualAuthDepthRef.current = Math.max(0, manualAuthDepthRef.current - 1);
     }
   };
 
@@ -205,18 +245,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     rememberMe = true
   ): Promise<LmsUserProfile> => {
     setAuthError(null);
-    const user = await loginWithEmail(email, pass, rememberMe);
+    manualAuthDepthRef.current += 1;
     try {
+      const user = await loginWithEmail(email, pass, rememberMe);
       return await hydrateUserState(user, expectedRole);
     } catch (err: any) {
-      await logoutAdmin().catch(() => {});
+      if (auth.currentUser) {
+        await logoutAdmin().catch(() => {});
+      }
       setCurrentUser(null);
       setAdminProfile(null);
       setLmsUser(null);
       setStudentProfile(null);
+      setSchoolEnrollment(null);
       setTeacherProfile(null);
-      setAuthError(err?.message || 'Access denied for this portal.');
+      const friendly = formatFirebaseAuthError(err, 'email');
+      setAuthError(friendly);
       throw err;
+    } finally {
+      manualAuthDepthRef.current = Math.max(0, manualAuthDepthRef.current - 1);
     }
   };
 
@@ -234,22 +281,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (selectedRole === 'admin') {
       throw new Error('Administrator accounts cannot be created via self-registration.');
     }
-    const user = await registerPortalAccountWithEmail(name, email, pass);
+    manualAuthDepthRef.current += 1;
     try {
-      const synced = await syncLmsUserProfile(user, selectedRole, {
+      const user = await registerPortalAccountWithEmail(name, email, pass);
+      return await hydrateUserState(user, selectedRole, {
         displayName: name,
         specialization: extra?.specialization,
         parentStudentEmail: extra?.parentStudentEmail,
       });
-      setLmsUser(synced.userProfile);
-      setStudentProfile(synced.studentProfile);
-      setTeacherProfile(synced.teacherProfile);
-      setPortalRole(synced.userProfile.role);
-      return synced.userProfile;
     } catch (err: any) {
-      await logoutAdmin().catch(() => {});
-      setAuthError(err?.message || 'Account registration blocked.');
+      if (auth.currentUser) {
+        await logoutAdmin().catch(() => {});
+      }
+      setCurrentUser(null);
+      const friendly = formatFirebaseAuthError(err, 'register');
+      setAuthError(friendly);
       throw err;
+    } finally {
+      manualAuthDepthRef.current = Math.max(0, manualAuthDepthRef.current - 1);
     }
   };
 
@@ -262,6 +311,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAuthError(err?.message || 'Session validation failed.');
       throw err;
     }
+  };
+
+  const refreshSchoolEnrollment = async (): Promise<SchoolStudentEnrollment | null> => {
+    if (!auth.currentUser) return null;
+    const enr = await getSchoolEnrollment(auth.currentUser.uid).catch(() => null);
+    setSchoolEnrollment(enr);
+    return enr;
   };
 
   const switchPortalRole = (newRole: LmsUserRole) => {
@@ -277,6 +333,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAdminProfile(null);
     setLmsUser(null);
     setStudentProfile(null);
+    setSchoolEnrollment(null);
     setTeacherProfile(null);
     setPortalRole('student');
   };
@@ -298,7 +355,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return adminProfile.role === requiredRole;
   };
 
-  const authorizedDashboardPath = getAuthorizedDashboardPath(lmsUser?.role || portalRole);
+  const activeRole = lmsUser?.role || portalRole;
+  const isSchoolStudent = Boolean(
+    activeRole === 'student' &&
+      (schoolEnrollment || isSchoolQualificationLabel(studentProfile?.qualification))
+  );
+
+  const authorizedDashboardPath =
+    activeRole === 'student' && isSchoolStudent
+      ? '/school?tab=daily'
+      : getAuthorizedDashboardPath(activeRole);
 
   return (
     <AuthContext.Provider
@@ -307,6 +373,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         adminProfile,
         lmsUser,
         studentProfile,
+        schoolEnrollment,
+        isSchoolStudent,
         teacherProfile,
         portalRole,
         authorizedDashboardPath,
@@ -322,6 +390,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginPortalEmail,
         registerPortalEmail,
         refreshUserProfile,
+        refreshSchoolEnrollment,
         switchPortalRole,
         logout,
         sendPasswordReset,

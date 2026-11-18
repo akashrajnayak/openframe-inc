@@ -19,9 +19,12 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
 import { useAuth, getAuthorizedDashboardPath } from '../context/AuthContext';
 import { useRouter, Link } from '../router/RouterContext';
-import { LmsUserRole } from '../types';
+import { LmsUserProfile, LmsUserRole } from '../types';
+import { db, formatFirebaseAuthError } from '../services/firebase';
+import { getSchoolEnrollment, isSchoolQualificationLabel } from '../services/schoolService';
 
 interface CategoryMeta {
   role: LmsUserRole;
@@ -159,6 +162,7 @@ function formatRoleDisplayName(role: LmsUserRole): string {
 
 function resolveInitialCategory(path: string): LmsUserRole | null {
   const [cleanPath, qs] = path.split('?');
+  const normalized = cleanPath.length > 1 && cleanPath.endsWith('/') ? cleanPath.slice(0, -1) : cleanPath;
   const params = new URLSearchParams(qs || '');
   const qpRole = params.get('role');
   if (qpRole) {
@@ -167,8 +171,11 @@ function resolveInitialCategory(path: string): LmsUserRole | null {
     );
     if (found) return found.role;
   }
-  if (cleanPath.startsWith('/portal/')) {
-    const seg = cleanPath.replace('/portal/', '').split('/')[0];
+  if (normalized === '/student/login' || normalized === '/login/student' || normalized === '/student-login') {
+    return 'student';
+  }
+  if (normalized.startsWith('/portal/')) {
+    const seg = normalized.replace('/portal/', '').split('/')[0];
     const found = ACCOUNT_CATEGORIES.find(
       (c) => c.slug === seg || c.role === seg || (seg === 'super_admin' && c.role === 'admin')
     );
@@ -214,22 +221,55 @@ export const PortalLoginPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
+  const allowSwitchAccount = queryParams.get('switch') === '1';
+
   useEffect(() => {
     const resolved = resolveInitialCategory(currentPath);
-    if (resolved) setSelectedRole(resolved);
+    setSelectedRole(resolved);
     const qp = new URLSearchParams(currentPath.split('?')[1] || '');
-    if (qp.get('mode') === 'register') setAuthMode('register');
+    setAuthMode(qp.get('mode') === 'register' ? 'register' : 'signin');
+    setErrorMsg(null);
+    setInfoMsg(null);
   }, [currentPath]);
+
+  // Persistent session auto-forward: never ask an already logged-in user to log in again
+  useEffect(() => {
+    if (loading || submitting || !currentUser || !lmsUser || allowSwitchAccount) return;
+    if (
+      redirectTarget &&
+      redirectTarget.startsWith('/') &&
+      !redirectTarget.startsWith('/login') &&
+      !redirectTarget.startsWith('/portal') &&
+      !redirectTarget.startsWith('/student/login')
+    ) {
+      navigate(redirectTarget, { replace: true });
+      return;
+    }
+    navigate(authorizedDashboardPath, { replace: true });
+  }, [loading, submitting, currentUser, lmsUser, allowSwitchAccount, redirectTarget, authorizedDashboardPath, navigate]);
 
   const activeCategory = ACCOUNT_CATEGORIES.find((c) => c.role === selectedRole) || null;
   const isAdminCategory = selectedRole === 'admin';
 
-  const getDestination = (role: LmsUserRole) => {
-    const authDest = getAuthorizedDashboardPath(role);
+  const resolveDestination = async (profile: LmsUserProfile): Promise<string> => {
     if (redirectTarget && redirectTarget.startsWith('/') && !redirectTarget.startsWith('/login') && !redirectTarget.startsWith('/portal')) {
       return redirectTarget;
     }
-    return authDest;
+    if (profile.role === 'student') {
+      try {
+        const [schoolEnr, stuSnap] = await Promise.all([
+          getSchoolEnrollment(profile.uid).catch(() => null),
+          getDoc(doc(db, 'student_profiles', profile.uid)).catch(() => null),
+        ]);
+        const qual = stuSnap?.exists() ? (stuSnap.data()?.qualification as string | undefined) : undefined;
+        if (schoolEnr || isSchoolQualificationLabel(qual)) {
+          return '/school?tab=daily';
+        }
+      } catch {
+        // fallback below
+      }
+    }
+    return getAuthorizedDashboardPath(profile.role);
   };
 
   const handleSelectCategory = (cat: CategoryMeta) => {
@@ -259,9 +299,9 @@ export const PortalLoginPage: React.FC = () => {
         return;
       }
       const profile = await loginPortalGoogle(selectedRole, rememberMe);
-      navigate(getDestination(profile.role));
+      navigate(await resolveDestination(profile));
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Google authentication failed or access was denied.');
+      setErrorMsg(formatFirebaseAuthError(err, 'google'));
     } finally {
       setSubmitting(false);
     }
@@ -293,93 +333,51 @@ export const PortalLoginPage: React.FC = () => {
           specialization: selectedRole === 'teacher' ? specialization.trim() : undefined,
           parentStudentEmail: selectedRole === 'parent' ? parentStudentEmail.trim() : undefined,
         });
-        navigate(getDestination(profile.role));
+        navigate(await resolveDestination(profile));
       } else {
         const profile = await loginPortalEmail(resolvedEmail, password, selectedRole, rememberMe);
-        navigate(getDestination(profile.role));
+        navigate(await resolveDestination(profile));
       }
     } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/operation-not-allowed') {
-        setErrorMsg(
-          'Email/password authentication is disabled in this Firebase project. Please use Continue with Google.'
-        );
-      } else if (
-        code === 'auth/invalid-credential' ||
-        code === 'auth/wrong-password' ||
-        code === 'auth/user-not-found'
-      ) {
-        setErrorMsg('Invalid email or password. Double-check your credentials or reset your password.');
-      } else if (code === 'auth/email-already-in-use') {
-        setErrorMsg('An account with this email already exists. Switch to Sign In.');
-      } else {
-        setErrorMsg(err?.message || 'Unable to authenticate with these credentials.');
-      }
+      setErrorMsg(formatFirebaseAuthError(err, authMode === 'register' ? 'register' : 'email'));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleResetPassword = async () => {
+    clearAuthError();
     setErrorMsg(null);
     setInfoMsg(null);
     if (!email.trim()) {
       setErrorMsg('Enter your email address first to receive a password reset link.');
       return;
     }
+    setSubmitting(true);
     try {
       await sendPasswordReset(email.trim());
       setInfoMsg(`Password reset instructions sent to ${email.trim()}.`);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Could not send password reset email.');
+      setErrorMsg(formatFirebaseAuthError(err, 'reset'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  if (loading) {
+  if (loading || (!allowSwitchAccount && !submitting && currentUser && lmsUser)) {
     return (
-      <div className="min-h-screen bg-[#FAF7F2] flex items-center justify-center p-6">
+      <div className="min-h-[70vh] bg-[#FAF7F2] flex flex-col items-center justify-center p-6 gap-3">
         <div className="w-8 h-8 border-2 border-[#123D32] border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-medium text-[#64748B]">
+          {currentUser && lmsUser ? 'Opening your workspace...' : 'Loading portal...'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#FAF7F2] flex flex-col">
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-3.5 sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden p-0.5">
-              <img src="/openframe_official_logo.jpg" alt="OpenFrame" className="w-full h-full object-contain rounded-lg" />
-            </div>
-            <div>
-              <span className="font-editorial font-semibold text-[#18221F] text-lg leading-none block">
-                OpenFrame
-              </span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#123D32]">
-                Learning Ecosystem
-              </span>
-            </div>
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link
-              to="/marketplace"
-              className="hidden sm:inline-block text-xs font-medium text-[#64748B] hover:text-[#18221F] whitespace-nowrap"
-            >
-              Browse Courses
-            </Link>
-            <Link
-              to="/"
-              className="text-xs font-semibold text-[#18221F] hover:text-[#123D32] flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F5F5F2] hover:bg-slate-200/70 transition-colors whitespace-nowrap"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Website</span>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 py-10 sm:py-14 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto space-y-8">
+    <div className="min-h-screen bg-[#FAF7F2] py-10 sm:py-14 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto space-y-8">
           {currentUser && lmsUser && (
             <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
               <div className="space-y-0.5 min-w-0">
@@ -538,12 +536,39 @@ export const PortalLoginPage: React.FC = () => {
                   </div>
                 )}
 
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={handleGoogleAuth}
+                  className="w-full py-3.5 px-4 bg-[#14213D] hover:bg-[#0d1629] text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2.5 transition-colors disabled:opacity-60 cursor-pointer shadow-sm"
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
+                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.37 24 12 24Z" />
+                    <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z" />
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.37 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z" />
+                  </svg>
+                  <span>{submitting ? 'Connecting to Google...' : `Continue with Google (${activeCategory.title})`}</span>
+                </button>
+
+                <div className="relative py-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200" />
+                  </div>
+                  <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
+                    <span className="bg-white px-3 text-[#64748B] font-semibold">or use email &amp; password</span>
+                  </div>
+                </div>
+
                 {!isAdminCategory && (
                   <div className="flex items-center justify-between gap-2 pb-1">
                     <div className="inline-flex items-center gap-1 p-1 bg-[#F5F5F2] rounded-xl">
                       <button
                         type="button"
-                        onClick={() => setAuthMode('signin')}
+                        onClick={() => {
+                          setAuthMode('signin');
+                          setErrorMsg(null);
+                        }}
                         className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                           authMode === 'signin' ? 'bg-white text-[#18221F] shadow-xs' : 'text-[#64748B]'
                         }`}
@@ -552,7 +577,10 @@ export const PortalLoginPage: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAuthMode('register')}
+                        onClick={() => {
+                          setAuthMode('register');
+                          setErrorMsg(null);
+                        }}
                         className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                           authMode === 'register' ? 'bg-white text-[#18221F] shadow-xs' : 'text-[#64748B]'
                         }`}
@@ -689,34 +717,18 @@ export const PortalLoginPage: React.FC = () => {
                   </button>
                 </form>
 
-                <div className="relative py-1">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-slate-200" />
+                {selectedRole === 'student' && (
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-[#64748B]">
+                    <span>Need LKG–12th / Course Onboarding?</span>
+                    <Link to="/join/student" className="font-semibold text-[#2563EB] hover:underline">
+                      7-Step Student Registration →
+                    </Link>
                   </div>
-                  <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
-                    <span className="bg-white px-3 text-[#64748B] font-semibold">or continue quickly</span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={handleGoogleAuth}
-                  className="w-full py-3 px-4 bg-[#14213D] hover:bg-[#0d1629] text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2.5 transition-colors disabled:opacity-60 cursor-pointer"
-                >
-                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
-                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.37 24 12 24Z" />
-                    <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z" />
-                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.37 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z" />
-                  </svg>
-                  <span>Continue with Google</span>
-                </button>
+                )}
               </div>
             </div>
           )}
-        </div>
-      </main>
+      </div>
     </div>
   );
 };

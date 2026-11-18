@@ -109,6 +109,58 @@ export const db = dbInstance;
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export function formatFirebaseAuthError(
+  err: unknown,
+  context: 'google' | 'email' | 'register' | 'reset' = 'email'
+): string {
+  const code = String((err as any)?.code || '');
+  const rawMessage = String((err as any)?.message || '');
+
+  if (code === 'auth/operation-not-allowed') {
+    return context === 'google'
+      ? 'Google Sign-In is not currently enabled in Firebase Console. Please enable Google provider in Authentication → Sign-in method.'
+      : 'Email/password sign-in is not enabled on this project yet. Please click "Continue with Google" above for instant access.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Your browser blocked the Google Sign-In popup. Please allow popups for this site and click "Continue with Google" again.';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'Google Sign-In window was closed before completing login. Click "Continue with Google" to try again.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+    return `This domain (${host}) is not authorized for Google Sign-In in Firebase Console → Authentication → Settings → Authorized domains.`;
+  }
+  if (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/wrong-password' ||
+    code === 'auth/user-not-found'
+  ) {
+    return 'Invalid email or password. Double-check your credentials, reset your password, or use "Continue with Google".';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'An account with this email already exists. Switch to Sign In or click "Continue with Google".';
+  }
+  if (code === 'auth/weak-password') {
+    return 'Password is too weak. Please enter at least 6 characters.';
+  }
+  if (code === 'auth/invalid-email') {
+    return 'Please enter a valid email address.';
+  }
+  if (code === 'auth/user-disabled') {
+    return 'This account has been disabled. Please contact OpenFrame support.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Too many login attempts. Please wait a moment and try again, or use "Continue with Google".';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Network error while connecting to Firebase Authentication. Check your internet connection and retry.';
+  }
+
+  return rawMessage || 'Authentication failed. Please try "Continue with Google" or check your details.';
+}
 
 // Operational context for error logging
 export enum OperationType {
@@ -281,11 +333,13 @@ export async function syncLmsUserProfile(
   studentProfile: StudentProfile | null;
   teacherProfile: TeacherProfile | null;
 }> {
-  const email = (user.email || '').toLowerCase();
-  const displayName =
+  const email = (user.email || '').trim().toLowerCase().slice(0, 120);
+  const rawEmail = (user.email || '').trim().slice(0, 120);
+  const displayName = (
     extra?.displayName?.trim() ||
     user.displayName ||
-    (email ? email.split('@')[0] : 'OpenFrame Learner');
+    (email ? email.split('@')[0] : 'OpenFrame Learner')
+  ).slice(0, 120);
   const now = new Date().toISOString();
 
   const userRef = doc(db, 'users', user.uid);
@@ -304,10 +358,16 @@ export async function syncLmsUserProfile(
   let matchedTeacherReg: TeacherRegistration | null = null;
 
   if (email) {
+    const lookupEmail = rawEmail && rawEmail !== email ? rawEmail : email;
     try {
-      const sSnap = await getDocs(
+      let sSnap = await getDocs(
         query(collection(db, 'student_registrations'), where('emailAddress', '==', email), limit(1))
       );
+      if (sSnap.empty && lookupEmail !== email) {
+        sSnap = await getDocs(
+          query(collection(db, 'student_registrations'), where('emailAddress', '==', lookupEmail), limit(1))
+        );
+      }
       if (!sSnap.empty) {
         matchedStudentReg = { id: sSnap.docs[0].id, ...(sSnap.docs[0].data() as any) };
       }
@@ -316,9 +376,14 @@ export async function syncLmsUserProfile(
     }
 
     try {
-      const tSnap = await getDocs(
+      let tSnap = await getDocs(
         query(collection(db, 'teacher_registrations'), where('email', '==', email), limit(1))
       );
+      if (tSnap.empty && lookupEmail !== email) {
+        tSnap = await getDocs(
+          query(collection(db, 'teacher_registrations'), where('email', '==', lookupEmail), limit(1))
+        );
+      }
       if (!tSnap.empty) {
         matchedTeacherReg = { id: tSnap.docs[0].id, ...(tSnap.docs[0].data() as any) };
       }
@@ -328,42 +393,62 @@ export async function syncLmsUserProfile(
   }
 
   const isSuper = SUPER_ADMIN_EMAILS.includes(email);
-  const resolvedRole: LmsUserRole =
-    preferredRole && preferredRole !== 'admin'
-      ? preferredRole
-      : existingUser?.role ||
-        (isSuper ? 'admin' : matchedTeacherReg ? 'teacher' : 'student');
 
-  const rolesSet = new Set<LmsUserRole>(existingUser?.roles || [resolvedRole === 'admin' ? 'student' : resolvedRole]);
-  rolesSet.add(resolvedRole);
-  if (isSuper) rolesSet.add('admin');
-  if (matchedTeacherReg) rolesSet.add('teacher');
+  // Preserve existing persisted role/roles in Firestore so owner updates never violate
+  // `incoming().role == existing().role && incoming().roles == existing().roles`.
+  const persistedRole: LmsUserRole = existingUser?.role
+    ? existingUser.role
+    : preferredRole && preferredRole !== 'admin'
+    ? preferredRole
+    : isSuper
+    ? 'admin'
+    : matchedTeacherReg
+    ? 'teacher'
+    : 'student';
+
+  const persistedRoles: LmsUserRole[] = existingUser?.roles?.length
+    ? existingUser.roles
+    : (() => {
+        const rolesSet = new Set<LmsUserRole>([persistedRole === 'admin' && !isSuper ? 'student' : persistedRole]);
+        if (isSuper) rolesSet.add('admin');
+        if (matchedTeacherReg && rolesSet.size < 2) rolesSet.add('teacher');
+        return Array.from(rolesSet).slice(0, 2);
+      })();
+
+  const safePersistedRole: LmsUserRole = persistedRole === 'admin' && !isSuper ? 'student' : persistedRole;
 
   const regNumber =
     existingUser?.registrationNumber ||
     matchedStudentReg?.id ||
     matchedTeacherReg?.id ||
-    (resolvedRole === 'institution_admin'
+    (safePersistedRole === 'institution_admin'
       ? `OF-SCH-${user.uid.slice(0, 6).toUpperCase()}`
-      : resolvedRole === 'teacher'
+      : safePersistedRole === 'teacher'
       ? `OF-TCH-${user.uid.slice(0, 6).toUpperCase()}`
-      : resolvedRole === 'parent'
+      : safePersistedRole === 'parent'
       ? `OF-PAR-${user.uid.slice(0, 6).toUpperCase()}`
-      : resolvedRole === 'ngo_partner'
+      : safePersistedRole === 'ngo_partner'
       ? `OF-NGO-${user.uid.slice(0, 6).toUpperCase()}`
-      : resolvedRole === 'field_executive'
+      : safePersistedRole === 'field_executive'
       ? `OF-FLD-${user.uid.slice(0, 6).toUpperCase()}`
-      : resolvedRole === 'professional'
+      : safePersistedRole === 'professional'
       ? `OF-PRO-${user.uid.slice(0, 6).toUpperCase()}`
       : `OF-STU-${user.uid.slice(0, 6).toUpperCase()}`);
 
+  const resolvedDisplayName = (
+    matchedStudentReg?.fullName ||
+    matchedTeacherReg?.fullName ||
+    existingUser?.displayName ||
+    displayName
+  ).slice(0, 120);
+
   const profilePayload: LmsUserProfile = stripUndefinedDeep({
     uid: user.uid,
-    email,
-    displayName: matchedStudentReg?.fullName || matchedTeacherReg?.fullName || displayName,
-    ...(user.photoURL ? { photoURL: user.photoURL } : {}),
-    role: resolvedRole === 'admin' && !isSuper ? 'student' : resolvedRole,
-    roles: Array.from(rolesSet).slice(0, 2),
+    email: existingUser?.email || email,
+    displayName: resolvedDisplayName,
+    ...(user.photoURL ? { photoURL: user.photoURL } : existingUser?.photoURL ? { photoURL: existingUser.photoURL } : {}),
+    role: safePersistedRole,
+    roles: persistedRoles,
     registrationNumber: regNumber,
     ...(existingUser?.institutionId ? { institutionId: existingUser.institutionId } : {}),
     ...(existingUser?.institutionName ? { institutionName: existingUser.institutionName } : {}),
@@ -382,7 +467,13 @@ export async function syncLmsUserProfile(
   let studentProfile: StudentProfile | null = null;
   let teacherProfile: TeacherProfile | null = null;
 
-  if (profilePayload.role === 'student' || profilePayload.role === 'professional' || rolesSet.has('student')) {
+  const isStudentPortalSession =
+    safePersistedRole === 'student' ||
+    safePersistedRole === 'professional' ||
+    persistedRoles.includes('student') ||
+    preferredRole === 'student';
+
+  if (isStudentPortalSession) {
     const stuRef = doc(db, 'student_profiles', user.uid);
     try {
       const stuSnap = await getDoc(stuRef);
@@ -392,7 +483,7 @@ export async function syncLmsUserProfile(
         uid: user.uid,
         studentId: user.uid,
         registrationNumber: existingStu?.registrationNumber || regNumber,
-        fullName: existingStu?.fullName || matchedStudentReg?.fullName || profilePayload.displayName,
+        fullName: (existingStu?.fullName || matchedStudentReg?.fullName || profilePayload.displayName).slice(0, 120),
         email,
         mobileNumber: existingStu?.mobileNumber || matchedStudentReg?.mobileNumber || '',
         parentEmail: existingStu?.parentEmail || '',
@@ -410,7 +501,7 @@ export async function syncLmsUserProfile(
     }
   }
 
-  if (profilePayload.role === 'teacher' || rolesSet.has('teacher')) {
+  if (safePersistedRole === 'teacher' || persistedRoles.includes('teacher')) {
     const tchRef = doc(db, 'teacher_profiles', user.uid);
     try {
       const tchSnap = await getDoc(tchRef);
@@ -420,7 +511,7 @@ export async function syncLmsUserProfile(
         uid: user.uid,
         teacherId: user.uid,
         registrationNumber: existingTch?.registrationNumber || matchedTeacherReg?.id || `OF-TCH-${user.uid.slice(0, 6).toUpperCase()}`,
-        fullName: existingTch?.fullName || matchedTeacherReg?.fullName || profilePayload.displayName,
+        fullName: (existingTch?.fullName || matchedTeacherReg?.fullName || profilePayload.displayName).slice(0, 120),
         email,
         qualification: existingTch?.qualification || matchedTeacherReg?.qualification || 'Faculty Evaluator',
         specialization: existingTch?.specialization || matchedTeacherReg?.subjectSpecialization || extra?.specialization || 'Technology & Applied Sciences',

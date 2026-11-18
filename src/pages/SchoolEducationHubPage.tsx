@@ -17,15 +17,20 @@ import {
   Languages,
   Layers,
   Loader2,
+  LogOut,
   Play,
   Presentation,
+  Radio,
   Save,
+  Settings,
   ShieldCheck,
   Sparkles,
   Trophy,
   Upload,
+  User,
   Video,
   Wrench,
+  X,
 } from 'lucide-react';
 import { useRouter } from '../router/RouterContext';
 import { useAuth } from '../context/AuthContext';
@@ -128,7 +133,8 @@ type HubTab =
 
 export const SchoolEducationHubPage: React.FC = () => {
   const { currentPath, navigate } = useRouter();
-  const { currentUser, lmsUser } = useAuth();
+  const { currentUser, lmsUser, logout, refreshSchoolEnrollment } = useAuth();
+  const [showClassSettingsModal, setShowClassSettingsModal] = useState(false);
 
   // Parse URL params/segments cleanly
   const [cleanPath, queryStr] = currentPath.split('?');
@@ -254,6 +260,13 @@ export const SchoolEducationHubPage: React.FC = () => {
       setActiveTab(initialTabFromUrl);
     }
   }, [initialTabFromUrl, urlParams]);
+
+  // Once enrolled & logged in, default to Daily Classes homepage (unless a sub-tab is explicitly requested)
+  useEffect(() => {
+    if (currentUser && enrollment && !urlParams.get('tab')) {
+      setActiveTab('daily');
+    }
+  }, [currentUser, enrollment, urlParams]);
 
   const activeBoard = useMemo(
     () => SCHOOL_BOARDS.find((b) => b.id === boardId) || SCHOOL_BOARDS[0],
@@ -449,7 +462,10 @@ export const SchoolEducationHubPage: React.FC = () => {
         lastActiveDate: new Date().toISOString().slice(0, 10),
       });
       setEnrollment(saved);
-      setStatusBanner(`Saved ${activeClass.label} (${selectedDirectoryBoard?.shortName || activeBoard.shortName} · ${medium}) enrollment & curriculum profile.`);
+      await refreshSchoolEnrollment().catch(() => {});
+      setShowClassSettingsModal(false);
+      setActiveTab('daily');
+      setStatusBanner(`Saved ${activeClass.label} (${selectedDirectoryBoard?.shortName || activeBoard.shortName} · ${medium}) — Daily Classes ready.`);
     } catch {
       setStatusBanner('Please sign in first to save your academic enrollment to Firestore.');
     } finally {
@@ -693,8 +709,11 @@ export const SchoolEducationHubPage: React.FC = () => {
   const masteredCount = progressRecords.filter((p) => p.status === 'Mastered').length;
   const weakConcepts = progressRecords.filter((p) => p.needsSupport || p.status === 'Needs Revision');
 
+  const isStudentEnrolled = Boolean(currentUser && enrollment);
+  const studentDisplayName = lmsUser?.displayName || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Student';
+
   const navTabs: Array<{ id: HubTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { id: 'daily', label: 'Class & Daily Plan', icon: Calendar },
+    { id: 'daily', label: 'Daily Classes', icon: Calendar },
     { id: 'boards', label: `All-India Boards (${ALL_INDIA_BOARDS.length})`, icon: Landmark },
     { id: 'structure', label: 'Grade Structure & Versions', icon: Layers },
     { id: 'languages', label: 'Languages & Voice (14)', icon: Languages },
@@ -708,11 +727,23 @@ export const SchoolEducationHubPage: React.FC = () => {
     { id: 'tools', label: 'Labs, Tools & Careers', icon: Wrench },
   ];
 
+  const handleJoinLiveSession = async (live: SchoolLiveClass) => {
+    if (currentUser?.uid) {
+      await joinSchoolLiveClass(live.id, currentUser.uid).catch(() => {});
+    }
+    if (live.meetingUrl) {
+      window.open(live.meetingUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      setActiveTab('live');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Top Dark Academic Banner */}
-      <div className="bg-gradient-to-r from-[#071326] via-[#0B1930] to-[#13294B] text-white border-b border-blue-900/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className={`min-h-screen bg-slate-50 ${isStudentEnrolled ? 'pb-20 md:pb-8' : ''}`}>
+      {/* Top Academic Setup Banner (Visible ONLY before login + class registration; hidden in Mobile App & Web once enrolled) */}
+      {!isStudentEnrolled ? (
+        <div className="bg-gradient-to-r from-[#071326] via-[#0B1930] to-[#13294B] text-white border-b border-blue-900/50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div>
               <div className="text-xs font-bold uppercase tracking-widest text-sky-400 flex items-center gap-2">
@@ -879,12 +910,75 @@ export const SchoolEducationHubPage: React.FC = () => {
                 className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
               >
                 {savingEnrollment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                <span>{currentUser ? 'Save Class Profile' : 'Sign In to Save'}</span>
+                <span>{currentUser ? 'Save & Open Daily Classes' : 'Sign In to Save'}</span>
               </button>
             </div>
           </div>
         </div>
       </div>
+      ) : (
+        /* Slim Authenticated Student Daily Header (Hides setup/registration form once logged in & registered) */
+        <div className="bg-[#0B1930] text-white border-b border-blue-900/50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-blue-600/25 border border-blue-500/40 flex items-center justify-center text-sky-300 shrink-0">
+                <GraduationCap className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-heading font-bold text-white truncate">
+                  {studentDisplayName} · {activeClass.label}
+                </div>
+                <div className="text-[11px] text-sky-300 truncate">
+                  {selectedDirectoryBoard?.shortName || activeBoard.shortName} · {medium} · {academicYear}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <select
+                aria-label="Switch learning language"
+                value={language}
+                onChange={(e) => handleSwitchLanguage(e.target.value as SchoolLanguage)}
+                className="px-2.5 py-1.5 rounded-lg bg-[#0F2042] border border-blue-700/80 text-sky-100 text-xs font-semibold cursor-pointer"
+              >
+                {ALL_INDIA_LANGUAGE_PACKS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nativeLabel.split(' ')[0]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setShowClassSettingsModal(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+                title="Change Class, Board, Medium or Stream"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Class Settings</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/student/dashboard')}
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>My Profile</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  navigate('/portal?switch=1');
+                }}
+                title="Sign Out"
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-rose-600/80 text-slate-200 hover:text-white transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Status Notice Banner */}
       {statusBanner && (
@@ -899,7 +993,7 @@ export const SchoolEducationHubPage: React.FC = () => {
       )}
 
       {/* Workspace Navigation Tabs */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <div className={`bg-white border-b border-slate-200 z-30 ${isStudentEnrolled ? 'md:sticky md:top-0' : 'sticky top-0'}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1.5 overflow-x-auto py-2.5">
           {navTabs.map((t) => {
             const Icon = t.icon;
@@ -992,7 +1086,9 @@ export const SchoolEducationHubPage: React.FC = () => {
                 <div className="text-2xl font-heading font-extrabold text-emerald-600 mt-1 tabular-nums">
                   {masteredCount}
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5">{weakConcepts.length} flagged for revision</div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {weakConcepts.length} flagged · Avg Score {overallMarksPercent}% ({overallBoardGrade.grade})
+                </div>
               </div>
               <div className="bg-white border border-slate-200 rounded-xl p-4">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Learning Streak &amp; XP</div>
@@ -1015,6 +1111,127 @@ export const SchoolEducationHubPage: React.FC = () => {
                 >
                   Mark Today Present (+15 XP)
                 </button>
+              </div>
+            </div>
+
+            {/* Live Classes Today + Continue Active Concept */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {liveClasses.length > 0 ? (
+                <div className="bg-white border border-blue-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1 min-w-0">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>Next Live Class · {liveClasses[0].subjectName}</span>
+                    </div>
+                    <div className="font-heading font-bold text-base text-slate-900 truncate">
+                      {liveClasses[0].topicTitle}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {liveClasses[0].scheduledAt ? new Date(liveClasses[0].scheduledAt).toLocaleString('en-IN') : 'Today'} · {liveClasses[0].teacherName}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleJoinLiveSession(liveClasses[0])}
+                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Video className="w-3.5 h-3.5" />
+                    <span>Join Live Class</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <Video className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Live Classes &amp; Weekly Timetable</span>
+                    </div>
+                    <div className="font-heading font-bold text-base text-slate-900">
+                      View Today&apos;s Class Rooms &amp; Schedule
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Open interactive live rooms, Zoom/Meet links, and full Monday–Saturday timetable.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('live')}
+                    className="px-4 py-2.5 rounded-xl bg-[#0B1930] hover:bg-blue-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Open Live Schedule
+                  </button>
+                </div>
+              )}
+
+              {activeSubject && activeConcept && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1 min-w-0">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
+                      <Play className="w-3.5 h-3.5" />
+                      <span>Resume Active Lesson · {getLocalizedText(activeSubject.name, language)}</span>
+                    </div>
+                    <div className="font-heading font-bold text-base text-slate-900 truncate">
+                      {getLocalizedText(activeConcept.title, language, translatedBundle?.title)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {activeConcept.estimatedMinutes} mins · Video lessons, 15-part notes &amp; voice read-aloud
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('subjects')}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Continue Learning
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* All-In-One School Tools Grid (Everything accessible directly from Daily Classes Homepage) */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="font-heading font-bold text-lg text-slate-900">
+                    Everything for {activeClass.label} on One Homepage
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Direct 1-tap access to lessons, AI tutor, 8-format quizzes, homework, report cards, live classrooms &amp; labs.
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-slate-500 tabular-nums">10 Integrated Modules</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {[
+                  { tab: 'subjects' as HubTab, title: 'Subjects & Concepts', sub: `${prescribedSubjects.length} subjects · Video & voice`, icon: BookOpen },
+                  { tab: 'quizzes' as HubTab, title: '8-Format Quizzes', sub: `${quizAttempts.length} completed attempts`, icon: CheckCircle2 },
+                  { tab: 'work' as HubTab, title: 'Homework & Projects', sub: `${assignments.length} tasks · Presentations`, icon: Presentation },
+                  { tab: 'marks' as HubTab, title: 'Marks & Report Card', sub: `${marks.length} exam records · PDF`, icon: FileSpreadsheet },
+                  { tab: 'tutor' as HubTab, title: 'AI Tutor & Flashcards', sub: 'Quinn AI multilingual mentor', icon: Sparkles },
+                  { tab: 'live' as HubTab, title: 'Live & Timetable', sub: `${todayPlanSlots.length} periods today`, icon: Video },
+                  { tab: 'progress' as HubTab, title: 'Badges & Certificates', sub: `${enrollment?.xpPoints || 0} XP earned`, icon: Trophy },
+                  { tab: 'tools' as HubTab, title: 'Labs, Formulas & Careers', sub: 'Interactive concept lab', icon: Wrench },
+                  { tab: 'languages' as HubTab, title: '14 Languages & Voice', sub: activeLanguagePack.name, icon: Languages },
+                  { tab: 'boards' as HubTab, title: '41+ Boards & Syllabus', sub: activeBoard.shortName, icon: Landmark },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.tab}
+                      type="button"
+                      onClick={() => setActiveTab(item.tab)}
+                      className="text-left p-3.5 rounded-xl border border-slate-200 hover:border-blue-500 bg-slate-50/70 hover:bg-white transition-all cursor-pointer group"
+                    >
+                      <Icon className="w-4 h-4 text-[#123D32] group-hover:text-blue-600 transition-colors" />
+                      <div className="font-heading font-bold text-xs sm:text-sm text-slate-900 mt-2 group-hover:text-blue-700">
+                        {item.title}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        {item.sub}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -2207,6 +2424,162 @@ export const SchoolEducationHubPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Class & Board Settings Modal (Only opened manually when enrolled student clicks "Class Settings") */}
+      {showClassSettingsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="font-heading font-bold text-lg text-slate-900">
+                  Update Class, Board &amp; Medium
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Your saved subjects, daily timetable, and progress remain backed up in your student profile.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClassSettingsModal(false)}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
+                aria-label="Close class settings"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Education Board</label>
+                <select
+                  value={boardId}
+                  onChange={(e) => {
+                    const nextId = e.target.value as SchoolBoardId;
+                    setBoardId(nextId);
+                    setSelectedDirectoryBoard(ALL_INDIA_BOARDS.find((b) => b.curriculumGroupId === nextId) || null);
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-900 bg-white"
+                >
+                  {SCHOOL_BOARDS.map((b) => (
+                    <option key={b.id} value={b.id}>{b.shortName} — {b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Class / Standard</label>
+                <select
+                  value={classId}
+                  onChange={(e) => {
+                    const nextCls = e.target.value as SchoolClassId;
+                    setClassId(nextCls);
+                    navigate(`/school/class/${nextCls}?board=${boardId}`);
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-900 bg-white"
+                >
+                  {SCHOOL_CLASSES.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Medium of Instruction</label>
+                <select
+                  value={medium}
+                  onChange={(e) => setMedium(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-900 bg-white"
+                >
+                  {activeBoard.supportedMediums.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Academic Year</label>
+                <select
+                  value={academicYear}
+                  onChange={(e) => setAcademicYear(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-900 bg-white"
+                >
+                  {SCHOOL_ACADEMIC_YEARS.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+
+              {activeClass.hasStreams && (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Senior Secondary Stream</label>
+                  <select
+                    value={stream}
+                    onChange={(e) => setStream(e.target.value as SchoolStreamId)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-900 bg-white"
+                  >
+                    <option value="Science">Science Stream</option>
+                    <option value="Commerce">Commerce Stream</option>
+                    <option value="Arts">Arts / Humanities</option>
+                    <option value="Vocational">Vocational &amp; Skill</option>
+                    <option value="General">All Prescribed Streams</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowClassSettingsModal(false)}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEnrollment}
+                disabled={savingEnrollment}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                {savingEnrollment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                <span>Save Changes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile App Bottom Navigation Bar (Displayed after login+registration on /school) */}
+      {isStudentEnrolled && (
+        <nav
+          aria-label="Mobile school daily navigation"
+          className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-1.5 grid grid-cols-5 gap-1 shadow-lg"
+        >
+          {[
+            { tab: 'daily' as HubTab, label: 'Daily Home', icon: Calendar },
+            { tab: 'subjects' as HubTab, label: 'Subjects', icon: BookOpen },
+            { tab: 'quizzes' as HubTab, label: 'Quizzes', icon: CheckCircle2 },
+            { tab: 'live' as HubTab, label: 'Live', icon: Video },
+            { tab: 'marks' as HubTab, label: 'Marks', icon: FileSpreadsheet },
+          ].map((item) => {
+            const Icon = item.icon;
+            const isAct = activeTab === item.tab;
+            return (
+              <button
+                key={item.tab}
+                type="button"
+                onClick={() => setActiveTab(item.tab)}
+                className={`flex flex-col items-center justify-center py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                  isAct ? 'text-blue-700 bg-blue-50' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Icon className="w-4 h-4 mb-0.5" />
+                <span className="truncate max-w-full">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 };

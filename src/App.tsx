@@ -62,7 +62,19 @@ import { useAuth } from './context/AuthContext';
 
 function AppContent() {
   const { currentPath, navigate } = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, schoolEnrollment } = useAuth();
+  const [isStandalonePwa, setIsStandalonePwa] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(display-mode: standalone)');
+    const update = () => {
+      setIsStandalonePwa(Boolean(mq.matches || (window.navigator as any)?.standalone));
+    };
+    update();
+    mq.addEventListener?.('change', update);
+    return () => mq.removeEventListener?.('change', update);
+  }, []);
 
   React.useEffect(() => {
     testFirestoreConnection().catch(() => {});
@@ -126,7 +138,14 @@ function AppContent() {
       pageTitle = 'Official Corporate Documents Repository | OpenFrame IT Solutions';
     } else if (clean.startsWith('/learn/')) {
       pageTitle = 'Quinn AI Interactive Learning Workspace | OpenFrame Education';
-    } else if (clean === '/portal' || clean === '/login' || clean.startsWith('/portal/')) {
+    } else if (
+      clean === '/portal' ||
+      clean === '/login' ||
+      clean === '/student/login' ||
+      clean === '/login/student' ||
+      clean === '/student-login' ||
+      clean.startsWith('/portal/')
+    ) {
       pageTitle = 'Portal Sign In Hub | OPENFRAME';
     } else if (clean === '/student/dashboard' || clean === '/student-portal') {
       pageTitle = 'Student Learning & Certification Dashboard | OPENFRAME';
@@ -178,7 +197,14 @@ function AppContent() {
       return <AdminLoginPage />;
     }
 
-    if (path === '/portal' || path === '/login' || path.startsWith('/portal/')) {
+    if (
+      path === '/portal' ||
+      path === '/login' ||
+      path === '/student/login' ||
+      path === '/login/student' ||
+      path === '/student-login' ||
+      path.startsWith('/portal/')
+    ) {
       return <PortalLoginPage />;
     }
 
@@ -400,9 +426,14 @@ function AppContent() {
     Boolean(currentUser) &&
     (cleanCurrentPath === '/partner/school/dashboard' ||
       cleanCurrentPath === '/partner/school/register');
+  const isSchoolStandaloneShell =
+    isStandalonePwa &&
+    Boolean(currentUser && schoolEnrollment) &&
+    (cleanCurrentPath === '/school' || cleanCurrentPath.startsWith('/school/class/'));
   const isWorkspaceShellRoute =
     isAdminRoute ||
     isSchoolPartnerShell ||
+    isSchoolStandaloneShell ||
     [
       '/student/dashboard',
       '/student-portal',

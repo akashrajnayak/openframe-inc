@@ -108,7 +108,7 @@ function getGeminiClient(): GoogleGenAI | null {
   return new GoogleGenAI({
     apiKey,
     httpOptions: {
-      timeout: 12000,
+      timeout: 30000,
       headers: {
         'User-Agent': 'aistudio-build',
       },
@@ -118,7 +118,7 @@ function getGeminiClient(): GoogleGenAI | null {
 
 async function withGeminiTimeout<T>(
   runner: (abortSignal: AbortSignal) => Promise<T>,
-  timeoutMs = 6500,
+  timeoutMs = 15000,
   label = 'Gemini request'
 ): Promise<T> {
   const controller = new AbortController();
@@ -2042,7 +2042,7 @@ ${JSON.stringify(
               },
             },
           }),
-        6500,
+        15000,
         'recommend-videos'
       );
 
@@ -2153,7 +2153,7 @@ Each question must include a clear rubricExplanation explaining why the correct 
               },
             },
           }),
-        11000,
+        20000,
         'generate-quiz'
       );
 
@@ -2252,7 +2252,7 @@ ${JSON.stringify(
                 },
               },
             }),
-          6500,
+          15000,
           'evaluate-quiz'
         );
 
@@ -2444,7 +2444,7 @@ Include:
               },
             },
           }),
-        11000,
+        20000,
         'generate-project'
       );
 
@@ -2572,7 +2572,7 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
               },
             },
           }),
-        6500,
+        15000,
         'analyze-performance'
       );
 
@@ -2636,24 +2636,38 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
         : detected.label;
 
     const videoMetadataList = Array.isArray(videos)
-      ? videos.slice(0, 12).map((v: any) => ({
+      ? videos.slice(0, 9).map((v: any) => ({
           videoId: v.videoId || v.youtubeId || v.id || '',
-          title: v.title || '',
-          channelTitle: v.channelTitle || '',
+          title: String(v.title || '').slice(0, 120),
+          channelTitle: String(v.channelTitle || '').slice(0, 60),
           duration: v.duration || '',
-          description: String(v.description || v.recommendedReason || '').slice(0, 260),
+          description: String(v.description || v.recommendedReason || '').slice(0, 120),
         }))
       : [];
 
     const aiDisclaimer =
       'AI-organized learning pathway generated strictly from available YouTube video titles, channels, and descriptions (no external video transcript parsing implied).';
 
-    const buildFallbackPath = () => {
-      const pickVideoIds = (idx: number) => {
-        const vid = videoMetadataList[idx % Math.max(1, videoMetadataList.length)]?.videoId;
+    const distributeVideoIds = (idx: number, totalMods: number): string[] => {
+      if (videoMetadataList.length === 0) return [];
+      if (videoMetadataList.length <= totalMods) {
+        const vid = videoMetadataList[idx % videoMetadataList.length]?.videoId;
         return vid ? [vid] : [];
-      };
+      }
+      const perModule = Math.ceil(videoMetadataList.length / Math.max(1, totalMods));
+      const start = idx * perModule;
+      const chunk = videoMetadataList
+        .slice(start, start + perModule)
+        .map((v) => v.videoId)
+        .filter(Boolean);
+      if (chunk.length > 0) return chunk;
+      const fallbackVid = videoMetadataList[idx % videoMetadataList.length]?.videoId;
+      return fallbackVid ? [fallbackVid] : [];
+    };
 
+    const validVideoIdSet = new Set(videoMetadataList.map((v) => v.videoId).filter(Boolean));
+
+    const buildFallbackPath = () => {
       if (isExcelTopic && targetModuleCount === 6) {
         const excelBlueprints = [
           {
@@ -2716,7 +2730,7 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
             objectives: bp.objectives,
             summary: bp.summary,
             practiceExercises: bp.practiceExercises,
-            videoIds: pickVideoIds(idx),
+            videoIds: distributeVideoIds(idx, excelBlueprints.length),
             ...(idx === 0
               ? {
                   miniQuizQuestion: {
@@ -2782,7 +2796,7 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
               `Complete a focused hands-on exercise demonstrating Module ${idx + 1} skills in ${topic}.`,
               `Document key takeaways and review common edge cases.`,
             ],
-            videoIds: pickVideoIds(idx),
+            videoIds: distributeVideoIds(idx, selectedIndices.length),
             ...(idx === 0
               ? {
                   miniQuizQuestion: {
@@ -2823,17 +2837,19 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
         (abortSignal) =>
           ai.models.generateContent({
             model: MODEL_TEXT,
-            contents: `You are Quinn AI, Academic Path Organizer at OpenFrame Education.
-Create a clean, structured ${targetModuleCount}-module learning path (progressing from Beginner to Intermediate to Advanced) for the topic: "${topic}" in language "${targetLanguage}".${excelInstruction}
+            contents: `Create a clean, structured ${targetModuleCount}-module learning path (Beginner to Intermediate to Advanced) for "${topic}" in "${targetLanguage}".${excelInstruction}
 
-STRICT GROUNDING RULE:
-- Base video groupings and references ONLY on the provided metadata below. Do not claim to have watched the video frames or read hidden transcripts unless provided in description metadata.
-- Respond in "${targetLanguage}" while keeping universal technical terms clear.
+RULES:
+- Map videoIds ONLY to exact videoId values from Available Video Metadata. Never invent video IDs.
+- Keep objectives (2 per module), summary (1 short sentence), and practiceExercises (1 per module) concise.
+- Include miniQuizQuestion only on the first and last module.
+- Respond in "${targetLanguage}" keeping technical terms clear.
 
 Available Video Metadata:
-${JSON.stringify(videoMetadataList, null, 2)}`,
+${JSON.stringify(videoMetadataList)}`,
             config: {
               abortSignal,
+              systemInstruction: 'You are Quinn AI, Academic Path Organizer at OpenFrame Education. Produce concise, well-structured JSON learning paths quickly without verbose filler.',
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
               responseMimeType: 'application/json',
               responseSchema: {
@@ -2872,12 +2888,13 @@ ${JSON.stringify(videoMetadataList, null, 2)}`,
               },
             },
           }),
-        9000,
+        25000,
         'organize-course'
       );
 
       const parsed = JSON.parse((response.text ?? '{}').trim());
       if (parsed && Array.isArray(parsed.modules) && parsed.modules.length > 0) {
+        const modCount = parsed.modules.length;
         return res.json({
           path: {
             id: `ai-path-${Date.now().toString(36)}`,
@@ -2888,16 +2905,22 @@ ${JSON.stringify(videoMetadataList, null, 2)}`,
             aiDisclaimer,
             sourceMode: 'gemini' as const,
             createdAt: new Date().toISOString(),
-            modules: parsed.modules.map((m: any, idx: number) => ({
-              moduleNumber: Number(m.moduleNumber) || idx + 1,
-              level: m.level === 'Advanced' || m.level === 'Intermediate' ? m.level : 'Beginner',
-              title: m.title,
-              objectives: Array.isArray(m.objectives) ? m.objectives : [],
-              summary: m.summary || '',
-              practiceExercises: Array.isArray(m.practiceExercises) ? m.practiceExercises : [],
-              videoIds: Array.isArray(m.videoIds) ? m.videoIds : [],
-              miniQuizQuestion: m.miniQuizQuestion,
-            })),
+            modules: parsed.modules.map((m: any, idx: number) => {
+              const rawVids = Array.isArray(m.videoIds)
+                ? m.videoIds.filter((vid: any) => typeof vid === 'string' && validVideoIdSet.has(vid))
+                : [];
+              const finalVideoIds = rawVids.length > 0 ? rawVids : distributeVideoIds(idx, modCount);
+              return {
+                moduleNumber: Number(m.moduleNumber) || idx + 1,
+                level: m.level === 'Advanced' || m.level === 'Intermediate' ? m.level : 'Beginner',
+                title: m.title,
+                objectives: Array.isArray(m.objectives) ? m.objectives : [],
+                summary: m.summary || '',
+                practiceExercises: Array.isArray(m.practiceExercises) ? m.practiceExercises : [],
+                videoIds: finalVideoIds,
+                miniQuizQuestion: m.miniQuizQuestion,
+              };
+            }),
           },
         });
       }
@@ -3496,7 +3519,7 @@ Provide 4 concise key takeaways and 3 actionable study/revision tips based stric
               },
             },
           }),
-        6500,
+        15000,
         'lesson-summary'
       );
 
@@ -3689,7 +3712,7 @@ Do NOT invent claims about unseen video captions. Keep each question concise, ed
               },
             },
           }),
-        7000,
+        15000,
         'practice-questions'
       );
       const parsed = JSON.parse(response.text || '{}');
@@ -3778,7 +3801,7 @@ Allowed Categories: ${catChoices.join(', ')}`,
               },
             },
           }),
-        6500,
+        15000,
         'recommend-category'
       );
       const parsed = JSON.parse(response.text || '{}');
@@ -4811,7 +4834,7 @@ Score honestly (0-15 each for subjectKnowledge, understanding, communication, cr
               },
             },
           }),
-        7000,
+        15000,
         'school-eval-presentation'
       );
 

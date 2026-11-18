@@ -218,7 +218,33 @@ export const CourseMarketplacePage: React.FC = () => {
     }
   };
 
-  // Explicit YouTube Data API v3 Search (ONLY on explicit submit, suggestion click, chip/category click, URL load, or Retry/Load More — NEVER on keystrokes)
+  const hasInitializedYoutubeRef = useRef(false);
+
+  const mapLiveYoutubeToExtended = (yt: any, topicFallback?: string): ExtendedYouTubeVideo => {
+    const vidId = yt.videoId || yt.youtubeId || yt.id || 'JMUxmLyrhSk';
+    const thumb = yt.thumbnail || yt.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+    return {
+      id: yt.id || `yt-${vidId}`,
+      videoId: vidId,
+      youtubeId: vidId,
+      title: yt.title || 'Educational Video Lecture',
+      channelTitle: yt.channelTitle || 'YouTube Educator',
+      thumbnail: thumb,
+      thumbnailUrl: thumb,
+      duration: yt.duration || 'Tutorial',
+      level: yt.level === 'Advanced' ? 'Advanced' : yt.level === 'Intermediate' ? 'Intermediate' : 'Beginner',
+      subjectCategory: selectedCategory !== 'All' ? selectedCategory : 'OpenFrame Discovery',
+      recommendedReason: yt.recommendedReason || 'Discovered via OpenFrame YouTube Search',
+      embedUrl:
+        yt.embedUrl ||
+        (yt.playlistId || yt.playlistInfo?.playlistId
+          ? `https://www.youtube-nocookie.com/embed/videoseries?list=${yt.playlistId || yt.playlistInfo?.playlistId}`
+          : `https://www.youtube-nocookie.com/embed/${vidId}`),
+      keyTopicsCovered: [topicFallback || searchQuery.trim() || yt.title || 'Learning Topic'],
+    };
+  };
+
+  // Explicit YouTube Data API v3 Search (ONLY on initial cached arrival, explicit submit, suggestion click, chip/category click, URL load, or Retry/Load More — NEVER on keystrokes)
   const runLiveYouTubeSearch = async (
     rawQuery: string,
     options?: {
@@ -227,8 +253,11 @@ export const CourseMarketplacePage: React.FC = () => {
       languageOverride?: string;
       channelOverride?: string;
       categoryOverride?: string;
+      skipSaveRecent?: boolean;
+      autoOrganize?: boolean;
+      targetModuleCount?: 3 | 6 | 9;
     }
-  ) => {
+  ): Promise<any[]> => {
     const q = rawQuery.trim();
     const ch = (options?.channelOverride ?? selectedChannel).trim();
     if (!liveYoutubeEnabled || (q.length < 2 && !ch)) {
@@ -239,7 +268,7 @@ export const CourseMarketplacePage: React.FC = () => {
         setLiveYoutubeNote(null);
         setActiveYouTubeQuery('');
       }
-      return;
+      return [];
     }
 
     const isAppend = Boolean(options?.append && options?.pageToken);
@@ -251,6 +280,7 @@ export const CourseMarketplacePage: React.FC = () => {
       setActiveYouTubeQuery(q || ch);
     }
 
+    let incomingVideos: any[] = [];
     try {
       const detected = detectQueryLanguage(q);
       const langBase = options?.languageOverride ?? selectedLanguage;
@@ -282,17 +312,17 @@ export const CourseMarketplacePage: React.FC = () => {
       }
 
       const data = await res.json();
-      const incoming = Array.isArray(data.videos) ? data.videos : [];
+      incomingVideos = Array.isArray(data.videos) ? data.videos : [];
       setLiveYoutubeResults((prev) => {
-        if (!isAppend) return incoming;
+        if (!isAppend) return incomingVideos;
         const seen = new Set(prev.map((item) => item.videoId || item.id));
-        return [...prev, ...incoming.filter((item: any) => !seen.has(item.videoId || item.id))];
+        return [...prev, ...incomingVideos.filter((item: any) => !seen.has(item.videoId || item.id))];
       });
       setLiveYoutubePageToken(data.nextPageToken || null);
       setLiveYoutubeError(data.retryable && data.error ? data.error : null);
       setLiveYoutubeNote(data.notice || null);
 
-      if (!isAppend && q.length >= 2) {
+      if (!isAppend && !options?.skipSaveRecent && q.length >= 2) {
         setRecentSearches(saveRecentSearch(q));
         if (currentUser?.uid) {
           lmsService
@@ -301,7 +331,7 @@ export const CourseMarketplacePage: React.FC = () => {
               query: q,
               detectedLanguage: detected.label,
               category: selectedCategory !== 'All' ? selectedCategory : undefined,
-              resultCount: incoming.length,
+              resultCount: incomingVideos.length,
             })
             .catch(() => {});
         }
@@ -313,12 +343,64 @@ export const CourseMarketplacePage: React.FC = () => {
       setLiveYoutubeLoading(false);
       setLiveYoutubeLoadingMore(false);
     }
+
+    if (options?.autoOrganize && !isAppend) {
+      const targetCnt = options?.targetModuleCount ?? (/\bexcel\b/i.test(q) ? 6 : aiModuleCount);
+      await handleGenerateAiPath(targetCnt, incomingVideos, q || ch, options?.languageOverride);
+    }
+
+    return incomingVideos;
   };
 
-  // Parse URL query params on route change (e.g., from Homepage Search or A–J Taxonomy Cards)
+  const executeUnifiedDiscoverySearch = (
+    rawTopic: string,
+    opts?: {
+      languageOverride?: string;
+      channelOverride?: string;
+      categoryOverride?: string;
+      targetModuleCount?: 3 | 6 | 9;
+      scroll?: boolean;
+    }
+  ) => {
+    const clean = rawTopic.trim();
+    setIsSearchFocused(false);
+    if (clean.length < 2 && !(opts?.channelOverride ?? selectedChannel).trim()) return;
+    const isExcel = /\bexcel\b/i.test(clean);
+    const nextModuleCount = opts?.targetModuleCount ?? (isExcel ? 6 : aiModuleCount);
+    if (isExcel) setAiModuleCount(6);
+    runIntelligentDiscovery(clean, {
+      langOverride: opts?.languageOverride,
+    });
+    runLiveYouTubeSearch(clean, {
+      languageOverride: opts?.languageOverride,
+      channelOverride: opts?.channelOverride,
+      categoryOverride: opts?.categoryOverride,
+      autoOrganize: true,
+      targetModuleCount: nextModuleCount,
+    });
+    if (opts?.scroll !== false) {
+      window.scrollTo({ top: 440, behavior: 'smooth' });
+    }
+  };
+
+  // Parse URL query params on route change or run initial cached YouTube preload when arriving cleanly
   useEffect(() => {
     const qIdx = router.currentPath.indexOf('?');
-    if (qIdx === -1) return;
+    if (qIdx === -1) {
+      if (!hasInitializedYoutubeRef.current) {
+        hasInitializedYoutubeRef.current = true;
+        const starterTopic =
+          studentProfile?.preferredCategories?.[0] ||
+          studentProfile?.degreeOrClass ||
+          studentProfile?.qualification ||
+          'Artificial Intelligence Python Programming';
+        runLiveYouTubeSearch(starterTopic, {
+          skipSaveRecent: true,
+          autoOrganize: false,
+        });
+      }
+      return;
+    }
     const sp = new URLSearchParams(router.currentPath.slice(qIdx + 1));
     const qParam = sp.get('q');
     const catParam = sp.get('cat') || sp.get('category');
@@ -344,14 +426,18 @@ export const CourseMarketplacePage: React.FC = () => {
 
     if (qParam !== null) {
       setSearchQuery(qParam);
-      if (/\bexcel\b/i.test(qParam)) {
+      const isExcel = /\bexcel\b/i.test(qParam);
+      if (isExcel) {
         setAiModuleCount(6);
       }
       if (qParam.trim().length >= 2) {
+        hasInitializedYoutubeRef.current = true;
         setRecentSearches(saveRecentSearch(qParam));
         runLiveYouTubeSearch(qParam, {
           languageOverride: cleanLang,
           categoryOverride: catParam || undefined,
+          autoOrganize: true,
+          targetModuleCount: isExcel ? 6 : aiModuleCount,
         });
         runIntelligentDiscovery(qParam, {
           levelOverride: levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam] ? levelParam : undefined,
@@ -360,10 +446,20 @@ export const CourseMarketplacePage: React.FC = () => {
         });
       }
     } else if ((levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam]) || degreeParam) {
+      hasInitializedYoutubeRef.current = true;
       runIntelligentDiscovery('', {
         levelOverride: levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam] ? levelParam : 'All',
         degreeOverride: degreeParam || 'All',
         langOverride: cleanLang,
+      });
+      const eduTopic =
+        degreeParam ||
+        (levelParam && EDUCATION_CATEGORY_BY_CODE[levelParam]?.title) ||
+        'Academic Curriculum Foundations';
+      runLiveYouTubeSearch(eduTopic, {
+        languageOverride: cleanLang,
+        skipSaveRecent: true,
+        autoOrganize: false,
       });
     }
 
@@ -577,19 +673,31 @@ export const CourseMarketplacePage: React.FC = () => {
     sortBy
   ]);
 
-  const handleGenerateAiPath = async (overrideCount?: 3 | 6 | 9) => {
-    const topic = searchQuery.trim() || (selectedCategory !== 'All' ? selectedCategory : 'Applied Data & AI Skills');
+  const handleGenerateAiPath = async (
+    overrideCount?: 3 | 6 | 9,
+    videosOverride?: any[],
+    topicOverride?: string,
+    languageOverride?: string
+  ) => {
+    const topic =
+      (topicOverride ?? searchQuery).trim() ||
+      activeYouTubeQuery.trim() ||
+      (selectedCategory !== 'All' ? selectedCategory : 'Applied Data & AI Skills');
+    const videosSource = Array.isArray(videosOverride) ? videosOverride : liveYoutubeResults;
     const countToUse = overrideCount ?? aiModuleCount;
+    const langBase = languageOverride ?? selectedLanguage;
     setAiPathOpen(true);
     setAiPathLoading(true);
     try {
       const generated = await quinnAiService.organizeCoursePath({
         query: topic,
-        language: selectedLanguage !== 'All' ? selectedLanguage : detectQueryLanguage(topic).label,
-        videos: liveYoutubeResults.slice(0, 9),
+        language: langBase !== 'All' ? langBase : detectQueryLanguage(topic).label,
+        videos: videosSource.slice(0, 9),
         moduleCount: countToUse,
       });
-      setAiPathData(generated);
+      if (generated) {
+        setAiPathData(generated);
+      }
     } finally {
       setAiPathLoading(false);
     }
@@ -673,6 +781,8 @@ export const CourseMarketplacePage: React.FC = () => {
     setLiveYoutubePageToken(null);
     setLiveYoutubeError(null);
     setActiveYouTubeQuery('');
+    setAiPathData(null);
+    setAiPathOpen(false);
   };
 
   const hasActiveFilters =
@@ -805,28 +915,32 @@ export const CourseMarketplacePage: React.FC = () => {
       return;
     }
     if (s.type === 'category') {
-      setSelectedCategory(s.category || s.label);
+      const cat = s.category || s.label;
+      setSelectedCategory(cat);
       setSearchQuery('');
-      runLiveYouTubeSearch(s.category || s.label, { categoryOverride: s.category || s.label });
+      runIntelligentDiscovery(cat);
+      runLiveYouTubeSearch(cat, { categoryOverride: cat, autoOrganize: true });
     } else if (s.type === 'subcategory') {
       setSelectedSubcategory(s.label);
       setSearchQuery('');
-      runLiveYouTubeSearch(s.label);
+      runIntelligentDiscovery(s.label);
+      runLiveYouTubeSearch(s.label, { autoOrganize: true });
     } else if (s.type === 'language') {
       setSelectedLanguage(s.label);
       setSearchQuery('');
     } else if (s.type === 'channel') {
       setSelectedChannel(s.label);
       setSearchQuery('');
-      runLiveYouTubeSearch(s.label, { channelOverride: s.label });
+      runIntelligentDiscovery(s.label);
+      runLiveYouTubeSearch(s.label, { channelOverride: s.label, autoOrganize: true });
     } else if (s.type === 'instructor') {
       setSelectedInstructor(s.label);
       setSearchQuery('');
-      runLiveYouTubeSearch(s.label);
+      runIntelligentDiscovery(s.label);
+      runLiveYouTubeSearch(s.label, { autoOrganize: true });
     } else {
       setSearchQuery(s.label);
-      runLiveYouTubeSearch(s.label);
-      runIntelligentDiscovery(s.label);
+      executeUnifiedDiscoverySearch(s.label, { scroll: false });
     }
     window.scrollTo({ top: 440, behavior: 'smooth' });
   };
@@ -967,12 +1081,7 @@ export const CourseMarketplacePage: React.FC = () => {
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    setIsSearchFocused(false);
-                    if (searchQuery.trim().length >= 2 || selectedChannel.trim()) {
-                      runLiveYouTubeSearch(searchQuery);
-                      runIntelligentDiscovery(searchQuery);
-                    }
-                    window.scrollTo({ top: 440, behavior: 'smooth' });
+                    executeUnifiedDiscoverySearch(searchQuery);
                   }}
                   className="relative flex gap-2"
                 >
@@ -981,6 +1090,7 @@ export const CourseMarketplacePage: React.FC = () => {
                     <input
                       type="text"
                       value={searchQuery}
+                      aria-label="Search any subject, course, degree, skill or topic"
                       onFocus={() => setIsSearchFocused(true)}
                       onChange={(e) => {
                         setSearchQuery(e.target.value);
@@ -989,7 +1099,7 @@ export const CourseMarketplacePage: React.FC = () => {
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') setIsSearchFocused(false);
                       }}
-                      placeholder="What do you want to learn today?"
+                      placeholder="Search any subject, course, degree, skill or topic..."
                       className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-slate-800/90 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 transition-all"
                     />
                     {searchQuery && (
@@ -1000,6 +1110,7 @@ export const CourseMarketplacePage: React.FC = () => {
                           setIsSearchFocused(false);
                         }}
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                        aria-label="Clear search query"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -1007,7 +1118,7 @@ export const CourseMarketplacePage: React.FC = () => {
                   </div>
                   <button
                     type="submit"
-                    className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shrink-0 cursor-pointer"
+                    className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     Search
                   </button>
@@ -1021,7 +1132,7 @@ export const CourseMarketplacePage: React.FC = () => {
                             ? 'Searching catalog index...'
                             : searchQuery.trim().length < 2
                             ? 'Popular, Recent & Recommended Courses'
-                            : 'Live Catalog Suggestions'}
+                            : 'Live Catalog & YouTube Discovery'}
                         </span>
                         <span className="text-[10px] text-slate-400 tabular-nums">
                           {searchQuery.trim().length >= 2
@@ -1050,10 +1161,9 @@ export const CourseMarketplacePage: React.FC = () => {
                                     type="button"
                                     onClick={() => {
                                       setSearchQuery(rs);
-                                      setIsSearchFocused(false);
-                                      runLiveYouTubeSearch(rs);
+                                      executeUnifiedDiscoverySearch(rs);
                                     }}
-                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] whitespace-nowrap cursor-pointer"
                                   >
                                     {rs}
                                   </button>
@@ -1073,10 +1183,9 @@ export const CourseMarketplacePage: React.FC = () => {
                                   type="button"
                                   onClick={() => {
                                     setSearchQuery(pop);
-                                    setIsSearchFocused(false);
-                                    runLiveYouTubeSearch(pop);
+                                    executeUnifiedDiscoverySearch(pop);
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-blue-950/70 hover:bg-blue-900 border border-blue-800/70 text-sky-200 text-[11px] cursor-pointer"
+                                  className="px-2.5 py-1 rounded-lg bg-blue-950/70 hover:bg-blue-900 border border-blue-800/70 text-sky-200 text-[11px] whitespace-nowrap cursor-pointer"
                                 >
                                   {pop}
                                 </button>
@@ -1087,7 +1196,7 @@ export const CourseMarketplacePage: React.FC = () => {
                           {recommendedQuickCourses.length > 0 && (
                             <div className="space-y-1">
                               <div className="text-[10px] uppercase tracking-wider font-bold text-emerald-300">
-                                Recommended Courses
+                                Recommended OpenFrame Courses
                               </div>
                               {recommendedQuickCourses.slice(0, 3).map((rc) => (
                                 <button
@@ -1107,10 +1216,27 @@ export const CourseMarketplacePage: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        <div className="p-2 space-y-1">
+                        <div className="p-2 space-y-1.5">
+                          <button
+                            type="button"
+                            onClick={() => executeUnifiedDiscoverySearch(searchQuery)}
+                            className="w-full px-3 py-2.5 rounded-xl bg-gradient-to-r from-cyan-900/90 to-indigo-900/90 hover:from-cyan-800 hover:to-indigo-800 border border-cyan-500/40 text-left flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Tv className="w-4 h-4 text-rose-300 shrink-0" />
+                              <span className="font-bold text-white truncate text-xs">
+                                Search Live YouTube + Organize with Quinn AI for &ldquo;{searchQuery.trim()}&rdquo;
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold text-cyan-300 whitespace-nowrap shrink-0 flex items-center gap-1">
+                              <span>Run</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </span>
+                          </button>
+
                           {autocompleteSuggestions.length === 0 && !isAutocompleting ? (
                             <div className="p-3 text-slate-400 text-center text-[11px]">
-                              Press Enter or click Search to run live YouTube + catalog search for &ldquo;{searchQuery}&rdquo;
+                              Press Enter or click above to search Recommended Courses, Live YouTube &amp; Quinn AI Modules for &ldquo;{searchQuery}&rdquo;
                             </div>
                           ) : (
                             autocompleteSuggestions.map((s, idx) => (
@@ -1170,7 +1296,7 @@ export const CourseMarketplacePage: React.FC = () => {
                         <Link
                           to="/chatbot"
                           onClick={() => setIsSearchFocused(false)}
-                          className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] flex items-center gap-1 shrink-0"
+                          className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] flex items-center gap-1 whitespace-nowrap shrink-0"
                         >
                           <span>Ask Quinn AI</span>
                           <ArrowRight className="w-3 h-3" />
@@ -1193,15 +1319,15 @@ export const CourseMarketplacePage: React.FC = () => {
                         if (chip === 'Hindi') {
                           setSelectedLanguage('Hindi');
                           setSearchQuery('');
-                          if (searchQuery.trim()) runLiveYouTubeSearch(searchQuery, { languageOverride: 'Hindi' });
+                          if (searchQuery.trim()) {
+                            runLiveYouTubeSearch(searchQuery, { languageOverride: 'Hindi', autoOrganize: true });
+                          }
                         } else {
                           setSearchQuery(chip);
-                          setIsSearchFocused(false);
-                          runLiveYouTubeSearch(chip);
-                          runIntelligentDiscovery(chip);
+                          executeUnifiedDiscoverySearch(chip);
                         }
                       }}
-                      className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-cyan-950 text-slate-300 hover:text-cyan-300 border border-slate-700 hover:border-cyan-500/50 transition-colors text-[10px] cursor-pointer"
+                      className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-cyan-950 text-slate-300 hover:text-cyan-300 border border-slate-700 hover:border-cyan-500/50 transition-colors text-[10px] whitespace-nowrap cursor-pointer"
                     >
                       {chip}
                     </button>
@@ -1390,7 +1516,7 @@ export const CourseMarketplacePage: React.FC = () => {
                 <option value="All">All Degrees &amp; Classes</option>
                 {(selectedEducationLevel !== 'All'
                   ? getAllProgrammesForCategory(selectedEducationLevel)
-                  : EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))
+                  : Array.from(new Set(EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))))
                 )
                   .slice(0, 80)
                   .map((prog) => (
@@ -1853,8 +1979,7 @@ export const CourseMarketplacePage: React.FC = () => {
                               onClick={() => {
                                 setSearchQuery(sk);
                                 setUnifiedViewTab('all_results');
-                                runLiveYouTubeSearch(sk);
-                                runIntelligentDiscovery(sk);
+                                executeUnifiedDiscoverySearch(sk);
                               }}
                               className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold cursor-pointer"
                             >
@@ -2033,8 +2158,7 @@ export const CourseMarketplacePage: React.FC = () => {
                         const qStr = uc.featuredQueries[0] || uc.name;
                         setSelectedGroup(uc.domainGroup);
                         setSearchQuery(qStr);
-                        runLiveYouTubeSearch(qStr);
-                        runIntelligentDiscovery(qStr);
+                        executeUnifiedDiscoverySearch(qStr, { scroll: false });
                       }}
                       className={`px-3 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                         isActive
@@ -2082,6 +2206,68 @@ export const CourseMarketplacePage: React.FC = () => {
               </div>
             )}
 
+            {/* Recommended OpenFrame Courses Strip (Displayed on arrival before intent search takes over) */}
+            {!discoveryResult && recommendedQuickCourses.length > 0 && unifiedViewTab !== 'youtube_videos' && (
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                      Recommended OpenFrame Courses
+                    </div>
+                    <h2 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
+                      Enrollable Catalog Programmes with Guided Syllabi &amp; Certification
+                    </h2>
+                  </div>
+                  <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap shrink-0">
+                    {recommendedQuickCourses.length} featured picks
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                  {recommendedQuickCourses.slice(0, 4).map((rc) => (
+                    <div
+                      key={rc.id}
+                      className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 flex flex-col justify-between gap-3"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                          <span className="font-semibold text-blue-700 truncate">{rc.category}</span>
+                          <span className="font-bold text-slate-900 tabular-nums shrink-0">
+                            {rc.price > 0 ? `₹${rc.price.toLocaleString()}` : 'Free'}
+                          </span>
+                        </div>
+                        <Link
+                          to={`/marketplace/${rc.id}`}
+                          className="font-bold text-xs text-slate-900 hover:text-blue-700 line-clamp-2 block leading-snug"
+                        >
+                          {rc.title}
+                        </Link>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 truncate">
+                          <span>{rc.level}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="tabular-nums">{rc.duration}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setEnrollModalCourse(rc)}
+                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          Enroll Now
+                        </button>
+                        <Link
+                          to={`/marketplace/${rc.id}`}
+                          className="py-1.5 px-2.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-[11px] font-semibold whitespace-nowrap shrink-0"
+                        >
+                          Details
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* AI Course Organizer Collapsible Studio Panel */}
             <div className="bg-white rounded-2xl border border-indigo-200 shadow-xs overflow-hidden">
               <div className="p-4 sm:p-5 bg-gradient-to-r from-indigo-50/80 via-blue-50/70 to-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2091,10 +2277,10 @@ export const CourseMarketplacePage: React.FC = () => {
                     <span>Quinn AI Course Organizer</span>
                   </div>
                   <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                    Structure &ldquo;{searchQuery.trim() || selectedCategory !== 'All' ? (searchQuery.trim() || selectedCategory) : 'Any Topic'}&rdquo; into a {aiModuleCount}-Module Course Path
+                    Structure &ldquo;{searchQuery.trim() || activeYouTubeQuery || (selectedCategory !== 'All' ? selectedCategory : 'Any Topic')}&rdquo; into a {aiModuleCount}-Module Course Path
                   </h3>
                   <p className="text-xs text-slate-600">
-                    Organize discovered videos into Beginner, Intermediate, and Advanced modules with exercises and a mini-quiz.
+                    Organize live YouTube tutorials into Beginner, Intermediate, and Advanced modules with direct on-site video playback, exercises, and a mini-quiz.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -2103,8 +2289,13 @@ export const CourseMarketplacePage: React.FC = () => {
                       <button
                         key={cnt}
                         type="button"
-                        onClick={() => setAiModuleCount(cnt)}
-                        className={`px-2.5 py-1 rounded-lg cursor-pointer transition-colors ${
+                        onClick={() => {
+                          setAiModuleCount(cnt);
+                          if (aiPathData || aiPathOpen || searchQuery.trim().length >= 2) {
+                            handleGenerateAiPath(cnt, liveYoutubeResults);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg whitespace-nowrap cursor-pointer transition-colors ${
                           aiModuleCount === cnt
                             ? 'bg-indigo-600 text-white'
                             : 'text-slate-700 hover:bg-indigo-50'
@@ -2118,7 +2309,7 @@ export const CourseMarketplacePage: React.FC = () => {
                     type="button"
                     onClick={() => handleGenerateAiPath()}
                     disabled={aiPathLoading}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-60"
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-amber-200" />
                     <span>{aiPathLoading ? 'Organizing...' : `Organize Into ${aiModuleCount} Modules`}</span>
@@ -2139,83 +2330,182 @@ export const CourseMarketplacePage: React.FC = () => {
               {aiPathOpen && (
                 <div className="p-5 border-t border-indigo-100 space-y-4">
                   {aiPathLoading ? (
-                    <div className="py-6 text-center text-xs text-slate-500">
-                      Structuring curriculum modules &amp; exercises using available metadata...
+                    <div className="py-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                      <span>Quinn AI is organizing live YouTube videos into structured syllabus modules &amp; exercises...</span>
                     </div>
-                  ) : aiPathData ? (
-                    <>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div>
-                          <h4 className="font-bold text-base text-slate-900">{aiPathData.title}</h4>
-                          <p className="text-xs text-slate-600 mt-0.5">{aiPathData.overview}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleSaveAiPath}
-                          disabled={savingAiPath}
-                          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shrink-0 cursor-pointer"
-                        >
-                          {savingAiPath ? 'Saving...' : 'Save Learning Path'}
-                        </button>
-                      </div>
+                  ) : aiPathData ? (() => {
+                    const combinedVideoPool = [
+                      ...liveYoutubeResults,
+                      ...(discoveryResult?.youtubeResources || []),
+                    ];
+                    const findVideoById = (vidId: string) =>
+                      combinedVideoPool.find(
+                        (v) => v.videoId === vidId || v.youtubeId === vidId || v.id === vidId
+                      );
+                    const organizedVideos: ExtendedYouTubeVideo[] = [];
+                    const seenOrganized = new Set<string>();
+                    (aiPathData.modules || []).forEach((mod) => {
+                      (mod.videoIds || []).forEach((vidId) => {
+                        const raw = findVideoById(vidId);
+                        if (raw) {
+                          const key = raw.videoId || raw.youtubeId || raw.id;
+                          if (key && !seenOrganized.has(key)) {
+                            seenOrganized.add(key);
+                            organizedVideos.push(mapLiveYoutubeToExtended(raw, aiPathData.topic));
+                          }
+                        }
+                      });
+                    });
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {(aiPathData.modules || []).map((mod, mIdx) => (
-                          <div key={mIdx} className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="font-bold text-indigo-700 uppercase">Module {mIdx + 1} · {mod.level}</span>
-                              <span className="text-slate-500">Module #{mod.moduleNumber || mIdx + 1}</span>
-                            </div>
-                            <div className="text-sm font-bold text-slate-900">{mod.title}</div>
-                            <p className="text-xs text-slate-600">{mod.summary}</p>
-                            {Array.isArray(mod.objectives) && mod.objectives.length > 0 && (
-                              <ul className="space-y-1 pt-1 text-[11px] text-slate-700">
-                                {mod.objectives.slice(0, 3).map((obj, oIdx) => (
-                                  <li key={oIdx} className="flex items-start gap-1.5">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                                    <span>{obj}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {Array.isArray(mod.practiceExercises) && mod.practiceExercises.length > 0 && (
-                              <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700">
-                                <strong className="text-slate-900">Exercise:</strong> {mod.practiceExercises[0]}
-                              </div>
-                            )}
+                    return (
+                      <>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <h4 className="font-bold text-base text-slate-900">{aiPathData.title}</h4>
+                            <p className="text-xs text-slate-600 mt-0.5">{aiPathData.overview}</p>
                           </div>
-                        ))}
-                      </div>
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            {organizedVideos.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedVideo(organizedVideos[0]);
+                                  setVideoPlaylist(organizedVideos);
+                                  setIsVideoModalOpen(true);
+                                }}
+                                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                              >
+                                <Play className="w-3.5 h-3.5 fill-current" />
+                                <span>Watch Module Playlist ({organizedVideos.length})</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={handleSaveAiPath}
+                              disabled={savingAiPath}
+                              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                            >
+                              {savingAiPath ? 'Saving...' : 'Save Learning Path'}
+                            </button>
+                          </div>
+                        </div>
 
-                      {aiPathData.modules?.some((m) => Boolean(m.miniQuizQuestion)) && (
-                        <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 space-y-2">
-                          <div className="text-xs font-bold text-amber-900">Self-Check Mini-Quiz Questions</div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                            {aiPathData.modules
-                              .filter((m) => m.miniQuizQuestion)
-                              .map((m, qi) => (
-                                <div key={qi} className="p-3 rounded-lg bg-white border border-amber-200/80">
-                                  <div className="font-semibold text-slate-900">{qi + 1}. {m.miniQuizQuestion!.question}</div>
-                                  <div className="text-[11px] text-emerald-700 mt-1">
-                                    Answer: {m.miniQuizQuestion!.correctAnswer}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {(aiPathData.modules || []).map((mod, mIdx) => {
+                            const modVideos = (mod.videoIds || [])
+                              .map((vidId) => findVideoById(vidId))
+                              .filter(Boolean);
+
+                            return (
+                              <div key={mIdx} className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between gap-3">
+                                <div className="space-y-2.5">
+                                  <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
+                                    <span className="font-bold text-indigo-700 uppercase">
+                                      Module {String(mIdx + 1).padStart(2, '0')} · {mod.level}
+                                    </span>
+                                    <span>#{mod.moduleNumber || mIdx + 1}</span>
                                   </div>
+                                  <div className="text-sm font-bold text-slate-900 leading-snug">{mod.title}</div>
+                                  <p className="text-xs text-slate-600">{mod.summary}</p>
+                                  {Array.isArray(mod.objectives) && mod.objectives.length > 0 && (
+                                    <ul className="space-y-1 pt-1 text-[11px] text-slate-700">
+                                      {mod.objectives.slice(0, 3).map((obj, oIdx) => (
+                                        <li key={oIdx} className="flex items-start gap-1.5">
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                                          <span>{obj}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {Array.isArray(mod.practiceExercises) && mod.practiceExercises.length > 0 && (
+                                    <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-700">
+                                      <strong className="text-slate-900">Exercise:</strong> {mod.practiceExercises[0]}
+                                    </div>
+                                  )}
                                 </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
 
-                      <div className="text-[11px] text-slate-500 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
-                        {aiPathData.aiDisclaimer || 'AI-generated study path grounded strictly on available topic and video metadata.'}
-                      </div>
-                    </>
-                  ) : null}
+                                {modVideos.length > 0 && (
+                                  <div className="pt-2.5 border-t border-slate-200 space-y-2">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-rose-700">
+                                      Assigned YouTube Lectures ({modVideos.length})
+                                    </div>
+                                    {modVideos.map((mv: any) => {
+                                      const mvId = mv.videoId || mv.youtubeId || mv.id;
+                                      const mvThumb = mv.thumbnail || mv.thumbnailUrl || `https://i.ytimg.com/vi/${mvId}/hqdefault.jpg`;
+                                      return (
+                                        <div
+                                          key={mvId}
+                                          className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-slate-200"
+                                        >
+                                          <img
+                                            src={mvThumb}
+                                            alt={mv.title}
+                                            referrerPolicy="no-referrer"
+                                            className="w-16 h-10 rounded object-cover shrink-0 bg-slate-900"
+                                          />
+                                          <div className="min-w-0 flex-1">
+                                            <div className="text-[11px] font-semibold text-slate-900 line-clamp-1">
+                                              {mv.title}
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 truncate">
+                                              {mv.channelTitle} · {mv.duration || 'Tutorial'}
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const ext = mapLiveYoutubeToExtended(mv, aiPathData.topic);
+                                              setSelectedVideo(ext);
+                                              setVideoPlaylist(organizedVideos.length > 0 ? organizedVideos : [ext]);
+                                              setIsVideoModalOpen(true);
+                                            }}
+                                            className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Play className="w-2.5 h-2.5 fill-current" />
+                                            <span>Watch</span>
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {aiPathData.modules?.some((m) => Boolean(m.miniQuizQuestion)) && (
+                          <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 space-y-2">
+                            <div className="text-xs font-bold text-amber-900">Self-Check Mini-Quiz Questions</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                              {aiPathData.modules
+                                .filter((m) => m.miniQuizQuestion)
+                                .map((m, qi) => (
+                                  <div key={qi} className="p-3 rounded-lg bg-white border border-amber-200/80">
+                                    <div className="font-semibold text-slate-900">{qi + 1}. {m.miniQuizQuestion!.question}</div>
+                                    <div className="text-[11px] text-emerald-700 mt-1">
+                                      Answer: {m.miniQuizQuestion!.correctAnswer}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="text-[11px] text-slate-500 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                          {aiPathData.aiDisclaimer || 'AI-generated study path grounded strictly on available topic and video metadata.'}
+                        </div>
+                      </>
+                    );
+                  })() : null}
                 </div>
               )}
             </div>
 
-            {/* Live YouTube Discovery Section (Official YouTube Data API v3 — explicit triggers only) */}
-            {(activeYouTubeQuery || liveYoutubeResults.length > 0 || searchQuery.trim().length >= 3) && (
+            {/* Live YouTube Discovery Section (Official YouTube Data API v3 — initial cached load + explicit search triggers) */}
+            {(activeYouTubeQuery || liveYoutubeResults.length > 0 || searchQuery.trim().length >= 3) &&
+              (unifiedViewTab === 'all_results' || unifiedViewTab === 'youtube_videos') && (
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
@@ -2230,14 +2520,16 @@ export const CourseMarketplacePage: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {(searchQuery.trim().length >= 2 || selectedChannel.trim()) && (
+                    {(searchQuery.trim().length >= 2 || activeYouTubeQuery.trim().length >= 2 || selectedChannel.trim()) && (
                       <button
                         type="button"
-                        onClick={() => runLiveYouTubeSearch(searchQuery)}
+                        onClick={() =>
+                          runLiveYouTubeSearch(searchQuery.trim() || activeYouTubeQuery, { autoOrganize: true })
+                        }
                         disabled={liveYoutubeLoading}
-                        className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                        className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold whitespace-nowrap cursor-pointer disabled:opacity-50"
                       >
-                        {liveYoutubeLoading ? 'Searching...' : activeYouTubeQuery ? 'Refresh YouTube' : 'Search YouTube Now'}
+                        {liveYoutubeLoading ? 'Searching...' : activeYouTubeQuery ? 'Refresh + Re-Organize' : 'Search YouTube Now'}
                       </button>
                     )}
                     <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
@@ -2257,7 +2549,7 @@ export const CourseMarketplacePage: React.FC = () => {
                     <span>{liveYoutubeError}</span>
                     <button
                       type="button"
-                      onClick={() => runLiveYouTubeSearch(activeYouTubeQuery || searchQuery)}
+                      onClick={() => runLiveYouTubeSearch(activeYouTubeQuery || searchQuery, { autoOrganize: true })}
                       className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold shrink-0 cursor-pointer"
                     >
                       Retry YouTube Search
@@ -2289,6 +2581,7 @@ export const CourseMarketplacePage: React.FC = () => {
                                 <img
                                   src={yt.thumbnail || yt.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`}
                                   alt={yt.title}
+                                  referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover"
                                 />
                                 <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[10px] font-bold">
@@ -2304,7 +2597,12 @@ export const CourseMarketplacePage: React.FC = () => {
                                 <h4 className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">{yt.title}</h4>
                                 <div className="flex items-center gap-2 text-[11px] text-slate-600">
                                   {yt.channelThumbnail && (
-                                    <img src={yt.channelThumbnail} alt={yt.channelTitle} className="w-4 h-4 rounded-full object-cover shrink-0" />
+                                    <img
+                                      src={yt.channelThumbnail}
+                                      alt={yt.channelTitle}
+                                      referrerPolicy="no-referrer"
+                                      className="w-4 h-4 rounded-full object-cover shrink-0"
+                                    />
                                   )}
                                   <span className="truncate font-medium">{yt.channelTitle}</span>
                                 </div>
@@ -2318,26 +2616,15 @@ export const CourseMarketplacePage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const ext: ExtendedYouTubeVideo = {
-                                    id: yt.id || `yt-${vidId}`,
-                                    videoId: vidId,
-                                    youtubeId: vidId,
-                                    title: yt.title,
-                                    channelTitle: yt.channelTitle,
-                                    thumbnail: yt.thumbnail || yt.thumbnailUrl,
-                                    thumbnailUrl: yt.thumbnailUrl || yt.thumbnail,
-                                    duration: yt.duration || 'Tutorial',
-                                    level: yt.level === 'Advanced' ? 'Advanced' : yt.level === 'Intermediate' ? 'Intermediate' : 'Beginner',
-                                    subjectCategory: selectedCategory !== 'All' ? selectedCategory : 'OpenFrame Discovery',
-                                    recommendedReason: yt.recommendedReason || 'Discovered via OpenFrame YouTube Search',
-                                    embedUrl: yt.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
-                                    keyTopicsCovered: [searchQuery.trim() || yt.title],
-                                  };
+                                  const fullPlaylist = liveYoutubeResults.map((item) =>
+                                    mapLiveYoutubeToExtended(item, activeYouTubeQuery || searchQuery.trim())
+                                  );
+                                  const ext = mapLiveYoutubeToExtended(yt, activeYouTubeQuery || searchQuery.trim());
                                   setSelectedVideo(ext);
-                                  setVideoPlaylist([ext]);
+                                  setVideoPlaylist(fullPlaylist.length > 0 ? fullPlaylist : [ext]);
                                   setIsVideoModalOpen(true);
                                 }}
-                                className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 whitespace-nowrap cursor-pointer"
                               >
                                 <Play className="w-3 h-3 fill-current" />
                                 <span>Play Lesson</span>
@@ -2823,7 +3110,7 @@ export const CourseMarketplacePage: React.FC = () => {
                   <option value="All">All Degrees &amp; Classes</option>
                   {(selectedEducationLevel !== 'All'
                     ? getAllProgrammesForCategory(selectedEducationLevel)
-                    : EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))
+                    : Array.from(new Set(EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))))
                   )
                     .slice(0, 80)
                     .map((prog) => (

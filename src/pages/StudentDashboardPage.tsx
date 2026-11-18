@@ -1212,7 +1212,7 @@ export const StudentDashboardPage: React.FC = () => {
                         <option value="">Select or customize below</option>
                         {(profileForm.educationLevel
                           ? getAllProgrammesForCategory(profileForm.educationLevel)
-                          : EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))
+                          : Array.from(new Set(EDUCATION_CLASSIFICATION_CATEGORIES.flatMap((c) => getAllProgrammesForCategory(c.code))))
                         )
                           .slice(0, 80)
                           .map((deg) => (

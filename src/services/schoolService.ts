@@ -99,6 +99,67 @@ export function computeBoardGrade(
   };
 }
 
+const VALID_SCHOOL_LANGUAGES: SchoolLanguage[] = [
+  'English',
+  'Kannada',
+  'Hindi',
+  'Tamil',
+  'Telugu',
+  'Malayalam',
+  'Marathi',
+  'Gujarati',
+  'Bengali',
+  'Odia',
+  'Punjabi',
+  'Assamese',
+  'Urdu',
+  'Sanskrit',
+];
+
+export function isSchoolQualificationLabel(label?: string | null): boolean {
+  if (!label) return false;
+  const norm = label.toLowerCase();
+  return (
+    norm.includes('lkg') ||
+    norm.includes('ukg') ||
+    norm.includes('nursery') ||
+    norm.includes('kindergarten') ||
+    norm.includes('primary school') ||
+    norm.includes('middle school') ||
+    norm.includes('secondary school') ||
+    norm.includes('higher secondary') ||
+    norm.includes('class ') ||
+    norm.includes('classes ') ||
+    norm.includes('puc') ||
+    norm.includes('10th') ||
+    norm.includes('12th')
+  );
+}
+
+export function inferClassIdFromQualification(label?: string | null): SchoolClassId {
+  const norm = (label || '').toLowerCase();
+  if (norm.includes('lkg') || norm.includes('nursery')) return 'LKG';
+  if (norm.includes('ukg') || norm.includes('kindergarten')) return 'UKG';
+  const match = norm.match(/class(?:es)?\s*(\d{1,2})/);
+  if (match) {
+    const num = Number(match[1]);
+    if (num >= 1 && num <= 12) return String(num) as SchoolClassId;
+  }
+  if (norm.includes('primary')) return '5';
+  if (norm.includes('middle')) return '8';
+  if (norm.includes('higher secondary') || norm.includes('puc') || norm.includes('12th')) return '11';
+  if (norm.includes('secondary') || norm.includes('10th')) return '10';
+  return '8';
+}
+
+export function toValidSchoolLanguage(lang?: string | null): SchoolLanguage {
+  const clean = (lang || '').split('(')[0].trim();
+  const matched = VALID_SCHOOL_LANGUAGES.find(
+    (item) => item.toLowerCase() === clean.toLowerCase()
+  );
+  return matched || 'English';
+}
+
 // ====================================================
 // ALL-INDIA EDUCATION BOARD DIRECTORY (41+ BOARDS)
 // ====================================================

@@ -106,23 +106,17 @@ export const GlobalChatbotWidget: React.FC = () => {
       {!isOpen && (
         <div className="fixed bottom-5 right-5 z-40 flex items-center group">
           <button
+            type="button"
             onClick={() => setIsOpen(true)}
-            className="flex items-center space-x-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-xs shadow-2xl shadow-cyan-500/30 hover:scale-105 active:scale-95 transition-all duration-300 border border-white/20 cursor-pointer"
+            className="w-11 h-11 rounded-full p-2 flex items-center justify-center bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white shadow-lg shadow-cyan-500/25 hover:scale-105 active:scale-95 transition-all duration-200 border border-white/25 cursor-pointer"
             aria-label="Open Quinn AI Chatbot"
+            title="Ask Quinn AI"
           >
-            <div className="relative">
-              <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
-                <Brain className="w-4 h-4 text-white" />
-              </div>
-            </div>
-            <div className="text-left">
-              <div className="text-[9px] uppercase font-mono tracking-wider text-cyan-200 font-semibold leading-none">
-                AI Course Tutor
-              </div>
-              <div className="text-xs font-bold leading-tight">
-                Ask Quinn AI
-              </div>
-            </div>
+            <img
+              src="/assets/aistudio/quinn-ai-logo.png"
+              alt="Quinn AI"
+              className="w-7 h-7 object-contain brightness-0 invert pointer-events-none select-none"
+            />
           </button>
         </div>
       )}

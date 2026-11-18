@@ -28,12 +28,22 @@ import { doc, setDoc } from 'firebase/firestore';
 import { storageService } from '../services/storageService';
 import {
   db,
+  formatFirebaseAuthError,
   stripUndefinedDeep,
   submitStudentRegistration,
   triggerAdminNotification,
   registerPortalAccountWithEmail,
   syncLmsUserProfile
 } from '../services/firebase';
+import { useAuth } from '../context/AuthContext';
+import {
+  inferClassIdFromQualification,
+  isSchoolQualificationLabel,
+  saveSchoolEnrollment,
+  toValidSchoolLanguage,
+} from '../services/schoolService';
+import { SCHOOL_ACADEMIC_YEARS, SCHOOL_BOARDS } from '../data/schoolCurriculumData';
+import { SchoolBoardId } from '../types';
 import { lmsService } from '../services/lmsService';
 import { initialEducationCourses } from '../data/initialData';
 import { UNIVERSAL_12_CATEGORIES, SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../utils/searchIntelligence';
@@ -82,6 +92,7 @@ const QUALIFICATION_LEVELS = [
 
 export const StudentRegistrationPage: React.FC = () => {
   const { currentPath, navigate } = useRouter();
+  const { currentUser, lmsUser, authorizedDashboardPath, loading: authLoading, refreshUserProfile } = useAuth();
 
   // Extract query course if present
   const getPreselectedCourse = (): string => {
@@ -138,6 +149,7 @@ export const StudentRegistrationPage: React.FC = () => {
   const [gpsStatus, setGpsStatus] = useState<string>('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [schoolBoardId, setSchoolBoardId] = useState<SchoolBoardId>('CBSE');
   const [registeredEntry, setRegisteredEntry] = useState<{
     id: string;
     fullName: string;
@@ -145,7 +157,16 @@ export const StudentRegistrationPage: React.FC = () => {
     registeredAt: string;
     portalActivated?: boolean;
     verificationEmailSent?: boolean;
+    isSchoolTrack?: boolean;
   } | null>(null);
+
+  // Already logged-in & registered learners should not see the registration form repeatedly
+  useEffect(() => {
+    if (authLoading || isSubmitting || registeredEntry) return;
+    if (currentUser && lmsUser && !currentPath.includes('force=1')) {
+      navigate(authorizedDashboardPath);
+    }
+  }, [authLoading, currentUser, lmsUser, isSubmitting, registeredEntry, currentPath, authorizedDashboardPath, navigate]);
 
   useEffect(() => {
     fetch('/api/auth/verification-status')
@@ -350,7 +371,7 @@ export const StudentRegistrationPage: React.FC = () => {
         fullName: formData.fullName.trim(),
         mobileNumber: formData.mobileNumber.trim(),
         whatsappNumber: formData.whatsappNumber.trim() || formData.mobileNumber.trim(),
-        emailAddress: formData.emailAddress.trim(),
+        emailAddress: formData.emailAddress.trim().toLowerCase(),
         dob: formData.dob,
         gender: formData.gender || undefined,
         profilePhotoUrl: formData.profilePhotoUrl.trim() || undefined,
@@ -423,9 +444,37 @@ export const StudentRegistrationPage: React.FC = () => {
           ).catch(() => {});
           portalActivated = true;
           verificationEmailSent = true;
+
+          if (isSchoolQualificationLabel(payload.currentClassQualification)) {
+            await saveSchoolEnrollment({
+              studentUid: authUser.uid,
+              studentName: payload.fullName,
+              studentEmail: payload.emailAddress,
+              boardId: schoolBoardId,
+              classId: inferClassIdFromQualification(payload.currentClassQualification),
+              academicYear: SCHOOL_ACADEMIC_YEARS[0],
+              medium: 'English Medium',
+              stream: 'General',
+              preferredLanguage: toValidSchoolLanguage(payload.preferredLanguage),
+              parentalConsentGiven: isMinor ? Boolean(payload.guardianConsentAccepted) : true,
+              parentEmail: payload.parentEmail,
+              parentName: payload.parentName,
+              xpPoints: 25,
+              streakDays: 1,
+              badges: ['School Explorer'],
+              totalLearningMinutes: 0,
+              lastActiveDate: new Date().toISOString().slice(0, 10),
+            }).catch(() => {});
+          }
+          await refreshUserProfile('student').catch(() => {});
         } catch (authErr: any) {
           if (authErr?.code === 'auth/email-already-in-use') {
             setErrors({ portalPassword: 'An account already exists with this email. Uncheck portal creation or sign in after registration.' });
+            setIsSubmitting(false);
+            return;
+          }
+          if (authErr?.code === 'auth/operation-not-allowed') {
+            setErrors({ portalPassword: formatFirebaseAuthError(authErr, 'register') + ' You may uncheck instant password activation below and sign in with Google after submitting.' });
             setIsSubmitting(false);
             return;
           }
@@ -456,6 +505,7 @@ export const StudentRegistrationPage: React.FC = () => {
         console.warn('Firestore student registration async notice:', err);
       }
 
+      const isSchoolTrack = isSchoolQualificationLabel(payload.currentClassQualification);
       setIsSubmitting(false);
       setRegisteredEntry({
         id: created.id,
@@ -464,6 +514,7 @@ export const StudentRegistrationPage: React.FC = () => {
         registeredAt: created.registeredAt,
         portalActivated,
         verificationEmailSent,
+        isSchoolTrack,
       });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch {
@@ -527,11 +578,23 @@ export const StudentRegistrationPage: React.FC = () => {
               <span>Print Registration Slip</span>
             </button>
             <Link
-              to={registeredEntry.portalActivated ? '/student/dashboard' : '/marketplace'}
+              to={
+                registeredEntry.portalActivated
+                  ? registeredEntry.isSchoolTrack
+                    ? '/school?tab=daily'
+                    : '/student/dashboard'
+                  : '/marketplace'
+              }
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider transition-colors shadow-sm"
             >
               <GraduationCap className="w-4 h-4" />
-              <span>{registeredEntry.portalActivated ? 'Go to Student Dashboard' : 'Explore Courses'}</span>
+              <span>
+                {registeredEntry.portalActivated
+                  ? registeredEntry.isSchoolTrack
+                    ? "Open Today's Daily Classes"
+                    : 'Go to Student Dashboard'
+                  : 'Explore Courses'}
+              </span>
             </Link>
           </div>
           {registeredEntry.verificationEmailSent && (
@@ -969,6 +1032,25 @@ export const StudentRegistrationPage: React.FC = () => {
                       ))}
                     </select>
                   </div>
+
+                  {isSchoolQualificationLabel(formData.currentClassQualification) && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        School Education Board (LKG–12th)
+                      </label>
+                      <select
+                        value={schoolBoardId}
+                        onChange={(e) => setSchoolBoardId(e.target.value as SchoolBoardId)}
+                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {SCHOOL_BOARDS.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.shortName} — {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1.5">
