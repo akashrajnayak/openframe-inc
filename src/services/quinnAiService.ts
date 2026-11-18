@@ -239,21 +239,20 @@ export class QuinnAiService {
     language?: string;
     videos?: any[];
     moduleCount?: number;
+    mode?: 'builtin' | 'gemini';
   }): Promise<AiLearningPath | null> {
-    try {
-      const res = await fetch('/api/quinn/organize-course', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.path) return data.path as AiLearningPath;
-      }
-    } catch (err) {
-      console.warn('AI Course Organizer fallback warning:', err);
+    const res = await fetch('/api/quinn/organize-course', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(
+        data?.error || 'Unable to organize learning path right now. Please try again.'
+      );
     }
-    return null;
+    return data?.path ? (data.path as AiLearningPath) : null;
   }
 
   async generateLessonSummary(params: {

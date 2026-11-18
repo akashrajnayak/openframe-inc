@@ -26,6 +26,8 @@ import {
   detectQueryLanguage,
   normalizeAndExpandQuery,
   parseEducationalIntent,
+  scoreSearchMatch,
+  matchesWordBoundary,
 } from './src/utils/searchIntelligence';
 import { EDUCATION_CATEGORY_BY_CODE } from './src/data/educationClassificationData';
 import type {
@@ -100,9 +102,70 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 3000);
 const MODEL_TEXT = 'gemini-4-hydrogen';
 
+let geminiQuotaExhaustedUntilMs = 0;
+const organizeCourseCache = new Map<string, { ts: number; path: any }>();
+const ORGANIZE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+function extractGeminiRetrySeconds(err: any): number {
+  const msg = typeof err?.message === 'string' ? err.message : JSON.stringify(err || '');
+  const retryDelayMatch = msg.match(/"retryDelay"\s*:\s*"(\d+)s"/i);
+  if (retryDelayMatch?.[1]) {
+    return Math.min(3600, Math.max(60, Number(retryDelayMatch[1])));
+  }
+  return 900;
+}
+
+function classifyGeminiError(err: any): {
+  status: number;
+  errorCode: string;
+  message: string;
+  retryAfterSeconds?: number;
+} {
+  const raw = typeof err?.message === 'string' ? err.message : JSON.stringify(err || '');
+  const lower = raw.toLowerCase();
+  const httpStatus = Number(err?.status || err?.code || 0);
+
+  if (httpStatus === 429 || lower.includes('resource_exhausted') || lower.includes('quota')) {
+    const retryAfterSeconds = extractGeminiRetrySeconds(err);
+    geminiQuotaExhaustedUntilMs = Date.now() + retryAfterSeconds * 1000;
+    return {
+      status: 429,
+      errorCode: 'RESOURCE_EXHAUSTED',
+      retryAfterSeconds,
+      message:
+        'Gemini API daily free-tier quota has been reached. Use Settings > Secrets to select a billing-enabled API key for higher limits, or try again after the quota resets.',
+    };
+  }
+
+  if (httpStatus === 400 || httpStatus === 401 || httpStatus === 403 || lower.includes('api_key_invalid') || lower.includes('permission_denied')) {
+    return {
+      status: httpStatus === 400 ? 400 : 403,
+      errorCode: 'GEMINI_AUTH_ERROR',
+      message: 'Gemini API authentication failed. Please verify the API key in Settings > Secrets.',
+    };
+  }
+
+  if (httpStatus === 404 || lower.includes('not_found')) {
+    return {
+      status: 404,
+      errorCode: 'MODEL_NOT_FOUND',
+      message: `Requested Gemini model (${MODEL_TEXT}) is unavailable.`,
+    };
+  }
+
+  return {
+    status: 502,
+    errorCode: 'GEMINI_UPSTREAM_ERROR',
+    message: 'Unable to complete Gemini request right now. Please try again shortly.',
+  };
+}
+
 function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  if (Date.now() < geminiQuotaExhaustedUntilMs) {
     return null;
   }
   return new GoogleGenAI({
@@ -137,6 +200,7 @@ async function withGeminiTimeout<T>(
     return result;
   } catch (err) {
     trackGeminiCall(label, true);
+    classifyGeminiError(err);
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
@@ -385,39 +449,106 @@ const VERIFIED_EDUCATIONAL_VIDEO_POOL: CuratedVideoSeed[] = [
     subject: 'research methodology phd postgraduate doctoral academic writing thesis mba msc',
     recommendedReason: 'Covers research design, sampling methods, data collection validity, and peer-reviewed academic writing standards.',
   },
+  {
+    id: 'yt-excel-1',
+    videoId: 'wbJcJCkBcMg',
+    title: 'Microsoft Excel for Beginners — Complete Course from Scratch',
+    channelTitle: 'Kevin Stratvert / OpenFrame Curated',
+    duration: '54:20',
+    level: 'Beginner',
+    subject: 'microsoft excel spreadsheet spreadsheets workbook cells formulas beginner tutorial',
+    recommendedReason: 'Hands-on walkthrough of Excel ribbons, data entry, formatting, basic formulas, and worksheet organization.',
+  },
+  {
+    id: 'yt-excel-2',
+    videoId: '7QNgqq154gE',
+    title: 'Complete Microsoft Excel Tutorial for Data Analysis (Formulas, VLOOKUP & Pivot Tables)',
+    channelTitle: 'Data Analytics Academy',
+    duration: '4:00:00',
+    level: 'Intermediate',
+    subject: 'microsoft excel data analysis vlookup xlookup formulas pivot tables spreadsheet analytics',
+    recommendedReason: 'Covers IF, SUMIFS, XLOOKUP/VLOOKUP, PivotTables, and cleaning business datasets in Excel.',
+  },
+  {
+    id: 'yt-excel-3',
+    videoId: 'WV6X0rol5To',
+    title: 'How to Build Interactive Dashboards & Reports in Microsoft Excel',
+    channelTitle: 'Excel BI & Reporting',
+    duration: '38:15',
+    level: 'Advanced',
+    subject: 'microsoft excel dashboard dashboards pivot charts slicers reporting kpi',
+    recommendedReason: 'Teaches end-to-end KPI dashboard architecture, dynamic PivotCharts, and executive reporting.',
+  },
+  {
+    id: 'yt-web-build-1',
+    videoId: '-W9F__D3oY4',
+    title: 'How to Build a Website from Scratch — Complete HTML5 & CSS3 Course',
+    channelTitle: 'freeCodeCamp / Web Mastery',
+    duration: '2:30:00',
+    level: 'Beginner',
+    subject: 'how to build a website create website web development html css webpage beginner',
+    recommendedReason: 'Step-by-step tutorial on building your first responsive website with clean HTML5 semantics and CSS3 layout.',
+  },
+  {
+    id: 'yt-web-build-2',
+    videoId: 'l1EssrLxt7E',
+    title: 'Responsive Website Design & Flexbox/Grid Architecture Complete Guide',
+    channelTitle: 'Web Dev Simplified / Curated',
+    duration: '1:45:00',
+    level: 'Intermediate',
+    subject: 'website design responsive layout flexbox grid web development build website',
+    recommendedReason: 'Demonstrates mobile-first grids, navigation bars, landing page sections, and modern styling workflows.',
+  },
+  {
+    id: 'yt-web-build-3',
+    videoId: 'tVzUXW6siu0',
+    title: 'Modern Website Engineering: Tailwind CSS, JavaScript & Production Launch',
+    channelTitle: 'Frontend Engineering Lab',
+    duration: '2:10:00',
+    level: 'Advanced',
+    subject: 'website full stack frontend tailwind javascript deploy hosting seo build website',
+    recommendedReason: 'Guides learners from component styling and interactive JavaScript to deploying a live website.',
+  },
 ];
 
 function selectCuratedFallbackVideos(queryText: string, category = ''): any[] {
-  const needle = `${queryText} ${category}`.toLowerCase();
-  const terms = needle.split(/\s+/).filter((w) => w.length > 2);
-
+  const combinedQuery = `${queryText} ${category}`.trim();
   const scored = VERIFIED_EDUCATIONAL_VIDEO_POOL.map((vid) => {
-    const haystack = `${vid.title} ${vid.subject} ${vid.channelTitle}`.toLowerCase();
-    let score = 0;
-    for (const t of terms) {
-      if (haystack.includes(t)) score += 2;
-    }
+    const score = combinedQuery
+      ? scoreSearchMatch(
+          {
+            title: vid.title,
+            category: vid.subject,
+            keywords: vid.subject.split(/\s+/),
+            shortDesc: vid.recommendedReason,
+            youtubeChannelName: vid.channelTitle,
+          },
+          combinedQuery
+        )
+      : 10;
     return { vid, score };
   }).sort((a, b) => b.score - a.score);
 
-  const beginner = scored.find((s) => s.vid.level === 'Beginner')?.vid || VERIFIED_EDUCATIONAL_VIDEO_POOL[0];
-  const intermediate = scored.find((s) => s.vid.level === 'Intermediate')?.vid || VERIFIED_EDUCATIONAL_VIDEO_POOL[1];
-  const advanced = scored.find((s) => s.vid.level === 'Advanced')?.vid || VERIFIED_EDUCATIONAL_VIDEO_POOL[2];
+  // If we have genuine topic matches, NEVER dilute them with unrelated AI fallback videos
+  const topicMatched = scored[0]?.score > 0 ? scored.filter((s) => s.score > 0) : scored;
 
-  const unique = [beginner, intermediate, advanced].filter(
-    (v, idx, arr) => arr.findIndex((x) => x.videoId === v.videoId) === idx
-  );
+  const beginner = topicMatched.find((s) => s.vid.level === 'Beginner')?.vid || topicMatched[0]?.vid || VERIFIED_EDUCATIONAL_VIDEO_POOL[0];
+  const intermediate = topicMatched.find((s) => s.vid.level === 'Intermediate')?.vid || topicMatched[1]?.vid || beginner;
+  const advanced = topicMatched.find((s) => s.vid.level === 'Advanced')?.vid || topicMatched[2]?.vid || intermediate;
 
-  while (unique.length < 3) {
-    const next = scored.find((s) => !unique.some((u) => u.videoId === s.vid.videoId))?.vid;
-    if (!next) break;
-    unique.push(next);
+  const unique: CuratedVideoSeed[] = [];
+  for (const cand of [beginner, intermediate, advanced, ...topicMatched.map((s) => s.vid)]) {
+    if (cand && !unique.some((u) => u.videoId === cand.videoId)) {
+      unique.push(cand);
+    }
+    if (unique.length >= 3) break;
   }
 
   return unique.map((v) => ({
     id: v.id,
     videoId: v.videoId,
     youtubeId: v.videoId,
+    youtubeUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
     title: v.title,
     channelTitle: v.channelTitle,
     thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
@@ -477,18 +608,21 @@ function normalizeLoadedCourse(raw: any): MarketplaceCourse {
   // Map synthetic yt_ai_* base catalog video entries to matched verified educational videos
   let normalizedRecVideos = recVideos;
   if (!youtubeVideoId && (recVideos.length > 0 || rawYtId)) {
-    const topicText = `${raw.title || ''} ${raw.category || ''} ${raw.subcategory || ''}`.toLowerCase();
-    const matchedSeed =
-      VERIFIED_EDUCATIONAL_VIDEO_POOL.find((seed) =>
-        seed.subject.split(' ').some((w) => w.length > 2 && topicText.includes(w))
-      ) || VERIFIED_EDUCATIONAL_VIDEO_POOL[0];
+    const topicText = `${raw.title || ''} ${raw.category || ''} ${raw.subcategory || ''}`;
+    const rankedSeeds = VERIFIED_EDUCATIONAL_VIDEO_POOL.map((seed) => ({
+      seed,
+      score: scoreSearchMatch(
+        { title: seed.title, category: seed.subject, keywords: seed.subject.split(/\s+/) },
+        topicText
+      ),
+    })).sort((a, b) => b.score - a.score);
+    const matchedSeed = (rankedSeeds[0]?.score > 0 ? rankedSeeds[0].seed : undefined) || VERIFIED_EDUCATIONAL_VIDEO_POOL[0];
     youtubeVideoId = matchedSeed.videoId;
     if (recVideos.length > 0) {
       normalizedRecVideos = recVideos.map((v: any, idx: number) => {
         const seed =
-          idx === 0
-            ? matchedSeed
-            : VERIFIED_EDUCATIONAL_VIDEO_POOL[(idx + recVideos.length) % VERIFIED_EDUCATIONAL_VIDEO_POOL.length];
+          (rankedSeeds[idx]?.score > 0 ? rankedSeeds[idx].seed : undefined) ||
+          matchedSeed;
         const existingValid = isRealYtId(v.youtubeId) || isRealYtId(v.videoId);
         if (existingValid) return v;
         return {
@@ -922,7 +1056,7 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
   const instructorFilter = typeof params.instructor === 'string' ? params.instructor.trim().toLowerCase() : '';
   const channelFilter = typeof params.channel === 'string' ? params.channel.trim().toLowerCase() : '';
 
-  const matched: MarketplaceCourse[] = [];
+  const matchedEntries: Array<{ course: MarketplaceCourse; score: number }> = [];
   const nowMs = Date.now();
   const pubCutoffMs =
     publicationDate === 'week'
@@ -951,18 +1085,27 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
       if (tab === 'playlists' && course.courseType !== 'youtube_playlist' && !course.youtubePlaylistId) continue;
     }
 
-    if (terms.length > 0) {
-      let ok = true;
-      for (const term of terms) {
-        if (!searchBlob.includes(term)) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok && expanded.expandedTerms.length > terms.length) {
-        ok = expanded.expandedTerms.some((alt) => searchBlob.includes(alt));
-      }
-      if (!ok) continue;
+    let relevanceScore = 0;
+    if (q.length > 0) {
+      relevanceScore = scoreSearchMatch(
+        {
+          id: course.id,
+          aliasId: course.aliasId,
+          title: course.title,
+          category: course.category,
+          categories: course.categories,
+          subcategory: course.subcategory,
+          topic: course.topic,
+          keywords: course.keywords,
+          skills: course.skillsAcquired,
+          shortDesc: course.shortDesc,
+          instructorName: course.instructorName || course.instructor?.name,
+          youtubeChannelName: course.youtubeChannelName,
+          language: course.language,
+        },
+        q
+      );
+      if (relevanceScore <= 0) continue;
     }
 
     if (category) {
@@ -1044,20 +1187,24 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
     }
     if (status && course.status !== status) continue;
 
-    matched.push(course);
+    matchedEntries.push({ course, score: relevanceScore });
   }
 
   const sortBy = params.sortBy || 'popular';
-  matched.sort((a, b) => {
-    if (sortBy === 'popular') return b.enrolledCount - a.enrolledCount;
-    if (sortBy === 'rating') return b.rating - a.rating;
-    if (sortBy === 'price_low') return a.price - b.price;
-    if (sortBy === 'price_high') return b.price - a.price;
-    if (sortBy === 'newest') return (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0);
-    return 0;
+  matchedEntries.sort((a, b) => {
+    if (q.length > 0 && (sortBy === 'popular' || sortBy === 'recommended')) {
+      const scoreDiff = b.score - a.score;
+      if (scoreDiff !== 0) return scoreDiff;
+    }
+    if (sortBy === 'popular') return b.course.enrolledCount - a.course.enrolledCount;
+    if (sortBy === 'rating') return b.course.rating - a.course.rating;
+    if (sortBy === 'price_low') return a.course.price - b.course.price;
+    if (sortBy === 'price_high') return b.course.price - a.course.price;
+    if (sortBy === 'newest') return (b.course.isNew ? 1 : 0) - (a.course.isNew ? 1 : 0);
+    return b.score - a.score;
   });
 
-  return matched;
+  return matchedEntries.map((m) => m.course);
 }
 
 async function startServer() {
@@ -1615,37 +1762,46 @@ async function startServer() {
       return res.json({ suggestions });
     }
 
+    const expanded = normalizeAndExpandQuery(q);
+    const matchTerms = Array.from(new Set([expanded.corePhrase, ...expanded.tokens, ...expanded.expandedTerms]))
+      .filter((t) => t.length >= 2);
+    const matchesAnyTerm = (text: string) => {
+      const lower = text.toLowerCase();
+      return matchTerms.some((t) => matchesWordBoundary(lower, t));
+    };
+
     // Categories
+    let catAdded = 0;
     for (const cat of ALL_MARKETPLACE_CATEGORIES) {
-      if (cat.toLowerCase().includes(q)) {
+      if (matchesAnyTerm(cat)) {
         suggestions.push({
           type: 'category',
           label: cat,
           sublabel: `${index.categoryCounts[cat] || 0} courses`,
           category: cat,
         });
-        if (suggestions.length >= 4) break;
+        if (++catAdded >= 2) break;
       }
     }
 
     // Subcategories
     let subAdded = 0;
     for (const sub of index.subcategories) {
-      if (sub.name.toLowerCase().includes(q)) {
+      if (matchesAnyTerm(sub.name)) {
         suggestions.push({
           type: 'subcategory',
           label: sub.name,
           sublabel: `${sub.category} · ${sub.count} courses`,
           category: sub.category,
         });
-        if (++subAdded >= 3) break;
+        if (++subAdded >= 2) break;
       }
     }
 
     // Instructors
     let instAdded = 0;
     for (const inst of index.instructors) {
-      if (inst.name.toLowerCase().includes(q)) {
+      if (matchesAnyTerm(inst.name)) {
         suggestions.push({
           type: 'instructor',
           label: inst.name,
@@ -1658,7 +1814,7 @@ async function startServer() {
     // YouTube Channels
     let chanAdded = 0;
     for (const chan of index.channels) {
-      if (chan.name.toLowerCase().includes(q)) {
+      if (matchesAnyTerm(chan.name)) {
         suggestions.push({
           type: 'channel',
           label: chan.name,
@@ -1671,7 +1827,7 @@ async function startServer() {
     // Languages
     let langAdded = 0;
     for (const lang of index.languages) {
-      if (lang.name.toLowerCase().includes(q)) {
+      if (matchesAnyTerm(lang.name)) {
         suggestions.push({
           type: 'language',
           label: lang.name,
@@ -1681,27 +1837,51 @@ async function startServer() {
       }
     }
 
-    // Courses
-    let crsAdded = 0;
-    for (const { course, searchBlob } of index.items) {
-      if (searchBlob.includes(q)) {
-        suggestions.push({
-          type: 'course',
-          id: course.id,
-          label: course.title,
-          sublabel: `${course.id} · ${course.category} · ${course.instructorName || 'OpenFrame'}`,
-          category: course.category,
-          courseType: course.courseType,
-        });
-        if (++crsAdded >= 6) break;
-      }
+    // Top-ranked Courses using shared word-boundary relevance scoring
+    const topCourses = index.items
+      .filter(({ course }) => course.status !== 'Draft' && course.status !== 'Archived')
+      .map(({ course }) => ({
+        course,
+        score: scoreSearchMatch(
+          {
+            id: course.id,
+            aliasId: course.aliasId,
+            title: course.title,
+            category: course.category,
+            categories: course.categories,
+            subcategory: course.subcategory,
+            topic: course.topic,
+            keywords: course.keywords,
+            skills: course.skillsAcquired,
+            shortDesc: course.shortDesc,
+            instructorName: course.instructorName || course.instructor?.name,
+            youtubeChannelName: course.youtubeChannelName,
+            language: course.language,
+          },
+          q
+        ),
+      }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.course.enrolledCount - a.course.enrolledCount)
+      .slice(0, 6);
+
+    for (const { course } of topCourses) {
+      suggestions.push({
+        type: 'course',
+        id: course.id,
+        label: course.title,
+        sublabel: `${course.id} · ${course.category} · ${course.instructorName || 'OpenFrame'}`,
+        category: course.category,
+        courseType: course.courseType,
+      });
     }
 
     return res.json({ suggestions });
   });
 
-  app.get('/api/marketplace/base-course/:id', (req, res) => {
-    const id = String(req.params.id || '').toLowerCase().trim();
+  app.get('/api/marketplace/base-course/:id', async (req, res) => {
+    const rawId = String(req.params.id || '').trim();
+    const id = rawId.toLowerCase();
     const index = getBaseCatalogIndex();
     const direct = index.byId.get(id);
     if (direct) return res.json({ course: direct });
@@ -1709,9 +1889,136 @@ async function startServer() {
     const match = id.match(/^of-crs-0*(\d+)$/);
     if (match && match[1]) {
       const idx = parseInt(match[1], 10);
-      if (idx >= 1 && idx <= 15000) {
+      if (idx >= 1 && idx <= 16000) {
         return res.json({ course: synthesizeBaseCourse(idx) });
       }
+    }
+
+    // Resolve dynamic YouTube / discovered IDs (yt-{videoId}, disc-vid-{videoId}, disc-pl-{playlistId})
+    const ytMatch = rawId.match(/^(?:yt-|disc-vid-)([A-Za-z0-9_-]{6,20})$/i);
+    const plMatch = rawId.match(/^disc-pl-([A-Za-z0-9_-]{8,50})$/i);
+    if (ytMatch?.[1]) {
+      const videoId = ytMatch[1];
+      const existingCatalog = index.items.find((i) => i.course.youtubeVideoId === videoId)?.course;
+      if (existingCatalog) return res.json({ course: existingCatalog });
+
+      const pooled = VERIFIED_EDUCATIONAL_VIDEO_POOL.find((v) => v.videoId === videoId);
+      let title = pooled?.title || `YouTube Educational Course (${videoId})`;
+      let channelTitle = pooled?.channelTitle || 'YouTube Educator';
+      let thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+      if (!pooled) {
+        try {
+          const oRes = await fetch(
+            `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`,
+            { signal: AbortSignal.timeout(4000) }
+          );
+          if (oRes.ok) {
+            const oJson: any = await oRes.json();
+            if (oJson?.title) title = oJson.title;
+            if (oJson?.author_name) channelTitle = oJson.author_name;
+            if (oJson?.thumbnail_url) thumbnailUrl = oJson.thumbnail_url;
+          }
+        } catch {
+          // Use videoId defaults
+        }
+      }
+
+      const intent = parseEducationalIntent(title);
+      const inferredCategory = intent.primarySubject || 'Digital Skills & Productivity';
+      const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      return res.json({
+        course: normalizeLoadedCourse({
+          id: rawId,
+          title,
+          category: inferredCategory,
+          categories: [inferredCategory],
+          categoryGroup: 'Technology',
+          subcategory: intent.desiredSkill || inferredCategory,
+          level: pooled?.level || 'Beginner',
+          duration: pooled?.duration || 'Self-Paced Tutorial',
+          estimatedHours: 2,
+          pricingTier: 'Academic Access',
+          price: 0,
+          isFree: true,
+          status: 'Published',
+          courseType: 'youtube_video',
+          contentType: 'Tutorial',
+          instructorName: channelTitle,
+          youtubeChannelName: channelTitle,
+          youtubeVideoId: videoId,
+          youtubeUrl: ytUrl,
+          language: intent.preferredLanguage || 'English',
+          rating: 4.8,
+          enrolledCount: 1200,
+          isPopular: true,
+          certificateEligibility: true,
+          thumbnailUrl,
+          imageUrl: thumbnailUrl,
+          shortDesc: pooled?.recommendedReason || `Structured OpenFrame YouTube course for "${title}" taught by ${channelTitle}.`,
+          learningObjectives: [
+            `Master core concepts presented in ${title}`,
+            `Complete structured practical exercises and verification assessment`,
+          ],
+          skillsAcquired: [intent.desiredSkill || inferredCategory, 'Applied Practice'],
+          modules: [
+            { moduleNumber: 1, partLabel: 'Part 1: Foundations', level: 'Beginner', title: 'Core Walkthrough & Setup', duration: '45m', lessons: [title, 'Concept Verification'], videoIds: [videoId] },
+            { moduleNumber: 2, partLabel: 'Part 2: Application', level: 'Intermediate', title: 'Hands-On Practice & Applied Quiz', duration: '45m', lessons: ['Guided Practical Exercise', 'Knowledge Verification Quiz'], videoIds: [videoId] },
+          ],
+          recommendedVideos: [
+            {
+              id: rawId,
+              videoId,
+              youtubeId: videoId,
+              youtubeUrl: ytUrl,
+              title,
+              channelTitle,
+              thumbnail: thumbnailUrl,
+              thumbnailUrl,
+              duration: pooled?.duration || 'Tutorial',
+              level: pooled?.level || 'Beginner',
+              recommendedReason: pooled?.recommendedReason || `Direct YouTube tutorial for ${title}.`,
+              embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+              source: 'curated_library',
+            },
+          ],
+        }),
+      });
+    }
+
+    if (plMatch?.[1]) {
+      const playlistId = plMatch[1];
+      const existingPl = index.items.find((i) => i.course.youtubePlaylistId === playlistId)?.course;
+      if (existingPl) return res.json({ course: existingPl });
+      const plUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
+      return res.json({
+        course: normalizeLoadedCourse({
+          id: rawId,
+          title: `YouTube Course Playlist (${playlistId})`,
+          category: 'Digital Skills & Productivity',
+          categoryGroup: 'Technology',
+          subcategory: 'Playlist Series',
+          level: 'All Levels',
+          duration: 'Playlist Series',
+          estimatedHours: 6,
+          pricingTier: 'Academic Access',
+          price: 0,
+          isFree: true,
+          status: 'Published',
+          courseType: 'youtube_playlist',
+          contentType: 'Playlist',
+          youtubePlaylistId: playlistId,
+          youtubePlaylistUrl: plUrl,
+          language: 'English',
+          rating: 4.8,
+          enrolledCount: 850,
+          certificateEligibility: true,
+          shortDesc: `Multi-part OpenFrame YouTube playlist series (${playlistId}).`,
+          modules: [
+            { moduleNumber: 1, title: 'Playlist Curriculum Overview', duration: '2h', lessons: ['Series Introduction & Core Lessons'] },
+          ],
+        }),
+      });
     }
 
     return res.status(404).json({ error: 'Base course not found' });
@@ -1897,12 +2204,14 @@ async function startServer() {
         ? new Date(nowMs - 365 * 86400000).toISOString()
         : undefined;
 
-    const quota = youtubeDiscoveryEngine.getQuotaStatus();
-    if (quota.apiKeyConfigured && (cleanQuery || cleanChannel)) {
+    const intent = parseEducationalIntent(cleanQuery);
+    const inferredCategory = String(category || intent.primarySubject || 'Education');
+
+    if (cleanQuery || cleanChannel) {
       try {
         const page = await youtubeDiscoveryEngine.discoverPage({
           query: `${cleanQuery} ${cleanChannel} ${category}`.trim(),
-          category: String(category || 'Artificial Intelligence'),
+          category: inferredCategory,
           languageLabel: effectiveLang,
           searchType: searchType === 'playlist' ? 'playlist' : 'video',
           pageToken: pageToken ? String(pageToken) : undefined,
@@ -1919,35 +2228,46 @@ async function startServer() {
           if (chMatches.length > 0) filteredItems = chMatches;
         }
         if (filteredItems.length > 0) {
-          const videos = filteredItems.map((item) => ({
-            id: item.youtubeVideoId || item.youtubePlaylistId || item.id,
-            videoId: item.youtubeVideoId || '',
-            youtubeId: item.youtubeVideoId || '',
-            playlistId: item.youtubePlaylistId,
-            playlistInfo: item.playlistInfo,
-            title: item.title,
-            description: item.description,
-            channelTitle: item.youtubeChannelName,
-            channelThumbnail: item.channelThumbnailUrl,
-            thumbnail: item.thumbnailUrl,
-            thumbnailUrl: item.thumbnailUrl,
-            duration: item.duration || 'N/A',
-            publishedAt: item.publishedAt,
-            viewCount: item.viewCount,
-            embeddable: item.embeddable !== false,
-            detectedLanguage: item.language || effectiveLang,
-            level: item.level === 'All Levels' ? 'Beginner' : item.level,
-            difficultyLevel: item.level,
-            recommendedReason: item.learningObjectives[0] || item.title,
-            rationale: item.learningObjectives[0] || item.title,
-            embedUrl: item.youtubePlaylistId
-              ? `https://www.youtube-nocookie.com/embed/videoseries?list=${item.youtubePlaylistId}`
-              : `https://www.youtube-nocookie.com/embed/${item.youtubeVideoId}`,
-            source: 'youtube_data_api',
-          }));
+          const videos = filteredItems.map((item) => {
+            const vid = item.youtubeVideoId || '';
+            const plId = item.youtubePlaylistId;
+            return {
+              id: vid || plId || item.id,
+              videoId: vid,
+              youtubeId: vid,
+              youtubeUrl: plId
+                ? `https://www.youtube.com/playlist?list=${plId}`
+                : vid
+                ? `https://www.youtube.com/watch?v=${vid}`
+                : undefined,
+              playlistId: plId,
+              playlistInfo: item.playlistInfo,
+              title: item.title,
+              description: item.description,
+              channelTitle: item.youtubeChannelName,
+              channelThumbnail: item.channelThumbnailUrl,
+              thumbnail: item.thumbnailUrl,
+              thumbnailUrl: item.thumbnailUrl,
+              duration: item.duration || 'Tutorial',
+              publishedAt: item.publishedAt,
+              viewCount: item.viewCount,
+              embeddable: item.embeddable !== false,
+              detectedLanguage: item.language || effectiveLang,
+              level: item.level === 'All Levels' ? 'Beginner' : item.level,
+              difficultyLevel: item.level,
+              recommendedReason: item.learningObjectives[0] || item.title,
+              rationale: item.learningObjectives[0] || item.title,
+              embedUrl: plId
+                ? `https://www.youtube-nocookie.com/embed/videoseries?list=${plId}`
+                : `https://www.youtube-nocookie.com/embed/${vid}`,
+              source: item.id?.startsWith('disc-vid-') && !process.env.YOUTUBE_API_KEY
+                ? 'youtube_public_search'
+                : 'youtube_data_api',
+            };
+          });
           trackSearchQuery(cleanQuery || cleanChannel, effectiveLang, videos.length);
           return res.json({
-            source: 'youtube_data_api',
+            source: videos[0]?.source || 'youtube_data_api',
             detectedLanguage: effectiveLang,
             nextPageToken: page.nextPageToken || null,
             totalResults: page.totalResults || videos.length,
@@ -1955,25 +2275,10 @@ async function startServer() {
           });
         }
       } catch (err: any) {
-        console.warn('Live YouTube Data API search fallback to curated index:', err);
-        const fallback = selectCuratedFallbackVideos(cleanQuery, String(category)).map((v) => ({
-          ...v,
-          detectedLanguage: effectiveLang,
-          embeddable: true,
-        }));
-        trackSearchQuery(cleanQuery, effectiveLang, fallback.length);
-        return res.json({
-          source: 'curated_library',
-          retryable: true,
-          error: err?.message || 'Live YouTube Data API search temporarily unavailable.',
-          notice: 'YouTube Data API search encountered a temporary error — showing curated OpenFrame lectures with retry option.',
-          detectedLanguage: effectiveLang,
-          nextPageToken: null,
-          videos: fallback,
-        });
+        console.warn('Live YouTube search fallback to curated index:', err?.message || err);
       }
     }
-    const fallback = selectCuratedFallbackVideos(cleanQuery, String(category)).map((v) => ({
+    const fallback = selectCuratedFallbackVideos(cleanQuery || cleanChannel, String(category)).map((v) => ({
       ...v,
       detectedLanguage: effectiveLang,
       embeddable: true,
@@ -2611,16 +2916,25 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
   });
 
   // ------------------------------------------------------------------
-  // AI Course Organizer (Transforms search query + YouTube metadata into structured multi-module path)
+  // Built-In Zero-Token AI Course Organizer (Transforms query + catalog + YouTube into Parts & Modules)
   // ------------------------------------------------------------------
   app.post('/api/quinn/organize-course', async (req, res) => {
-    const { query = '', language = 'English', videos = [], moduleCount } = req.body || {};
+    const { query = '', language = 'English', videos = [], moduleCount, mode = 'builtin' } = req.body || {};
     const topic = String(query || '').trim();
     if (!topic) {
       return res.status(400).json({ error: 'Search query is required to organize a learning path.' });
     }
 
-    const isExcelTopic = /\b(excel|spreadsheet|pivot|vlookup|xlookup)\b/i.test(topic);
+    const intent = parseEducationalIntent(topic);
+    const expanded = normalizeAndExpandQuery(topic);
+    const displayTopicRaw = intent.desiredSkill || expanded.corePhrase || topic;
+    const displayTopic = displayTopicRaw
+      .split(/\s+/)
+      .map((w) => (w.length <= 3 && /^(ai|ml|ui|ux|sql|css|seo|ppt|bi)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+      .join(' ');
+
+    const isExcelTopic = /\b(excel|spreadsheet|spreadsheets|pivot|vlookup|xlookup)\b/i.test(topic);
+    const isWebsiteTopic = /\b(website|websites|web\s*dev|web\s*design|html|css|wordpress|landing\s*page|webpage|full\s*stack)\b/i.test(topic);
     const parsedModuleCount = Number(moduleCount);
     const targetModuleCount =
       Number.isFinite(parsedModuleCount) && parsedModuleCount >= 3 && parsedModuleCount <= 9
@@ -2635,18 +2949,87 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
         ? String(language)
         : detected.label;
 
-    const videoMetadataList = Array.isArray(videos)
-      ? videos.slice(0, 9).map((v: any) => ({
-          videoId: v.videoId || v.youtubeId || v.id || '',
-          title: String(v.title || '').slice(0, 120),
-          channelTitle: String(v.channelTitle || '').slice(0, 60),
-          duration: v.duration || '',
-          description: String(v.description || v.recommendedReason || '').slice(0, 120),
-        }))
-      : [];
+    const index = getBaseCatalogIndex();
+    const matchedCatalog = index.items
+      .filter(({ course }) => course.status !== 'Draft' && course.status !== 'Archived')
+      .map(({ course }) => ({
+        course,
+        score: scoreSearchMatch(
+          {
+            id: course.id,
+            aliasId: course.aliasId,
+            title: course.title,
+            category: course.category,
+            categories: course.categories,
+            subcategory: course.subcategory,
+            topic: course.topic,
+            keywords: course.keywords,
+            skills: course.skillsAcquired,
+            shortDesc: course.shortDesc,
+            instructorName: course.instructorName || course.instructor?.name,
+            youtubeChannelName: course.youtubeChannelName,
+            language: course.language,
+          },
+          topic
+        ),
+      }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.course.enrolledCount - a.course.enrolledCount)
+      .slice(0, 4)
+      .map((x) => x.course);
 
-    const aiDisclaimer =
-      'AI-organized learning pathway generated strictly from available YouTube video titles, channels, and descriptions (no external video transcript parsing implied).';
+    let incomingVideos = Array.isArray(videos) ? videos.filter(Boolean) : [];
+    if (incomingVideos.length === 0) {
+      try {
+        const ytPage = await youtubeDiscoveryEngine.discoverPage({
+          query: `${expanded.corePhrase || topic} tutorial`,
+          category: intent.primarySubject || 'Education',
+          languageLabel: targetLanguage,
+          searchType: 'video',
+          maxResults: 6,
+        });
+        if (ytPage.items.length > 0) {
+          incomingVideos = ytPage.items.map((item) => ({
+            id: item.youtubeVideoId || item.id,
+            videoId: item.youtubeVideoId || '',
+            youtubeId: item.youtubeVideoId || '',
+            youtubeUrl: item.youtubeVideoId ? `https://www.youtube.com/watch?v=${item.youtubeVideoId}` : undefined,
+            title: item.title,
+            channelTitle: item.youtubeChannelName,
+            thumbnail: item.thumbnailUrl,
+            thumbnailUrl: item.thumbnailUrl,
+            duration: item.duration || 'Tutorial',
+            level: item.level === 'All Levels' ? 'Beginner' : item.level,
+            description: item.description || item.learningObjectives?.[0] || '',
+          }));
+        }
+      } catch {
+        // Fallback cleanly below
+      }
+    }
+    if (incomingVideos.length === 0) {
+      incomingVideos = selectCuratedFallbackVideos(expanded.corePhrase || topic, intent.primarySubject || '');
+    }
+
+    const videoMetadataList = incomingVideos.slice(0, 9).map((v: any) => {
+      const vid = v.videoId || v.youtubeId || v.id || '';
+      return {
+        id: vid,
+        videoId: vid,
+        youtubeId: vid,
+        youtubeUrl: v.youtubeUrl || (vid ? `https://www.youtube.com/watch?v=${vid}` : undefined),
+        title: String(v.title || '').slice(0, 120),
+        channelTitle: String(v.channelTitle || 'YouTube Educator').slice(0, 60),
+        thumbnail: v.thumbnail || v.thumbnailUrl || (vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : ''),
+        thumbnailUrl: v.thumbnailUrl || v.thumbnail || (vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : ''),
+        duration: v.duration || 'Tutorial',
+        level: v.level || 'Beginner',
+        description: String(v.description || v.recommendedReason || '').slice(0, 140),
+        embedUrl: v.embedUrl || (vid ? `https://www.youtube-nocookie.com/embed/${vid}` : undefined),
+      };
+    });
+
+    const videoById = new Map(videoMetadataList.map((v) => [v.videoId, v]));
 
     const distributeVideoIds = (idx: number, totalMods: number): string[] => {
       if (videoMetadataList.length === 0) return [];
@@ -2665,163 +3048,352 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
       return fallbackVid ? [fallbackVid] : [];
     };
 
-    const validVideoIdSet = new Set(videoMetadataList.map((v) => v.videoId).filter(Boolean));
+    const aiDisclaimer =
+      'Built-In OpenFrame AI Curriculum Engine modeled this course from verified OpenFrame catalog programmes and real YouTube tutorials at zero AI token cost.';
 
-    const buildFallbackPath = () => {
-      if (isExcelTopic && targetModuleCount === 6) {
-        const excelBlueprints = [
-          {
-            level: 'Beginner' as const,
-            title: `Module 1: Beginner Tutorials — Workbook Navigation & Core Data Entry (${topic})`,
-            summary: 'Master cell formatting, sheets, tables, sorting, filtering, and keyboard productivity essentials.',
-            objectives: ['Navigate worksheets, ribbon commands, and structured Excel tables accurately.', 'Apply number, date, currency, and conditional formatting cleanly.'],
-            practiceExercises: ['Format an unstyled sales sheet into an Excel Table with filters and totals.', 'Create a clean 12-month personal or departmental budget sheet.'],
-          },
-          {
-            level: 'Beginner' as const,
-            title: `Module 2: Formulas & Functions — XLOOKUP, VLOOKUP, IF, SUMIFS & Text Logic`,
-            summary: 'Build accurate dynamic calculations using logical, lookup, statistical, and text functions.',
-            objectives: ['Write conditional formulas (IF, IFS, SUMIFS, COUNTIFS) without hardcoding values.', 'Join multi-sheet records reliably with XLOOKUP and INDEX/MATCH.'],
-            practiceExercises: ['Build a dynamic invoice pricing calculator with tiered IF/XLOOKUP rules.', 'Reconcile product IDs across two separate inventory worksheets.'],
-          },
-          {
-            level: 'Intermediate' as const,
-            title: `Module 3: Dashboards & Pivot Tables — Interactive Executive Reporting`,
-            summary: 'Summarize large datasets in seconds using PivotTables, Slicers, PivotCharts, and KPI cards.',
-            objectives: ['Group rows by month, region, and category inside multi-level PivotTables.', 'Wire dynamic Slicers and charts into a single-screen interactive dashboard.'],
-            practiceExercises: ['Create an interactive regional sales dashboard driven by 2 PivotTables and Slicers.', 'Highlight top/bottom 10% performers using dynamic conditional formatting rules.'],
-          },
-          {
-            level: 'Intermediate' as const,
-            title: `Module 4: Data Analysis — Power Query, Cleaning & Variance Diagnostics`,
-            summary: 'Clean messy imports, split/merge columns, remove duplicates, and run what-if sensitivity analysis.',
-            objectives: ['Automate messy CSV cleanup and standardization workflows with repeatable rules.', 'Apply Goal Seek and Data Tables for financial or operational forecasting.'],
-            practiceExercises: ['Clean a 500-row raw transaction export removing duplicates and fixing date formats.', 'Run a breakeven sensitivity table comparing price vs. unit cost scenarios.'],
-          },
-          {
-            level: 'Advanced' as const,
-            title: `Module 5: Practical Projects — End-to-End Business Automation Case Study`,
-            summary: 'Combine Power Query, formulas, validation rules, and executive dashboard design into a portfolio workbook.',
-            objectives: ['Architect an error-free, protected multi-tab business workbook with documentation.', 'Validate formula accuracy across edge cases using IFERROR and data validation.'],
-            practiceExercises: ['Build an end-to-end Finance / HR KPI tracker ready for OpenFrame Capstone submission.', 'Audit and verify all cross-sheet references for zero #REF! or #N/A errors.'],
-          },
-          {
-            level: 'Advanced' as const,
-            title: `Module 6: Interview Preparation — Formula Debugging, Timed Scenarios & Defense`,
-            summary: 'Prepare for real analyst interviews, timed Excel assessments, and OpenFrame faculty evaluation.',
-            objectives: ['Explain lookup trade-offs (XLOOKUP vs VLOOKUP vs INDEX/MATCH) clearly in interviews.', 'Debug broken formulas and defend dashboard metrics concisely.'],
-            practiceExercises: ['Complete a 15-minute mock Excel scenario troubleshooting broken lookup references.', 'Take the OpenFrame verification quiz and prepare a 5-slide walkthrough.'],
-          },
-        ];
+    const buildBuiltInStructuredCoursePath = () => {
+      const partTitles = isExcelTopic
+        ? [
+            'Part 1: Excel Foundations & Core Formulas',
+            'Part 2: Analytics, Pivot Tables & Dashboards',
+            'Part 3: Real-World Projects & Interview Mastery',
+          ]
+        : isWebsiteTopic
+        ? [
+            'Part 1: Web Foundations, Structure & Responsive Styling',
+            'Part 2: Interactive Frontend, Components & Content Workflows',
+            'Part 3: Hosting, SEO Optimization & Production Launch',
+          ]
+        : [
+            `Part 1: ${displayTopic} Foundations & Core Concepts`,
+            `Part 2: Guided Workflows & Practical Application`,
+            `Part 3: Capstone Projects & Assessment Readiness`,
+          ];
 
-        return {
-          id: `ai-path-${Date.now().toString(36)}`,
-          topic,
-          language: targetLanguage,
-          title: `${topic} — 6-Module Mastery Path (${targetLanguage})`,
-          overview: `Structured 6-part Microsoft Excel & Analytics learning path covering Beginner Tutorials, Formulas & Functions, Dashboards & Pivot Tables, Data Analysis, Practical Projects, and Interview Preparation.`,
-          aiDisclaimer,
-          sourceMode: 'structured_fallback' as const,
-          createdAt: new Date().toISOString(),
-          modules: excelBlueprints.map((bp, idx) => ({
-            moduleNumber: idx + 1,
-            level: bp.level,
-            title: bp.title,
-            objectives: bp.objectives,
-            summary: bp.summary,
-            practiceExercises: bp.practiceExercises,
-            videoIds: distributeVideoIds(idx, excelBlueprints.length),
-            ...(idx === 0
-              ? {
-                  miniQuizQuestion: {
-                    question: `Why is converting raw data into an official Excel Table recommended before building PivotTables or formulas?`,
-                    options: [
-                      'Tables delete formulas automatically to save memory',
-                      'Tables expand ranges dynamically when new rows are added and support structured column references',
-                      'Tables block all sorting and filtering features',
-                      'Tables remove all formatting rules permanently',
-                    ],
-                    correctAnswer: 'Tables expand ranges dynamically when new rows are added and support structured column references',
-                    explanation: 'Structured Excel Tables keep PivotTables and lookup formulas automatically up to date as data grows.',
-                  },
-                }
-              : {}),
-          })),
-        };
-      }
-
-      const stageTitles = [
-        `Foundations & Core Terminology of ${topic}`,
-        `Core Tools, Syntax & Essential Concepts in ${topic}`,
-        `Applied Workflows & Guided Practice in ${topic}`,
-        `Intermediate Techniques & Problem Solving in ${topic}`,
-        `Real-World Industry Case Studies for ${topic}`,
-        `Data Quality, Testing & Debugging in ${topic}`,
-        `Practical Mini-Project Architecture for ${topic}`,
-        `Capstone Integration & Portfolio Polish in ${topic}`,
-        `Interview Readiness & Verification Defense for ${topic}`,
+      const excelSixTemplates = [
+        {
+          partIdx: 0,
+          level: 'Beginner' as const,
+          title: 'Beginner Tutorials & Workbook Navigation',
+          summary: 'Master Excel ribbons, cell referencing, data entry formatting, and clean worksheet structure.',
+          objectives: [
+            'Navigate workbooks, ranges, rows/columns, and structured Excel tables confidently',
+            'Apply conditional formatting, data validation, and keyboard productivity shortcuts',
+          ],
+          exercise: 'Create a formatted monthly expense tracker using relative & absolute ($) cell references.',
+        },
+        {
+          partIdx: 0,
+          level: 'Beginner' as const,
+          title: 'Essential Formulas & Logical Functions',
+          summary: 'Automate calculations using SUMIFS, COUNTIFS, IF, and modern XLOOKUP / VLOOKUP formulas.',
+          objectives: [
+            'Write nested IF, AND/OR, SUMIFS, and text-cleaning formulas without errors',
+            'Merge multi-sheet datasets accurately using XLOOKUP, VLOOKUP, and INDEX-MATCH',
+          ],
+          exercise: 'Join a product price list with a sales log using XLOOKUP and flag low-margin orders with IF.',
+        },
+        {
+          partIdx: 1,
+          level: 'Intermediate' as const,
+          title: 'Dashboards, Charts & Pivot Tables',
+          summary: 'Summarize thousands of rows instantly with PivotTables, PivotCharts, timelines, and interactive slicers.',
+          objectives: [
+            'Group, filter, and calculate % of total revenue inside dynamic PivotTables',
+            'Connect slicers to multi-chart KPI dashboards for executive reporting',
+          ],
+          exercise: 'Build a 3-KPI regional sales dashboard driven by a PivotTable and interactive region slicer.',
+        },
+        {
+          partIdx: 1,
+          level: 'Intermediate' as const,
+          title: 'Data Analysis & Power Query Cleanup',
+          summary: 'Clean messy CSV imports, remove duplicates, split columns, and run what-if sensitivity analysis.',
+          objectives: [
+            'Standardize inconsistent dates, currencies, and text using Power Query transformations',
+            'Use Goal Seek and Scenario Manager for business forecasting',
+          ],
+          exercise: 'Import an unformatted sales CSV, deduplicate rows, and generate a clean summary sheet.',
+        },
+        {
+          partIdx: 2,
+          level: 'Advanced' as const,
+          title: 'Practical Business Projects & Case Study',
+          summary: 'Deliver an end-to-end financial budget and inventory tracking workbook ready for review.',
+          objectives: [
+            'Combine raw data, transformation logic, and executive presentation tabs cleanly',
+            'Add error-proofing checks with IFERROR and audit formulas',
+          ],
+          exercise: 'Complete a multi-sheet Financial & Inventory Control workbook ready for LMS submission.',
+        },
+        {
+          partIdx: 2,
+          level: 'Advanced' as const,
+          title: 'Interview Preparation & Speed Benchmarks',
+          summary: 'Practice timed Excel assessment tests covering lookups, PivotTables, and business case reasoning.',
+          objectives: [
+            'Solve common analyst & finance Excel test scenarios under time constraints',
+            'Explain formula trade-offs clearly during technical interviews',
+          ],
+          exercise: 'Complete the timed 6-task Excel case drill and verify your score on the module quiz.',
+        },
       ];
 
-      const selectedIndices =
-        targetModuleCount <= 3
-          ? [0, 2, 7].slice(0, targetModuleCount)
-          : Array.from({ length: targetModuleCount }, (_, i) => Math.min(stageTitles.length - 1, i));
+      const websiteTemplates = [
+        {
+          partIdx: 0,
+          level: 'Beginner' as const,
+          title: 'Semantic HTML5 & Website Blueprinting',
+          summary: 'Structure accessible pages with semantic landmarks, navigation, media, and forms.',
+          objectives: [
+            'Plan page wireframes, header/main/footer hierarchy, and accessible semantic HTML tags',
+            'Embed responsive images, links, and structured contact forms cleanly',
+          ],
+          exercise: 'Create a complete 3-section landing page skeleton in clean semantic HTML5.',
+        },
+        {
+          partIdx: 0,
+          level: 'Beginner' as const,
+          title: 'Modern CSS3, Flexbox & Responsive Grid Layout',
+          summary: 'Style layouts, typography scales, cards, and mobile breakpoints using Flexbox and CSS Grid.',
+          objectives: [
+            'Build responsive navigation bars and multi-column feature grids for desktop and mobile',
+            'Apply consistent color contrast, spacing tokens, and interactive hover states',
+          ],
+          exercise: 'Make your landing page adapt cleanly from 375px mobile to 1280px desktop.',
+        },
+        {
+          partIdx: 1,
+          level: 'Intermediate' as const,
+          title: 'Interactive JavaScript & DOM Workflows',
+          summary: 'Add mobile drawers, form validation, dynamic filtering, and interactive UI state.',
+          objectives: [
+            'Handle DOM events cleanly for search bars, tabs, modals, and form validation',
+            'Fetch and render dynamic data into reusable UI cards',
+          ],
+          exercise: 'Add an interactive filterable showcase grid and validated inquiry form to your website.',
+        },
+        {
+          partIdx: 1,
+          level: 'Intermediate' as const,
+          title: 'Multi-Page Components & Routing Architecture',
+          summary: 'Organize reusable header/footer templates, detail views, and scalable component folders.',
+          objectives: [
+            'Separate shared layout chrome from page content and data services',
+            'Optimize navigation speed and clean URL routes across views',
+          ],
+          exercise: 'Refactor your site into Home, Services, and Contact views sharing reusable components.',
+        },
+        {
+          partIdx: 2,
+          level: 'Advanced' as const,
+          title: 'SEO, Performance & Accessibility Audits',
+          summary: 'Optimize page metadata, Core Web Vitals, image loading, and Lighthouse accessibility scores.',
+          objectives: [
+            'Configure semantic titles, meta descriptions, OpenGraph tags, and alt attributes',
+            'Minimize layout shift and optimize asset delivery',
+          ],
+          exercise: 'Run an accessibility & metadata checklist achieving full semantic coverage.',
+        },
+        {
+          partIdx: 2,
+          level: 'Advanced' as const,
+          title: 'Custom Domain Deployment & Portfolio Capstone',
+          summary: 'Publish your live website with HTTPS, DNS configuration, and documentation for clients.',
+          objectives: [
+            'Deploy production static or full-stack builds with environment safety checks',
+            'Present your live website project for OpenFrame faculty evaluation',
+          ],
+          exercise: 'Package and deploy your responsive multi-page website and submit the live showcase brief.',
+        },
+      ];
 
+      let rawModuleSpecs: Array<{
+        partIdx: number;
+        level: 'Beginner' | 'Intermediate' | 'Advanced';
+        title: string;
+        summary: string;
+        objectives: string[];
+        exercise: string;
+      }> = [];
+
+      if (isExcelTopic && targetModuleCount === 6) {
+        rawModuleSpecs = excelSixTemplates;
+      } else if (isWebsiteTopic && targetModuleCount === 6) {
+        rawModuleSpecs = websiteTemplates;
+      } else {
+        const templates = isWebsiteTopic ? websiteTemplates : [];
+        for (let i = 0; i < targetModuleCount; i++) {
+          const partIdx = Math.min(2, Math.floor((i * 3) / targetModuleCount));
+          const level: 'Beginner' | 'Intermediate' | 'Advanced' =
+            partIdx === 0 ? 'Beginner' : partIdx === 1 ? 'Intermediate' : 'Advanced';
+          if (templates.length >= targetModuleCount) {
+            const picked = templates[Math.floor((i * templates.length) / targetModuleCount)];
+            rawModuleSpecs.push({ ...picked, partIdx, level });
+          } else {
+            const vidHint = videoMetadataList[i % Math.max(1, videoMetadataList.length)]?.title;
+            const modTitle =
+              partIdx === 0
+                ? i === 0
+                  ? `${displayTopic}: Core Concepts & Foundations`
+                  : `${displayTopic}: Environment Setup & Essential Rules`
+                : partIdx === 1
+                ? i % 2 === 0
+                  ? `${displayTopic}: Guided Workflows & Pattern Practice`
+                  : `${displayTopic}: Applied Scenarios & Diagnostics`
+                : i === targetModuleCount - 1
+                ? `${displayTopic}: Capstone Project & Assessment Defense`
+                : `${displayTopic}: Real-World Optimization & Case Study`;
+            rawModuleSpecs.push({
+              partIdx,
+              level,
+              title: modTitle,
+              summary: vidHint
+                ? `Structured module anchored by "${vidHint.slice(0, 68)}" for step-by-step ${displayTopic} mastery.`
+                : `Progressive ${level.toLowerCase()} study module covering essential ${displayTopic} workflows.`,
+              objectives: [
+                `Master ${level.toLowerCase()} ${displayTopic} principles and repeatable techniques`,
+                `Apply module lessons inside a hands-on practical exercise ready for verification`,
+              ],
+              exercise: `Apply "${modTitle}" inside a small reproducible deliverable and verify key outputs.`,
+            });
+          }
+        }
+      }
+
+      const modules = rawModuleSpecs.map((spec, idx) => {
+        const vidIds = distributeVideoIds(idx, rawModuleSpecs.length);
+        const modRecVideos = vidIds.map((id) => videoById.get(id)).filter(Boolean);
+        const partLabel = partTitles[spec.partIdx];
+        const includeQuiz = idx === 0 || idx === rawModuleSpecs.length - 1 || idx === Math.floor(rawModuleSpecs.length / 2);
+        return {
+          moduleNumber: idx + 1,
+          partLabel,
+          level: spec.level,
+          title: spec.title,
+          objectives: spec.objectives,
+          summary: spec.summary,
+          practiceExercises: [spec.exercise],
+          videoIds: vidIds,
+          recommendedVideos: modRecVideos,
+          ...(includeQuiz
+            ? {
+                miniQuizQuestion:
+                  idx === 0
+                    ? {
+                        question: `Which approach gives you the fastest real-world foundation in ${displayTopic}?`,
+                        options: [
+                          'Watching the guided walkthrough while building a small hands-on example step by step',
+                          'Memorizing terms passively without practicing workflows',
+                          'Skipping foundational basics to attempt production capstones immediately',
+                          'Avoiding error verification after practice exercises',
+                        ],
+                        correctAnswer: 'Watching the guided walkthrough while building a small hands-on example step by step',
+                        explanation: 'Pairing guided demonstrations with immediate hands-on practice builds durable skill retention.',
+                      }
+                    : idx === rawModuleSpecs.length - 1
+                    ? {
+                        question: `Before enrolling or submitting your ${displayTopic} capstone, what proves practical readiness?`,
+                        options: [
+                          'A working deliverable tested against real inputs plus clear verification metrics',
+                          'Copying slide titles without testing outcomes',
+                          'Skipping edge-case checks',
+                          'Ignoring user or stakeholder requirements',
+                        ],
+                        correctAnswer: 'A working deliverable tested against real inputs plus clear verification metrics',
+                        explanation: 'Tested deliverables with verified metrics prepare you cleanly for certification and interviews.',
+                      }
+                    : {
+                        question: `When troubleshooting an intermediate ${displayTopic} task, what should you check first?`,
+                        options: [
+                          'Validate core inputs, structure, and step-by-step assumptions',
+                          'Delete the project and guess randomly',
+                          'Ignore warning indicators',
+                          'Skip testing intermediate outputs',
+                        ],
+                        correctAnswer: 'Validate core inputs, structure, and step-by-step assumptions',
+                        explanation: 'Systematic input and structure validation catches root errors quickly.',
+                      },
+              }
+            : {}),
+        };
+      });
+
+      const partGroups = partTitles
+        .map((pTitle, pIdx) => ({
+          partNumber: pIdx + 1,
+          title: pTitle,
+          moduleNumbers: modules
+            .filter((_, mIdx) => rawModuleSpecs[mIdx].partIdx === pIdx)
+            .map((m) => m.moduleNumber),
+        }))
+        .filter((pg) => pg.moduleNumbers.length > 0);
+
+      const primaryCourseMatch = matchedCatalog[0];
       return {
-        id: `ai-path-${Date.now().toString(36)}`,
+        id: `ai-path-${topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28) || 'course'}-${targetModuleCount}`,
         topic,
         language: targetLanguage,
-        title: `${topic} — ${selectedIndices.length}-Module Learning Path (${targetLanguage})`,
-        overview: `Progressive ${selectedIndices.length}-module learning path organized around "${topic}", moving from core concepts to practical application and verification.`,
+        title: primaryCourseMatch
+          ? `${displayTopic}: Complete Modeled Course & Enrollment Path`
+          : `${displayTopic} — Structured ${partGroups.length}-Part, ${modules.length}-Module Course`,
+        overview: primaryCourseMatch
+          ? `Recommended OpenFrame programme paired with "${primaryCourseMatch.title}" and ${videoMetadataList.length} live YouTube tutorials, organized into ${partGroups.length} progressive parts and ${modules.length} hands-on modules.`
+          : `Complete ${targetLanguage} learning pathway for ${displayTopic}, structured into ${partGroups.length} progressive parts and ${modules.length} actionable modules with embedded YouTube tutorials and direct enrollment.`,
         aiDisclaimer,
-        sourceMode: 'structured_fallback' as const,
+        sourceMode: 'builtin_engine' as const,
         createdAt: new Date().toISOString(),
-        modules: selectedIndices.map((titleIdx, idx) => {
-          const level: 'Beginner' | 'Intermediate' | 'Advanced' =
-            idx < Math.ceil(selectedIndices.length / 3)
-              ? 'Beginner'
-              : idx < Math.ceil((selectedIndices.length * 2) / 3)
-              ? 'Intermediate'
-              : 'Advanced';
-          return {
-            moduleNumber: idx + 1,
-            level,
-            title: `Module ${idx + 1}: ${stageTitles[titleIdx]}`,
-            objectives: [
-              `Understand and apply key principles of ${stageTitles[titleIdx].toLowerCase()}.`,
-              `Connect concepts in ${topic} to repeatable practical exercises.`,
-            ],
-            summary: `${level} milestone focused on ${stageTitles[titleIdx].toLowerCase()} using curated instructional metadata.`,
-            practiceExercises: [
-              `Complete a focused hands-on exercise demonstrating Module ${idx + 1} skills in ${topic}.`,
-              `Document key takeaways and review common edge cases.`,
-            ],
-            videoIds: distributeVideoIds(idx, selectedIndices.length),
-            ...(idx === 0
-              ? {
-                  miniQuizQuestion: {
-                    question: `What is the primary goal when beginning to learn ${topic}?`,
-                    options: [
-                      'Memorizing disconnected advanced jargon without context',
-                      'Understanding core foundational concepts and everyday real-world applications',
-                      'Skipping conceptual definitions completely',
-                      'Avoiding structured hands-on practice',
-                    ],
-                    correctAnswer: 'Understanding core foundational concepts and everyday real-world applications',
-                    explanation: 'Building a solid conceptual foundation enables accurate intermediate and advanced problem-solving.',
-                  },
-                }
-              : {}),
-          };
-        }),
+        partGroups,
+        modules,
+        matchedCatalogCourses: matchedCatalog.map((c) => ({
+          id: c.id,
+          title: c.title,
+          category: c.category,
+          subcategory: c.subcategory,
+          level: c.level,
+          duration: c.duration,
+          price: c.price,
+          thumbnailUrl: c.thumbnailUrl,
+          youtubeVideoId: c.youtubeVideoId,
+          youtubeUrl: c.youtubeUrl,
+          instructorName: c.instructorName,
+          shortDesc: c.shortDesc,
+        })),
       };
     };
 
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.json({ path: buildFallbackPath() });
+    const cacheKey = [
+      String(mode),
+      topic.toLowerCase(),
+      targetLanguage.toLowerCase(),
+      String(targetModuleCount),
+      videoMetadataList.map((v) => v.videoId).filter(Boolean).sort().join(','),
+    ].join('::');
+
+    const cachedEntry = organizeCourseCache.get(cacheKey);
+    if (cachedEntry && Date.now() - cachedEntry.ts < ORGANIZE_CACHE_TTL_MS) {
+      return res.json({ path: cachedEntry.path, cached: true });
     }
 
+    // Default Built-In Zero-Token Engine: instant, accurate, $0 token cost for users
+    if (mode !== 'gemini') {
+      const builtInPath = buildBuiltInStructuredCoursePath();
+      organizeCourseCache.set(cacheKey, { ts: Date.now(), path: builtInPath });
+      if (organizeCourseCache.size > 200) {
+        const oldestKey = organizeCourseCache.keys().next().value;
+        if (oldestKey) organizeCourseCache.delete(oldestKey);
+      }
+      return res.json({ path: builtInPath });
+    }
+
+    // Optional explicit Gemini enhancement (falls back cleanly to Built-In Engine if key/quota unavailable)
+    const ai = getGeminiClient();
+    if (!ai || Date.now() < geminiQuotaExhaustedUntilMs) {
+      const builtInPath = buildBuiltInStructuredCoursePath();
+      return res.json({ path: builtInPath });
+    }
+
+    const validVideoIdSet = new Set(videoMetadataList.map((v) => v.videoId).filter(Boolean));
     const excelInstruction = isExcelTopic && targetModuleCount === 6
       ? `\nSince this is an Excel topic with 6 modules, structure the 6 modules explicitly as:
 1. Beginner Tutorials
@@ -2888,47 +3460,56 @@ ${JSON.stringify(videoMetadataList)}`,
               },
             },
           }),
-        25000,
+        20000,
         'organize-course'
       );
 
       const parsed = JSON.parse((response.text ?? '{}').trim());
       if (parsed && Array.isArray(parsed.modules) && parsed.modules.length > 0) {
         const modCount = parsed.modules.length;
-        return res.json({
-          path: {
-            id: `ai-path-${Date.now().toString(36)}`,
-            topic,
-            language: targetLanguage,
-            title: parsed.title || `${topic} — AI Organized Learning Path`,
-            overview: parsed.overview || '',
-            aiDisclaimer,
-            sourceMode: 'gemini' as const,
-            createdAt: new Date().toISOString(),
-            modules: parsed.modules.map((m: any, idx: number) => {
-              const rawVids = Array.isArray(m.videoIds)
-                ? m.videoIds.filter((vid: any) => typeof vid === 'string' && validVideoIdSet.has(vid))
-                : [];
-              const finalVideoIds = rawVids.length > 0 ? rawVids : distributeVideoIds(idx, modCount);
-              return {
-                moduleNumber: Number(m.moduleNumber) || idx + 1,
-                level: m.level === 'Advanced' || m.level === 'Intermediate' ? m.level : 'Beginner',
-                title: m.title,
-                objectives: Array.isArray(m.objectives) ? m.objectives : [],
-                summary: m.summary || '',
-                practiceExercises: Array.isArray(m.practiceExercises) ? m.practiceExercises : [],
-                videoIds: finalVideoIds,
-                miniQuizQuestion: m.miniQuizQuestion,
-              };
-            }),
-          },
-        });
+        const baseline = buildBuiltInStructuredCoursePath();
+        const organizedPath = {
+          ...baseline,
+          id: `ai-path-${Date.now().toString(36)}`,
+          title: parsed.title || baseline.title,
+          overview: parsed.overview || baseline.overview,
+          sourceMode: 'gemini' as const,
+          modules: parsed.modules.map((m: any, idx: number) => {
+            const rawVids = Array.isArray(m.videoIds)
+              ? m.videoIds.filter((vid: any) => typeof vid === 'string' && validVideoIdSet.has(vid))
+              : [];
+            const finalVideoIds = rawVids.length > 0 ? rawVids : distributeVideoIds(idx, modCount);
+            const lvl = m.level === 'Advanced' || m.level === 'Intermediate' ? m.level : 'Beginner';
+            return {
+              moduleNumber: Number(m.moduleNumber) || idx + 1,
+              partLabel:
+                lvl === 'Advanced'
+                  ? 'Part 3: Applied Projects & Mastery'
+                  : lvl === 'Intermediate'
+                  ? 'Part 2: Guided Workflows & Practice'
+                  : 'Part 1: Foundations & Core Concepts',
+              level: lvl,
+              title: m.title,
+              objectives: Array.isArray(m.objectives) ? m.objectives : [],
+              summary: m.summary || '',
+              practiceExercises: Array.isArray(m.practiceExercises) ? m.practiceExercises : [],
+              videoIds: finalVideoIds,
+              recommendedVideos: finalVideoIds.map((vid: string) => videoById.get(vid)).filter(Boolean),
+              miniQuizQuestion: m.miniQuizQuestion,
+            };
+          }),
+        };
+
+        organizeCourseCache.set(cacheKey, { ts: Date.now(), path: organizedPath });
+        return res.json({ path: organizedPath });
       }
-    } catch (err) {
-      console.warn('Gemini organize-course warning, returning structured fallback:', err);
+    } catch (err: any) {
+      console.warn('Gemini organize-course unavailable, returning Built-In Engine path:', err?.message || err);
     }
 
-    return res.json({ path: buildFallbackPath() });
+    const fallbackPath = buildBuiltInStructuredCoursePath();
+    organizeCourseCache.set(cacheKey, { ts: Date.now(), path: fallbackPath });
+    return res.json({ path: fallbackPath });
   });
 
   // ------------------------------------------------------------------
@@ -2971,6 +3552,7 @@ ${JSON.stringify(videoMetadataList)}`,
     );
     const candidatePool = baseFiltered.length > 0 ? baseFiltered : index.items.map((i) => i.course);
 
+    const expandedDiscover = normalizeAndExpandQuery(rawQuery || intent.cleanedQuery || '');
     const scoreCourse = (course: MarketplaceCourse) => {
       const subjectBlob = [
         course.title,
@@ -2996,27 +3578,53 @@ ${JSON.stringify(videoMetadataList)}`,
       const subLower = (course.subcategory || '').toLowerCase();
 
       let searchScore = 0;
+      if (rawQuery.trim().length > 0) {
+        searchScore += scoreSearchMatch(
+          {
+            id: course.id,
+            aliasId: course.aliasId,
+            title: course.title,
+            category: course.category,
+            categories: course.categories,
+            subcategory: course.subcategory,
+            topic: course.topic,
+            keywords: course.keywords,
+            skills: course.skillsAcquired,
+            shortDesc: course.shortDesc,
+            instructorName: course.instructorName || course.instructor?.name,
+            youtubeChannelName: course.youtubeChannelName,
+            language: course.language,
+          },
+          rawQuery
+        );
+      }
+
       const desiredLower = (intent.desiredSkill || '').toLowerCase();
       const subDesired = desiredLower
         .split(/[&,/]+/)
         .map((s) => s.trim())
         .filter((s) => s.length >= 2 && s !== 'taxation');
 
-      if (desiredLower && desiredLower.length >= 2 && subjectBlob.includes(desiredLower)) {
-        searchScore += 65;
+      if (desiredLower && desiredLower.length >= 2 && matchesWordBoundary(subjectBlob, desiredLower)) {
+        searchScore += 45;
       }
       for (const sd of subDesired) {
-        if (catLower === sd || catLower.includes(sd)) searchScore += 75;
-        else if (titleLower.includes(sd)) searchScore += 60;
-        else if (subLower.includes(sd)) searchScore += 40;
+        if (catLower === sd || matchesWordBoundary(catLower, sd)) searchScore += 55;
+        else if (matchesWordBoundary(titleLower, sd)) searchScore += 45;
+        else if (matchesWordBoundary(subLower, sd)) searchScore += 30;
       }
 
       for (const term of intentTerms) {
         if (term.length < 2) continue;
-        if (catLower === term || catLower.includes(term)) searchScore += 32;
-        else if (titleLower.includes(term)) searchScore += 24;
-        else if (subLower.includes(term)) searchScore += 18;
-        else if (subjectBlob.includes(term)) searchScore += 9;
+        if (catLower === term || matchesWordBoundary(catLower, term)) searchScore += 22;
+        else if (matchesWordBoundary(titleLower, term)) searchScore += 18;
+        else if (matchesWordBoundary(subLower, term)) searchScore += 12;
+        else if (matchesWordBoundary(subjectBlob, term)) searchScore += 6;
+      }
+
+      // Bonus for core phrase match
+      if (expandedDiscover.corePhrase && matchesWordBoundary(titleLower, expandedDiscover.corePhrase)) {
+        searchScore += 40;
       }
 
       // Degree context bonus (strictly smaller than search intent so current search always wins!)
@@ -3130,35 +3738,35 @@ ${JSON.stringify(videoMetadataList)}`,
       () => `Applied capstone and deeper mastery track once you finish core ${topicLabel} basics.`
     );
 
-    // Fetch real YouTube educational videos (API first if configured, curated fallback otherwise)
-    let youtubeResources = selectCuratedFallbackVideos(`${topicLabel} ${intent.degreeOrClass || ''}`, '').map((v) => ({
+    // Fetch real YouTube educational videos (live YouTube discovery + curated topic fallback)
+    let youtubeResources = selectCuratedFallbackVideos(`${expandedDiscover.corePhrase || topicLabel} ${intent.degreeOrClass || ''}`, '').map((v) => ({
       ...v,
       detectedLanguage: intent.preferredLanguage || 'English',
       embeddable: true,
     }));
     let youtubeSource = 'curated_library';
 
-    const quota = youtubeDiscoveryEngine.getQuotaStatus();
-    if (quota.apiKeyConfigured && topicLabel) {
+    if (topicLabel) {
       try {
         const ytPage = await youtubeDiscoveryEngine.discoverPage({
-          query: `${topicLabel} ${intent.educationLevelCode === 'A' || intent.educationLevelCode === 'B' ? intent.degreeOrClass || '' : ''} tutorial`,
+          query: `${expandedDiscover.corePhrase || topicLabel} ${intent.educationLevelCode === 'A' || intent.educationLevelCode === 'B' ? intent.degreeOrClass || '' : ''} tutorial`,
           category: intent.primarySubject || 'Education',
           languageLabel: intent.preferredLanguage || 'English',
           searchType: 'video',
           maxResults: 6,
         });
         if (ytPage.items.length > 0) {
-          youtubeSource = 'youtube_data_api';
+          youtubeSource = process.env.YOUTUBE_API_KEY ? 'youtube_data_api' : 'youtube_public_search';
           youtubeResources = ytPage.items.map((item) => ({
             id: item.youtubeVideoId || item.id,
             videoId: item.youtubeVideoId || '',
             youtubeId: item.youtubeVideoId || '',
+            youtubeUrl: item.youtubeVideoId ? `https://www.youtube.com/watch?v=${item.youtubeVideoId}` : undefined,
             title: item.title,
             channelTitle: item.youtubeChannelName,
             thumbnail: item.thumbnailUrl,
             thumbnailUrl: item.thumbnailUrl,
-            duration: item.duration || 'N/A',
+            duration: item.duration || 'Tutorial',
             level: item.level === 'All Levels' ? 'Beginner' : item.level,
             recommendedReason: `External YouTube lecture supporting ${topicLabel} mastery.`,
             embedUrl: `https://www.youtube-nocookie.com/embed/${item.youtubeVideoId}`,

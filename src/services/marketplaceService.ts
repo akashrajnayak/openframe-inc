@@ -28,6 +28,7 @@ import {
   MarketplaceFilterParams,
   EducationTaxonomyItem,
   EducationCategoryCode,
+  AiLearningPath,
 } from '../types';
 import {
   ALL_90_CATEGORIES,
@@ -41,12 +42,19 @@ import {
   buildCourseSearchTokens,
   matchesDurationFilter,
   synthesizeBaseCourse,
+  getCategoryFallbackImage,
 } from '../data/marketplaceCatalogData';
 import {
   CORPORATE_TRAINING_CATEGORIES,
   inferCorporateContentType,
 } from '../data/corporateTrainingTaxonomy';
-import { normalizeAndExpandQuery } from '../utils/searchIntelligence';
+import {
+  normalizeAndExpandQuery,
+  scoreSearchMatch,
+  parseEducationalIntent,
+} from '../utils/searchIntelligence';
+import { compute90PercentCoursePricing } from '../utils/pricingEngine';
+import { LKG_TO_PG_CURRICULUM_COURSES } from '../data/lkgToPgCurriculumData';
 
 export {
   ALL_90_CATEGORIES,
@@ -61,6 +69,173 @@ export {
   matchesDurationFilter,
   synthesizeBaseCourse as synthesizeCourse,
 };
+
+const MODELED_COURSES_CACHE_KEY = 'openframe_modeled_courses_v1';
+const YT_COURSE_CACHE_KEY = 'openframe_yt_course_cache_v1';
+
+function readLocalCourseMap(storageKey: string): Record<string, MarketplaceCourse> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalCourseEntry(storageKey: string, course: MarketplaceCourse): void {
+  if (typeof window === 'undefined' || !course?.id) return;
+  try {
+    const map = readLocalCourseMap(storageKey);
+    map[course.id.toLowerCase()] = course;
+    const keys = Object.keys(map);
+    if (keys.length > 60) {
+      delete map[keys[0]];
+    }
+    localStorage.setItem(storageKey, JSON.stringify(map));
+  } catch {
+    // ignore storage quota limits
+  }
+}
+
+export function cacheModeledCourse(course: MarketplaceCourse): void {
+  writeLocalCourseEntry(MODELED_COURSES_CACHE_KEY, course);
+}
+
+export function cacheYouTubeCourse(course: MarketplaceCourse): void {
+  writeLocalCourseEntry(YT_COURSE_CACHE_KEY, course);
+}
+
+export function aiPathToMarketplaceCourse(
+  path: AiLearningPath,
+  videoPool: any[] = []
+): MarketplaceCourse {
+  const byVid = new Map<string, any>();
+  for (const v of videoPool) {
+    const id = v?.videoId || v?.youtubeId || v?.id;
+    if (id) byVid.set(String(id), v);
+  }
+  for (const mod of path.modules || []) {
+    for (const v of mod.recommendedVideos || []) {
+      const id = v?.videoId || v?.youtubeId || v?.id;
+      if (id && !byVid.has(String(id))) byVid.set(String(id), v);
+    }
+  }
+
+  const orderedRecVideos: any[] = [];
+  const seenVids = new Set<string>();
+  const modules = (path.modules || []).map((mod, idx) => {
+    const modVideos = (mod.recommendedVideos && mod.recommendedVideos.length > 0
+      ? mod.recommendedVideos
+      : (mod.videoIds || []).map((id) => byVid.get(id)).filter(Boolean)
+    ).map((v: any) => {
+      const vid = v.videoId || v.youtubeId || v.id || '';
+      const ytUrl = v.youtubeUrl || (vid ? `https://www.youtube.com/watch?v=${vid}` : undefined);
+      const norm = {
+        id: vid || `mod-vid-${idx}`,
+        videoId: vid,
+        youtubeId: vid,
+        youtubeUrl: ytUrl,
+        title: v.title || `${mod.title} Tutorial`,
+        channelTitle: v.channelTitle || 'YouTube Educator',
+        thumbnail: v.thumbnail || v.thumbnailUrl || (vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : ''),
+        thumbnailUrl: v.thumbnailUrl || v.thumbnail || (vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : ''),
+        duration: v.duration || 'Tutorial',
+        level: (mod.level === 'Advanced' || mod.level === 'Intermediate' ? mod.level : 'Beginner') as 'Beginner' | 'Intermediate' | 'Advanced',
+        recommendedReason: v.recommendedReason || v.description || mod.summary,
+        embedUrl: v.embedUrl || (vid ? `https://www.youtube-nocookie.com/embed/${vid}` : undefined),
+        source: v.source || 'curated_library',
+      };
+      if (vid && !seenVids.has(vid)) {
+        seenVids.add(vid);
+        orderedRecVideos.push(norm);
+      }
+      return norm;
+    });
+
+    return {
+      moduleNumber: Number(mod.moduleNumber) || idx + 1,
+      partLabel: mod.partLabel,
+      level: mod.level,
+      title: mod.title,
+      duration: '1 Week',
+      lessons: [
+        ...(mod.objectives || []),
+        ...(mod.practiceExercises || []).map((p) => `Practice: ${p}`),
+      ].slice(0, 4),
+      videoIds: mod.videoIds || modVideos.map((v: any) => v.videoId).filter(Boolean),
+      recommendedVideos: modVideos,
+    };
+  });
+
+  const firstVid = orderedRecVideos[0];
+  const intent = parseEducationalIntent(path.topic || path.title);
+  const category = path.matchedCatalogCourses?.[0]?.category || intent.primarySubject || 'Digital Skills & Productivity';
+  const thumb =
+    firstVid?.thumbnailUrl ||
+    firstVid?.thumbnail ||
+    path.matchedCatalogCourses?.[0]?.thumbnailUrl ||
+    getCategoryFallbackImage(category, 'Technology');
+  const firstVidId = firstVid?.videoId || path.matchedCatalogCourses?.[0]?.youtubeVideoId;
+  const modeledPricing = compute90PercentCoursePricing({
+    rawPrice: path.price ?? path.matchedCatalogCourses?.[0]?.price,
+    category,
+    title: path.title,
+    educationLevel: path.educationLevel || intent.educationLevelCode,
+    pricingTier: 'Starter',
+  });
+
+  return {
+    id: path.id,
+    title: path.title,
+    category,
+    categories: [category],
+    categoryGroup: 'Technology',
+    subcategory: intent.desiredSkill || path.topic || category,
+    level: 'All Levels',
+    duration: `${modules.length} Modules (${Math.max(2, modules.length)} Weeks)`,
+    estimatedHours: Math.max(4, modules.length * 2),
+    pricingTier: modeledPricing.pricingTier,
+    price: modeledPricing.finalPriceInr,
+    marketBenchmarkPrice: modeledPricing.marketBenchmarkPrice,
+    discountPercent: modeledPricing.discountPercent,
+    isFree: false,
+    board: path.board,
+    educationLevels: path.educationLevel ? [path.educationLevel] : intent.educationLevelCode ? [intent.educationLevelCode] : undefined,
+    status: 'Published',
+    courseType: firstVidId ? 'youtube_video' : 'standard',
+    contentType: 'Full course',
+    topic: path.topic,
+    instructorName: 'OpenFrame Built-In AI Curriculum Faculty',
+    youtubeChannelName: firstVid?.channelTitle || 'OpenFrame Curated',
+    youtubeVideoId: firstVidId,
+    youtubeUrl: firstVidId ? `https://www.youtube.com/watch?v=${firstVidId}` : undefined,
+    language: path.language || 'English',
+    rating: 4.9,
+    enrolledCount: 1500,
+    isPopular: true,
+    isRecommended: true,
+    certificateEligibility: true,
+    thumbnailUrl: thumb,
+    imageUrl: thumb,
+    shortDesc: path.overview || `Structured ${modules.length}-module modeled course for ${path.topic}.`,
+    description: path.overview,
+    learningObjectives: modules.flatMap((m) => m.lessons || []).slice(0, 6),
+    targetAudience: `Learners, students, and professionals studying ${path.topic}`,
+    skillsAcquired: [intent.desiredSkill || path.topic, category, 'Applied Practice'],
+    practicalProjects: modules
+      .flatMap((m) => (m.lessons || []).filter((l) => l.startsWith('Practice:')))
+      .slice(0, 3),
+    modules,
+    recommendedVideos: orderedRecVideos,
+    assessmentMethod: 'Verification Quiz + Practical Project + Faculty Defense',
+    certificateNote: 'Eligible for OpenFrame Certificate upon completing lessons, quiz, and project.',
+    keywords: [path.topic, category, 'modeled course', 'youtube'],
+    createdAt: path.createdAt,
+    updatedAt: path.updatedAt || path.createdAt || new Date().toISOString(),
+  };
+}
 
 export function normalizeCourseTitleKey(title: string): string {
   return String(title || '')
@@ -211,25 +386,19 @@ class MarketplaceService {
       input.courseType ||
       (youtubePlaylistId ? 'youtube_playlist' : youtubeVideoId ? 'youtube_video' : 'standard');
 
-    const price = Math.max(0, Number(input.price ?? 0));
-    const isFree = price === 0 || Boolean(input.isFree);
-    const rawTier = input.pricingTier as string | undefined;
-    const pricingTier: MarketplacePricingTier =
-      rawTier && rawTier !== 'Free'
-        ? (rawTier as MarketplacePricingTier)
-        : price >= 2000
-        ? 'Specialised'
-        : price >= 1400
-        ? 'Advanced'
-        : price >= 900
-        ? 'Professional'
-        : price >= 400
-        ? 'Basic'
-        : price > 0
-        ? 'Starter'
-        : input.libraryCollection === 'corporate_training'
-        ? 'Corporate Track'
-        : 'Academic Access';
+    const priced = compute90PercentCoursePricing({
+      rawPrice: input.price,
+      category,
+      categoryGroup,
+      level: input.level,
+      pricingTier: input.pricingTier as string | undefined,
+      educationLevel: input.educationLevels?.[0],
+      degreeOrClass: input.degreeProgrammes?.[0],
+      title: input.title,
+    });
+    const price = priced.finalPriceInr;
+    const isFree = false;
+    const pricingTier: MarketplacePricingTier = priced.pricingTier;
 
     const fallbackThumb = youtubeVideoId
       ? `https://i.ytimg.com/vi/${youtubeVideoId}/hqdefault.jpg`
@@ -284,6 +453,8 @@ class MarketplaceService {
       estimatedHours: input.estimatedHours ?? 12,
       pricingTier,
       price,
+      marketBenchmarkPrice: priced.marketBenchmarkPrice,
+      discountPercent: priced.discountPercent,
       isFree,
       status: input.status || 'Published',
       courseType,
@@ -590,38 +761,25 @@ class MarketplaceService {
     }
 
     if (params.query && params.query.trim()) {
-      const expanded = normalizeAndExpandQuery(params.query);
-      const terms = expanded.tokens;
-      const blob = [
-        course.id,
-        course.aliasId || '',
-        course.title,
-        course.category,
-        ...(course.categories || []),
-        course.subcategory,
-        course.topic || '',
-        course.contentType || '',
-        course.categoryGroup,
-        course.shortDesc,
-        course.instructorName || course.instructor?.name || '',
-        course.youtubeChannelName || '',
-        course.language || 'English',
-        ...(course.keywords || []),
-        ...(course.skillsAcquired || []),
-      ]
-        .join(' ')
-        .toLowerCase();
-      let directMatch = true;
-      for (const term of terms) {
-        if (!blob.includes(term)) {
-          directMatch = false;
-          break;
-        }
-      }
-      if (!directMatch) {
-        const synMatch = expanded.expandedTerms.some((alt) => blob.includes(alt));
-        if (!synMatch) return false;
-      }
+      const relScore = scoreSearchMatch(
+        {
+          id: course.id,
+          aliasId: course.aliasId,
+          title: course.title,
+          category: course.category,
+          categories: course.categories,
+          subcategory: course.subcategory,
+          topic: course.topic,
+          keywords: course.keywords,
+          skills: course.skillsAcquired,
+          shortDesc: course.shortDesc,
+          instructorName: course.instructorName || course.instructor?.name,
+          youtubeChannelName: course.youtubeChannelName,
+          language: course.language,
+        },
+        params.query
+      );
+      if (relScore <= 0) return false;
     }
 
     if (params.category && params.category !== 'All') {
@@ -696,8 +854,14 @@ class MarketplaceService {
       const ch = (course.youtubeChannelName || '').toLowerCase();
       if (!ch.includes(targetCh)) return false;
     }
-    if (params.accessType === 'free' && course.price > 0) return false;
+    if (params.accessType === 'free' && course.price > 799) return false;
     if (params.accessType === 'paid' && course.price <= 0) return false;
+    if ((params as any).board && (params as any).board !== 'All') {
+      const targetBoard = String((params as any).board).toLowerCase();
+      const boards = [course.board, ...(course.boards || [])].filter(Boolean).map((b) => String(b).toLowerCase());
+      const tokens = `${course.title} ${course.category} ${course.shortDesc}`.toLowerCase();
+      if (!boards.some((b) => b.includes(targetBoard)) && !tokens.includes(targetBoard)) return false;
+    }
     if (params.educationLevel && params.educationLevel !== 'All') {
       const targetLvl = params.educationLevel.toLowerCase();
       const levels = (course.educationLevels || []).map((l) => l.toLowerCase());
@@ -787,7 +951,42 @@ class MarketplaceService {
     });
 
     const firestoreMatches = [...customMatches, ...overrideMatches];
+    const queryStr = params.query?.trim() || '';
     firestoreMatches.sort((a, b) => {
+      if (queryStr && sortBy === 'popular') {
+        const sDiff =
+          scoreSearchMatch(
+            {
+              id: b.id,
+              aliasId: b.aliasId,
+              title: b.title,
+              category: b.category,
+              categories: b.categories,
+              subcategory: b.subcategory,
+              topic: b.topic,
+              keywords: b.keywords,
+              skills: b.skillsAcquired,
+              shortDesc: b.shortDesc,
+            },
+            queryStr
+          ) -
+          scoreSearchMatch(
+            {
+              id: a.id,
+              aliasId: a.aliasId,
+              title: a.title,
+              category: a.category,
+              categories: a.categories,
+              subcategory: a.subcategory,
+              topic: a.topic,
+              keywords: a.keywords,
+              skills: a.skillsAcquired,
+              shortDesc: a.shortDesc,
+            },
+            queryStr
+          );
+        if (sDiff !== 0) return sDiff;
+      }
       if (sortBy === 'popular') return b.enrolledCount - a.enrolledCount;
       if (sortBy === 'rating') return b.rating - a.rating;
       if (sortBy === 'price_low') return a.price - b.price;
@@ -895,27 +1094,33 @@ class MarketplaceService {
     if (clean.length >= 2) {
       try {
         const publishedDocs = await this.fetchPublishedFirestoreCourses();
-        let added = 0;
-        for (const c of publishedDocs) {
-          if (added >= 10) break;
-          if (c.status === 'Draft' || c.status === 'Archived' || c.status === 'Unavailable') continue;
-          const haystack = [
-            c.title,
-            c.category,
-            c.subcategory,
-            c.instructorName,
-            c.youtubeChannelName,
-            ...(c.keywords || []),
-            ...(c.searchTokens || []),
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-          if (!haystack.includes(clean)) continue;
+        const rankedCustom = publishedDocs
+          .filter((c) => c.status !== 'Draft' && c.status !== 'Archived' && c.status !== 'Unavailable')
+          .map((c) => ({
+            c,
+            score: scoreSearchMatch(
+              {
+                id: c.id,
+                aliasId: c.aliasId,
+                title: c.title,
+                category: c.category,
+                subcategory: c.subcategory,
+                keywords: c.keywords,
+                skills: c.skillsAcquired,
+                instructorName: c.instructorName,
+                youtubeChannelName: c.youtubeChannelName,
+              },
+              clean
+            ),
+          }))
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 6);
+
+        for (const { c } of rankedCustom) {
           const key = `course:${c.id}`;
           if (!seen.has(key)) {
             seen.add(key);
-            added++;
             suggestions.push({
               type: 'course',
               id: c.id,
@@ -944,8 +1149,10 @@ class MarketplaceService {
         }
       }
     } catch {
-      // Fallback to category list matching
-      ALL_MARKETPLACE_CATEGORIES.filter((c) => !clean || c.toLowerCase().includes(clean))
+      const expanded = normalizeAndExpandQuery(clean);
+      ALL_MARKETPLACE_CATEGORIES.filter(
+        (c) => !clean || expanded.expandedTerms.some((t) => c.toLowerCase().includes(t))
+      )
         .slice(0, 6)
         .forEach((cat) => {
           suggestions.push({ type: 'category', label: cat, sublabel: 'Category', category: cat });
@@ -956,11 +1163,20 @@ class MarketplaceService {
   }
 
   /**
-   * Resolves single course by ID from Firestore first, then server base index, then deterministic fallback.
+   * Resolves single course by ID from local modeled/YT cache, Firestore, AI paths, server base index, YouTube resolver, or fallback synthesis.
    */
   async getCourseById(id: string): Promise<MarketplaceCourse | null> {
     const cleanId = id.trim();
     if (!cleanId) return null;
+    const lowerId = cleanId.toLowerCase();
+
+    // 0. Check local modeled/YouTube caches & LKG-to-PG static curriculum first
+    const modeledLocal = readLocalCourseMap(MODELED_COURSES_CACHE_KEY)[lowerId];
+    if (modeledLocal) return modeledLocal;
+    const ytLocal = readLocalCourseMap(YT_COURSE_CACHE_KEY)[lowerId];
+    if (ytLocal) return ytLocal;
+    const lkgMatch = LKG_TO_PG_CURRICULUM_COURSES.find((c) => c.id.toLowerCase() === lowerId);
+    if (lkgMatch) return lkgMatch;
 
     // 1. Check Firestore directly
     try {
@@ -974,7 +1190,21 @@ class MarketplaceService {
       console.warn('Firestore getCourseById check:', err);
     }
 
-    // 2. Check server indexed base catalog (handles OF-AI-001, OF-CRS-0101, OF-CRS-00001..15000)
+    // 1b. Check ai_learning_paths in Firestore if this is a modeled AI course ID
+    if (lowerId.startsWith('ai-path-') || lowerId.startsWith('ai_path_')) {
+      try {
+        const pathSnap = await getDoc(doc(db, 'ai_learning_paths', cleanId));
+        if (pathSnap.exists()) {
+          const converted = aiPathToMarketplaceCourse(pathSnap.data() as AiLearningPath);
+          cacheModeledCourse(converted);
+          return converted;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 2. Check server indexed base catalog (handles OF-AI-*, OF-CRS-ANIM-*, OF-CRS-00001..16000, yt-*, disc-vid-*, disc-pl-*)
     try {
       const res = await fetch(`/api/marketplace/base-course/${encodeURIComponent(cleanId)}`);
       if (res.ok) {
@@ -985,12 +1215,88 @@ class MarketplaceService {
       // Fallback
     }
 
-    const match = cleanId.toLowerCase().match(/^of-crs-0*(\d+)$/);
+    const match = lowerId.match(/^of-crs-0*(\d+)$/);
     if (match && match[1]) {
       const idx = parseInt(match[1], 10);
-      if (idx >= 1 && idx <= 15000) {
+      if (idx >= 1 && idx <= 16000) {
         return synthesizeBaseCourse(idx);
       }
+    }
+
+    // 3. Client-side YouTube ID fallback so bookmarked/modeled YouTube lessons never show Course Not Found
+    const ytMatch = cleanId.match(/^(?:yt-|disc-vid-)([A-Za-z0-9_-]{6,20})$/i);
+    if (ytMatch?.[1]) {
+      const vid = ytMatch[1];
+      const thumb = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+      const ytPriced = compute90PercentCoursePricing({
+        category: 'Digital Skills & Productivity',
+        title: `OpenFrame YouTube Lesson (${vid})`,
+        level: 'Beginner',
+        pricingTier: 'Starter',
+      });
+      return {
+        id: cleanId,
+        title: `OpenFrame YouTube Lesson (${vid})`,
+        category: 'Digital Skills & Productivity',
+        categories: ['Digital Skills & Productivity'],
+        categoryGroup: 'Technology',
+        subcategory: 'Video Tutorial',
+        level: 'Beginner',
+        duration: 'Self-Paced',
+        estimatedHours: 1,
+        pricingTier: ytPriced.pricingTier,
+        price: ytPriced.finalPriceInr,
+        marketBenchmarkPrice: ytPriced.marketBenchmarkPrice,
+        discountPercent: ytPriced.discountPercent,
+        isFree: false,
+        status: 'Published',
+        courseType: 'youtube_video',
+        contentType: 'Tutorial',
+        instructorName: 'YouTube Educator',
+        youtubeChannelName: 'YouTube Educator',
+        youtubeVideoId: vid,
+        youtubeUrl: `https://www.youtube.com/watch?v=${vid}`,
+        language: 'English',
+        rating: 4.8,
+        enrolledCount: 500,
+        certificateEligibility: true,
+        thumbnailUrl: thumb,
+        imageUrl: thumb,
+        shortDesc: 'Self-paced OpenFrame video tutorial with verification quiz and capstone tracking.',
+        description: 'Self-paced OpenFrame YouTube tutorial structured with guided objectives, practice checks, and certificate assessment.',
+        learningObjectives: ['Watch the full guided walkthrough', 'Verify understanding with the quiz'],
+        targetAudience: 'Students, professionals, and self-paced learners',
+        skillsAcquired: ['Practical Mastery'],
+        practicalProjects: ['Guided Concept Practice & Quiz'],
+        assessmentMethod: 'Verification Quiz & Guided Review',
+        certificateNote: 'Eligible for OpenFrame Certificate upon completing the video lesson and verification quiz.',
+        updatedAt: new Date().toISOString(),
+        modules: [
+          {
+            moduleNumber: 1,
+            title: 'Video Lesson & Practical Review',
+            duration: '1h',
+            lessons: ['Core Video Lecture', 'Practice Application'],
+            videoIds: [vid],
+          },
+        ],
+        recommendedVideos: [
+          {
+            id: cleanId,
+            videoId: vid,
+            youtubeId: vid,
+            youtubeUrl: `https://www.youtube.com/watch?v=${vid}`,
+            title: `OpenFrame YouTube Lesson (${vid})`,
+            channelTitle: 'YouTube Educator',
+            thumbnail: thumb,
+            thumbnailUrl: thumb,
+            duration: 'Tutorial',
+            level: 'Beginner',
+            recommendedReason: 'Direct YouTube lesson tutorial.',
+            embedUrl: `https://www.youtube-nocookie.com/embed/${vid}`,
+          },
+        ],
+      };
     }
 
     return null;
@@ -1568,14 +1874,12 @@ class MarketplaceService {
         row[h] = values[idx] ?? '';
       });
 
-      const price = Math.max(0, Number(row.price || 0));
-      const rawTier = (row.pricingTier || '').trim();
-      const pricingTier =
-        rawTier && rawTier.toLowerCase() !== 'free'
-          ? (rawTier as any)
-          : price > 0
-          ? 'Basic'
-          : 'Academic Access';
+      const csvPriced = compute90PercentCoursePricing({
+        rawPrice: Number(row.price || 0),
+        category: row.category || 'Artificial Intelligence',
+        title: row.title || '',
+        pricingTier: (row.pricingTier || '').trim(),
+      });
 
       records.push({
         id: row.id || undefined,
@@ -1595,8 +1899,10 @@ class MarketplaceService {
         level: (row.level as any) || 'All Levels',
         duration: row.duration || '12 Hours',
         isFree: false,
-        price,
-        pricingTier,
+        price: csvPriced.finalPriceInr,
+        marketBenchmarkPrice: csvPriced.marketBenchmarkPrice,
+        discountPercent: csvPriced.discountPercent,
+        pricingTier: csvPriced.pricingTier,
         certificateEligibility: row.certificateEligibility ? row.certificateEligibility.toLowerCase() !== 'false' : true,
         keywords: row.keywords ? row.keywords.split('|').map((s) => s.trim()).filter(Boolean) : undefined,
         status: (row.status as any) || 'Published',
@@ -1958,8 +2264,8 @@ class MarketplaceService {
       courseType: course.courseType || 'standard',
       level: course.level,
       duration: course.duration,
-      isFree: Number(course.price || 0) === 0 || Boolean(course.isFree),
-      price: Number(course.price || 0),
+      isFree: false,
+      price: compute90PercentCoursePricing({ rawPrice: course.price, category: course.category, title: course.title }).finalPriceInr,
       savedAt: new Date().toISOString(),
     });
     await setDoc(ref, fav);

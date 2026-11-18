@@ -41,7 +41,10 @@ import {
 import {
   marketplaceService,
   ALL_MARKETPLACE_CATEGORIES,
-  SUPPORTED_COURSE_LANGUAGES
+  SUPPORTED_COURSE_LANGUAGES,
+  aiPathToMarketplaceCourse,
+  cacheModeledCourse,
+  cacheYouTubeCourse
 } from '../services/marketplaceService';
 import {
   MarketplaceCourse,
@@ -162,6 +165,7 @@ export const CourseMarketplacePage: React.FC = () => {
   const [aiPathOpen, setAiPathOpen] = useState(false);
   const [aiPathLoading, setAiPathLoading] = useState(false);
   const [aiPathData, setAiPathData] = useState<AiLearningPath | null>(null);
+  const [aiPathError, setAiPathError] = useState<string | null>(null);
   const [aiModuleCount, setAiModuleCount] = useState<3 | 6 | 9>(3);
   const [savingAiPath, setSavingAiPath] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -242,6 +246,83 @@ export const CourseMarketplacePage: React.FC = () => {
           : `https://www.youtube-nocookie.com/embed/${vidId}`),
       keyTopicsCovered: [topicFallback || searchQuery.trim() || yt.title || 'Learning Topic'],
     };
+  };
+
+  const buildYouTubeMarketplaceCourse = (yt: any, topicFallback?: string): MarketplaceCourse => {
+    const vidId = String(yt?.videoId || yt?.youtubeId || String(yt?.id || '').replace(/^yt-/, '') || 'JMUxmLyrhSk');
+    const plId = yt?.playlistId || yt?.playlistInfo?.playlistId;
+    const ytCourseId = yt?.id && (String(yt.id).startsWith('yt-') || String(yt.id).startsWith('disc-'))
+      ? String(yt.id)
+      : `yt-${vidId}`;
+    const thumb = yt?.thumbnail || yt?.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+    const youtubeUrl = yt?.youtubeUrl || (plId
+      ? `https://www.youtube.com/playlist?list=${plId}`
+      : `https://www.youtube.com/watch?v=${vidId}`);
+    const courseObj: MarketplaceCourse = {
+      id: ytCourseId,
+      title: yt?.title || `${topicFallback || 'OpenFrame'} Video Course`,
+      shortDesc: yt?.description || yt?.recommendedReason || `Structured YouTube course on ${topicFallback || yt?.title || 'Core Skills'}.`,
+      description: yt?.description || `Curated YouTube educational track by ${yt?.channelTitle || 'OpenFrame YouTube Faculty'} paired with OpenFrame syllabus tracking and assessments.`,
+      category: selectedCategory !== 'All' ? selectedCategory : 'Applied Digital & Career Skills',
+      subcategory: topicFallback || 'YouTube Tutorial',
+      categoryGroup: 'Vocational, Professional & Open Skills',
+      language: yt?.language || (selectedLanguage !== 'All' ? selectedLanguage : 'English'),
+      pricingTier: 'Academic Access',
+      price: 0,
+      isFree: true,
+      level: yt?.level === 'Advanced' ? 'Advanced' : yt?.level === 'Intermediate' ? 'Intermediate' : 'Beginner',
+      duration: yt?.duration || 'Self-Paced',
+      status: 'Published',
+      certificateEligibility: true,
+      certificateNote: 'Eligible for OpenFrame Certificate upon completing video lessons and assessment.',
+      imageUrl: thumb,
+      thumbnailUrl: thumb,
+      courseType: plId ? 'youtube_playlist' : 'youtube_video',
+      youtubeVideoId: vidId,
+      youtubeUrl,
+      youtubePlaylistId: plId,
+      youtubePlaylistUrl: plId ? `https://www.youtube.com/playlist?list=${plId}` : undefined,
+      youtubeChannelName: yt?.channelTitle || 'YouTube Educator',
+      channelThumbnail: yt?.channelThumbnail,
+      viewCount: yt?.viewCount,
+      publishedDate: yt?.publishedAt,
+      instructorName: yt?.channelTitle || 'OpenFrame YouTube Faculty',
+      recommendedVideos: [mapLiveYoutubeToExtended(yt, topicFallback)],
+      learningObjectives: [`Master key concepts from ${yt?.title || topicFallback || 'this video course'}`, 'Complete guided assessment & applied review'],
+      targetAudience: `Learners and students exploring ${topicFallback || 'practical skills'}`,
+      skillsAcquired: [topicFallback || yt?.title || 'Practical Application', 'Self-Paced Study'],
+      practicalProjects: [`Applied exercise based on ${yt?.title || topicFallback || 'this tutorial'}`],
+      assessmentMethod: 'Verification Quiz & Guided Review',
+      rating: 4.8,
+      reviewCount: 0,
+      enrolledCount: 0,
+      modules: [
+        {
+          id: `${ytCourseId}-mod-1`,
+          moduleNumber: 1,
+          partLabel: 'Part 1: Video Walkthrough',
+          title: `Part 1 · Core Lesson: ${yt?.title || 'Video Walkthrough'}`,
+          duration: yt?.duration || '45 Mins',
+          lessons: [yt?.title || topicFallback || 'Video Lecture'],
+          videoIds: [vidId],
+          recommendedVideos: [mapLiveYoutubeToExtended(yt, topicFallback)],
+        },
+        {
+          id: `${ytCourseId}-mod-2`,
+          moduleNumber: 2,
+          partLabel: 'Part 2: Guided Practice',
+          title: `Part 2 · Guided Practice & Concept Check`,
+          duration: '30 Mins',
+          lessons: ['Hands-On Exercise', 'Self-Assessment Quiz'],
+          videoIds: [vidId],
+          recommendedVideos: [mapLiveYoutubeToExtended(yt, topicFallback)],
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    cacheYouTubeCourse(courseObj);
+    return courseObj;
   };
 
   // Explicit YouTube Data API v3 Search (ONLY on initial cached arrival, explicit submit, suggestion click, chip/category click, URL load, or Retry/Load More — NEVER on keystrokes)
@@ -677,7 +758,8 @@ export const CourseMarketplacePage: React.FC = () => {
     overrideCount?: 3 | 6 | 9,
     videosOverride?: any[],
     topicOverride?: string,
-    languageOverride?: string
+    languageOverride?: string,
+    modeOverride?: 'builtin' | 'gemini'
   ) => {
     const topic =
       (topicOverride ?? searchQuery).trim() ||
@@ -688,16 +770,26 @@ export const CourseMarketplacePage: React.FC = () => {
     const langBase = languageOverride ?? selectedLanguage;
     setAiPathOpen(true);
     setAiPathLoading(true);
+    setAiPathError(null);
     try {
       const generated = await quinnAiService.organizeCoursePath({
         query: topic,
         language: langBase !== 'All' ? langBase : detectQueryLanguage(topic).label,
         videos: videosSource.slice(0, 9),
         moduleCount: countToUse,
+        mode: modeOverride || 'builtin',
       });
       if (generated) {
         setAiPathData(generated);
+        const combinedPool = [...videosSource, ...(discoveryResult?.youtubeResources || [])];
+        const modeledCourse = aiPathToMarketplaceCourse(generated, combinedPool);
+        cacheModeledCourse(modeledCourse);
       }
+    } catch (err: any) {
+      setAiPathData(null);
+      setAiPathError(
+        err?.message || 'Unable to organize learning path right now. Please try again.'
+      );
     } finally {
       setAiPathLoading(false);
     }
@@ -707,14 +799,30 @@ export const CourseMarketplacePage: React.FC = () => {
     if (!aiPathData) return;
     setSavingAiPath(true);
     try {
+      const combinedPool = [...liveYoutubeResults, ...(discoveryResult?.youtubeResources || [])];
+      cacheModeledCourse(aiPathToMarketplaceCourse(aiPathData, combinedPool));
       await lmsService.saveAiLearningPath({
         ...aiPathData,
         createdByUid: currentUser?.uid,
       });
-      showToast('AI Learning Path saved to your OpenFrame workspace!');
+      showToast('Modeled Course Path saved to your OpenFrame workspace!');
     } finally {
       setSavingAiPath(false);
     }
+  };
+
+  const handleEnrollModeledCourse = () => {
+    if (!aiPathData) return;
+    const combinedPool = [...liveYoutubeResults, ...(discoveryResult?.youtubeResources || [])];
+    const modeledCourse = aiPathToMarketplaceCourse(aiPathData, combinedPool);
+    cacheModeledCourse(modeledCourse);
+    lmsService
+      .saveAiLearningPath({
+        ...aiPathData,
+        createdByUid: currentUser?.uid,
+      })
+      .catch(() => {});
+    setEnrollModalCourse(modeledCourse);
   };
 
   const handleToggleBookmarkCourse = async (e: React.MouseEvent, courseId: string, title: string, category: string, ytId?: string) => {
@@ -2022,63 +2130,86 @@ export const CourseMarketplacePage: React.FC = () => {
                               className="rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden flex flex-col justify-between"
                             >
                               <div>
-                                <div className="aspect-video bg-slate-900 relative overflow-hidden">
-                                  <img
-                                    src={ytThumb}
-                                    alt={yt.title}
-                                    className="w-full h-full object-cover"
-                                  />
-                                  <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[10px] font-semibold">
-                                    External YouTube Resource
-                                  </span>
+                                  <div className="aspect-video bg-slate-900 relative overflow-hidden">
+                                    <img
+                                      src={ytThumb}
+                                      alt={yt.title}
+                                      referrerPolicy="no-referrer"
+                                      className="w-full h-full object-cover"
+                                    />
+                                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/90 text-white text-[10px] font-semibold">
+                                      External YouTube Resource
+                                    </span>
+                                  </div>
+                                  <div className="p-3 space-y-1">
+                                    <div className="text-xs font-bold text-slate-900 line-clamp-2">{yt.title}</div>
+                                    <div className="text-[11px] text-slate-600 truncate">{yt.channelTitle}</div>
+                                  </div>
                                 </div>
-                                <div className="p-3 space-y-1">
-                                  <div className="text-xs font-bold text-slate-900 line-clamp-2">{yt.title}</div>
-                                  <div className="text-[11px] text-slate-600 truncate">{yt.channelTitle}</div>
+                                <div className="px-3 pb-3 space-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const ext: ExtendedYouTubeVideo = {
+                                          id: yt.id || `yt-${vidId}`,
+                                          videoId: vidId,
+                                          youtubeId: vidId,
+                                          title: yt.title,
+                                          channelTitle: yt.channelTitle,
+                                          thumbnail: ytThumb,
+                                          thumbnailUrl: ytThumb,
+                                          duration: yt.duration || 'Tutorial',
+                                          level: 'Beginner',
+                                          subjectCategory: discoveryResult.parsedIntent.primarySubject || 'YouTube Resource',
+                                          recommendedReason: yt.recommendedReason || 'External YouTube Resource',
+                                          embedUrl: yt.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
+                                          keyTopicsCovered: [searchQuery.trim() || yt.title],
+                                        };
+                                        setSelectedVideo(ext);
+                                        setVideoPlaylist([ext]);
+                                        setIsVideoModalOpen(true);
+                                      }}
+                                      className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                    >
+                                      <Play className="w-3 h-3 fill-current" />
+                                      <span>Watch</span>
+                                    </button>
+                                    <a
+                                      href={yt.youtubeUrl || `https://www.youtube.com/watch?v=${vidId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="py-1.5 px-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold flex items-center gap-1"
+                                      title="Open on YouTube"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                      <span>YouTube</span>
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const ytCourse = buildYouTubeMarketplaceCourse(yt, searchQuery.trim() || discoveryResult.parsedIntent.primarySubject);
+                                        setEnrollModalCourse(ytCourse);
+                                      }}
+                                      className="py-1.5 px-2.5 rounded-lg bg-[#123D32] hover:bg-[#0D2E25] text-white text-[11px] font-bold cursor-pointer"
+                                    >
+                                      Enroll
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleToggleBookmarkCourse(e, `yt-${vidId}`, yt.title, 'External YouTube Resource', vidId)}
+                                      className={`p-1.5 rounded-lg border text-[11px] cursor-pointer ${
+                                        bookmarkedIds.has(`yt-${vidId}`)
+                                          ? 'bg-blue-600 border-blue-600 text-white'
+                                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                      title="Save to Learning Plan"
+                                    >
+                                      <Bookmark className={`w-3.5 h-3.5 ${bookmarkedIds.has(`yt-${vidId}`) ? 'fill-current' : ''}`} />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="px-3 pb-3 flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const ext: ExtendedYouTubeVideo = {
-                                      id: yt.id || `yt-${vidId}`,
-                                      videoId: vidId,
-                                      youtubeId: vidId,
-                                      title: yt.title,
-                                      channelTitle: yt.channelTitle,
-                                      thumbnail: ytThumb,
-                                      thumbnailUrl: ytThumb,
-                                      duration: yt.duration || 'Tutorial',
-                                      level: 'Beginner',
-                                      subjectCategory: discoveryResult.parsedIntent.primarySubject || 'YouTube Resource',
-                                      recommendedReason: yt.recommendedReason || 'External YouTube Resource',
-                                      embedUrl: yt.embedUrl || `https://www.youtube-nocookie.com/embed/${vidId}`,
-                                      keyTopicsCovered: [searchQuery.trim() || yt.title],
-                                    };
-                                    setSelectedVideo(ext);
-                                    setVideoPlaylist([ext]);
-                                    setIsVideoModalOpen(true);
-                                  }}
-                                  className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
-                                >
-                                  <Play className="w-3 h-3 fill-current" />
-                                  <span>Watch Lecture</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleToggleBookmarkCourse(e, `yt-${vidId}`, yt.title, 'External YouTube Resource', vidId)}
-                                  className={`p-1.5 rounded-lg border text-[11px] cursor-pointer ${
-                                    bookmarkedIds.has(`yt-${vidId}`)
-                                      ? 'bg-blue-600 border-blue-600 text-white'
-                                      : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                  }`}
-                                  title="Save to Learning Plan"
-                                >
-                                  <Bookmark className={`w-3.5 h-3.5 ${bookmarkedIds.has(`yt-${vidId}`) ? 'fill-current' : ''}`} />
-                                </button>
-                              </div>
-                            </div>
                           );
                         })}
                       </div>
@@ -2268,19 +2399,22 @@ export const CourseMarketplacePage: React.FC = () => {
               </div>
             )}
 
-            {/* AI Course Organizer Collapsible Studio Panel */}
+            {/* Built-In AI Course Recommendation, Parts & Modules Modeler */}
             <div className="bg-white rounded-2xl border border-indigo-200 shadow-xs overflow-hidden">
               <div className="p-4 sm:p-5 bg-gradient-to-r from-indigo-50/80 via-blue-50/70 to-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-indigo-700 uppercase tracking-wider">
                     <Brain className="w-4 h-4" />
-                    <span>Quinn AI Course Organizer</span>
+                    <span>Built-In OpenFrame Course Modeler</span>
+                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold normal-case border border-emerald-200">
+                      {aiPathData?.sourceMode === 'gemini' ? 'Gemini AI Enhanced' : 'Built-In Engine · Zero Token Cost'}
+                    </span>
                   </div>
                   <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                    Structure &ldquo;{searchQuery.trim() || activeYouTubeQuery || (selectedCategory !== 'All' ? selectedCategory : 'Any Topic')}&rdquo; into a {aiModuleCount}-Module Course Path
+                    Model &ldquo;{searchQuery.trim() || activeYouTubeQuery || (selectedCategory !== 'All' ? selectedCategory : 'Any Topic')}&rdquo; into Parts &amp; {aiModuleCount} Modules
                   </h3>
                   <p className="text-xs text-slate-600">
-                    Organize live YouTube tutorials into Beginner, Intermediate, and Advanced modules with direct on-site video playback, exercises, and a mini-quiz.
+                    Automatically matches catalog courses + YouTube tutorials, structures them into progressive Parts &amp; Modules, and unlocks instant one-click enrollment.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -2312,7 +2446,7 @@ export const CourseMarketplacePage: React.FC = () => {
                     className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-amber-200" />
-                    <span>{aiPathLoading ? 'Organizing...' : `Organize Into ${aiModuleCount} Modules`}</span>
+                    <span>{aiPathLoading ? 'Modeling Course...' : `Model Into ${aiModuleCount} Modules`}</span>
                   </button>
                   {aiPathData && (
                     <button
@@ -2328,11 +2462,25 @@ export const CourseMarketplacePage: React.FC = () => {
               </div>
 
               {aiPathOpen && (
-                <div className="p-5 border-t border-indigo-100 space-y-4">
+                <div className="p-5 border-t border-indigo-100 space-y-5">
                   {aiPathLoading ? (
                     <div className="py-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
-                      <span>Quinn AI is organizing live YouTube videos into structured syllabus modules &amp; exercises...</span>
+                      <span>Structuring matched catalog courses and YouTube tutorials into Parts, Modules &amp; Exercises...</span>
+                    </div>
+                  ) : aiPathError ? (
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                        <span>{aiPathError}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateAiPath()}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold shrink-0 cursor-pointer"
+                      >
+                        Retry
+                      </button>
                     </div>
                   ) : aiPathData ? (() => {
                     const combinedVideoPool = [
@@ -2346,6 +2494,13 @@ export const CourseMarketplacePage: React.FC = () => {
                     const organizedVideos: ExtendedYouTubeVideo[] = [];
                     const seenOrganized = new Set<string>();
                     (aiPathData.modules || []).forEach((mod) => {
+                      (mod.recommendedVideos || []).forEach((rv: any) => {
+                        const key = rv.videoId || rv.youtubeId || rv.id;
+                        if (key && !seenOrganized.has(key)) {
+                          seenOrganized.add(key);
+                          organizedVideos.push(mapLiveYoutubeToExtended(rv, aiPathData.topic));
+                        }
+                      });
                       (mod.videoIds || []).forEach((vidId) => {
                         const raw = findVideoById(vidId);
                         if (raw) {
@@ -2360,12 +2515,20 @@ export const CourseMarketplacePage: React.FC = () => {
 
                     return (
                       <>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                           <div>
                             <h4 className="font-bold text-base text-slate-900">{aiPathData.title}</h4>
                             <p className="text-xs text-slate-600 mt-0.5">{aiPathData.overview}</p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleEnrollModeledCourse}
+                              className="px-4 py-2 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+                            >
+                              <GraduationCap className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>Enroll &amp; Start Modeled Course</span>
+                            </button>
                             {organizedVideos.length > 0 && (
                               <button
                                 type="button"
@@ -2377,7 +2540,7 @@ export const CourseMarketplacePage: React.FC = () => {
                                 className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
                               >
                                 <Play className="w-3.5 h-3.5 fill-current" />
-                                <span>Watch Module Playlist ({organizedVideos.length})</span>
+                                <span>Watch Playlist ({organizedVideos.length})</span>
                               </button>
                             )}
                             <button
@@ -2386,25 +2549,103 @@ export const CourseMarketplacePage: React.FC = () => {
                               disabled={savingAiPath}
                               className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
                             >
-                              {savingAiPath ? 'Saving...' : 'Save Learning Path'}
+                              {savingAiPath ? 'Saving...' : 'Save Course Path'}
                             </button>
+                            {aiPathData.sourceMode !== 'gemini' && (
+                              <button
+                                type="button"
+                                onClick={() => handleGenerateAiPath(aiModuleCount, liveYoutubeResults, aiPathData.topic, aiPathData.language, 'gemini')}
+                                className="px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                              >
+                                Optional Gemini Refine
+                              </button>
+                            )}
                           </div>
                         </div>
 
+                        {/* Progressive Part Structure Summary */}
+                        {Array.isArray(aiPathData.partGroups) && aiPathData.partGroups.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {aiPathData.partGroups.map((pg) => (
+                              <div key={pg.partNumber} className="p-3 rounded-xl bg-indigo-50/60 border border-indigo-200/80 space-y-1">
+                                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                                  <span>Part {pg.partNumber}</span>
+                                  <span>Modules {pg.moduleNumbers.join(', ')}</span>
+                                </div>
+                                <div className="text-xs font-bold text-slate-900">{pg.partTitle}</div>
+                                <p className="text-[11px] text-slate-600 line-clamp-2">{pg.partSummary}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Matched OpenFrame Catalog Courses */}
+                        {Array.isArray(aiPathData.matchedCatalogCourses) && aiPathData.matchedCatalogCourses.length > 0 && (
+                          <div className="p-4 rounded-xl bg-[#FAF7F2] border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-bold text-[#123D32] uppercase tracking-wider">
+                                Recommended OpenFrame Catalog Courses for &ldquo;{aiPathData.topic}&rdquo;
+                              </div>
+                              <span className="text-[11px] text-slate-500 tabular-nums">
+                                {aiPathData.matchedCatalogCourses.length} matched courses
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {aiPathData.matchedCatalogCourses.map((mc) => (
+                                <div key={mc.id} className="p-3 rounded-xl bg-white border border-slate-200 flex flex-col justify-between gap-2.5">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                      <span className="font-bold text-blue-700 truncate">{mc.category}</span>
+                                      <span className="font-bold text-[#123D32] shrink-0">
+                                        {mc.price > 0 ? `₹${mc.price.toLocaleString()}` : 'Free'}
+                                      </span>
+                                    </div>
+                                    <Link to={`/marketplace/${mc.id}`} className="text-xs font-bold text-slate-900 hover:text-blue-700 line-clamp-2 block">
+                                      {mc.title}
+                                    </Link>
+                                    <div className="text-[11px] text-slate-500 truncate">
+                                      {mc.level} · {mc.duration}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const fetched = await marketplaceService.getCourseById(mc.id);
+                                        if (fetched) setEnrollModalCourse(fetched);
+                                      }}
+                                      className="flex-1 py-1.5 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold cursor-pointer"
+                                    >
+                                      Enroll Now
+                                    </button>
+                                    <Link
+                                      to={`/marketplace/${mc.id}`}
+                                      className="py-1.5 px-2.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-[11px] font-semibold"
+                                    >
+                                      Syllabus
+                                    </Link>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           {(aiPathData.modules || []).map((mod, mIdx) => {
-                            const modVideos = (mod.videoIds || [])
-                              .map((vidId) => findVideoById(vidId))
-                              .filter(Boolean);
+                            const modVideos =
+                              Array.isArray(mod.recommendedVideos) && mod.recommendedVideos.length > 0
+                                ? mod.recommendedVideos
+                                : (mod.videoIds || []).map((vidId) => findVideoById(vidId)).filter(Boolean);
 
                             return (
                               <div key={mIdx} className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between gap-3">
                                 <div className="space-y-2.5">
-                                  <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
-                                    <span className="font-bold text-indigo-700 uppercase">
-                                      Module {String(mIdx + 1).padStart(2, '0')} · {mod.level}
+                                  <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums gap-1">
+                                    <span className="font-bold text-indigo-700 uppercase truncate">
+                                      {mod.partLabel ? `${mod.partLabel} · ` : ''}Module {String(mIdx + 1).padStart(2, '0')} · {mod.level}
                                     </span>
-                                    <span>#{mod.moduleNumber || mIdx + 1}</span>
+                                    <span className="shrink-0">#{mod.moduleNumber || mIdx + 1}</span>
                                   </div>
                                   <div className="text-sm font-bold text-slate-900 leading-snug">{mod.title}</div>
                                   <p className="text-xs text-slate-600">{mod.summary}</p>
@@ -2433,16 +2674,17 @@ export const CourseMarketplacePage: React.FC = () => {
                                     {modVideos.map((mv: any) => {
                                       const mvId = mv.videoId || mv.youtubeId || mv.id;
                                       const mvThumb = mv.thumbnail || mv.thumbnailUrl || `https://i.ytimg.com/vi/${mvId}/hqdefault.jpg`;
+                                      const mvUrl = mv.youtubeUrl || `https://www.youtube.com/watch?v=${mvId}`;
                                       return (
                                         <div
                                           key={mvId}
-                                          className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-slate-200"
+                                          className="flex items-center gap-2 p-2 rounded-lg bg-white border border-slate-200"
                                         >
                                           <img
                                             src={mvThumb}
                                             alt={mv.title}
                                             referrerPolicy="no-referrer"
-                                            className="w-16 h-10 rounded object-cover shrink-0 bg-slate-900"
+                                            className="w-14 h-9 rounded object-cover shrink-0 bg-slate-900"
                                           />
                                           <div className="min-w-0 flex-1">
                                             <div className="text-[11px] font-semibold text-slate-900 line-clamp-1">
@@ -2452,6 +2694,15 @@ export const CourseMarketplacePage: React.FC = () => {
                                               {mv.channelTitle} · {mv.duration || 'Tutorial'}
                                             </div>
                                           </div>
+                                          <a
+                                            href={mvUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-rose-600 shrink-0"
+                                            title="Open on YouTube"
+                                          >
+                                            <ExternalLink className="w-3 h-3" />
+                                          </a>
                                           <button
                                             type="button"
                                             onClick={() => {
@@ -2460,7 +2711,7 @@ export const CourseMarketplacePage: React.FC = () => {
                                               setVideoPlaylist(organizedVideos.length > 0 ? organizedVideos : [ext]);
                                               setIsVideoModalOpen(true);
                                             }}
-                                            className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
+                                            className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
                                           >
                                             <Play className="w-2.5 h-2.5 fill-current" />
                                             <span>Watch</span>
@@ -2494,7 +2745,7 @@ export const CourseMarketplacePage: React.FC = () => {
                         )}
 
                         <div className="text-[11px] text-slate-500 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
-                          {aiPathData.aiDisclaimer || 'AI-generated study path grounded strictly on available topic and video metadata.'}
+                          {aiPathData.aiDisclaimer || 'Built-in structured study path grounded on OpenFrame catalog courses & public YouTube tutorials with zero user token cost.'}
                         </div>
                       </>
                     );
@@ -2627,7 +2878,27 @@ export const CourseMarketplacePage: React.FC = () => {
                                 className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1 whitespace-nowrap cursor-pointer"
                               >
                                 <Play className="w-3 h-3 fill-current" />
-                                <span>Play Lesson</span>
+                                <span>Play</span>
+                              </button>
+                              <a
+                                href={yt.youtubeUrl || (isPl ? `https://www.youtube.com/playlist?list=${yt.playlistId || yt.playlistInfo?.playlistId}` : `https://www.youtube.com/watch?v=${vidId}`)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="py-1.5 px-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap"
+                                title="Open directly on YouTube"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span>YouTube</span>
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const ytCourse = buildYouTubeMarketplaceCourse(yt, activeYouTubeQuery || searchQuery.trim());
+                                  setEnrollModalCourse(ytCourse);
+                                }}
+                                className="py-1.5 px-2.5 rounded-lg bg-[#123D32] hover:bg-[#0D2E25] text-white text-[11px] font-bold whitespace-nowrap cursor-pointer"
+                              >
+                                Enroll
                               </button>
                               <button
                                 type="button"
@@ -3355,8 +3626,7 @@ export const CourseMarketplacePage: React.FC = () => {
         onClose={() => setEnrollModalCourse(null)}
         course={enrollModalCourse}
         onEnrolled={() => {
-          setEnrollModalCourse(null);
-          showToast('Course enrollment confirmed!');
+          showToast('Course enrollment confirmed! Click "Start Course Workspace" to begin.');
         }}
       />
 

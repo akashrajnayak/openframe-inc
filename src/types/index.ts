@@ -624,6 +624,10 @@ export interface MarketplaceModule {
   lessons: string[] | any[];
   id?: string;
   description?: string;
+  partLabel?: string;
+  level?: 'Beginner' | 'Intermediate' | 'Advanced';
+  videoIds?: string[];
+  recommendedVideos?: YouTubeVideoRecommendation[];
 }
 
 export interface MarketplaceCourse {
@@ -639,6 +643,8 @@ export interface MarketplaceCourse {
   estimatedHours?: number;
   pricingTier: MarketplacePricingTier;
   price: number;
+  marketBenchmarkPrice?: number;
+  discountPercent?: number;
   isFree?: boolean;
   status: MarketplaceCourseStatus;
   courseType?: MarketplaceCourseType;
@@ -700,6 +706,10 @@ export interface MarketplaceCourse {
   };
   educationLevels?: string[]; // Level 1–10 / Categories A–J codes or labels
   degreeProgrammes?: string[]; // Targeted degrees/classes (e.g., LKG, Class 10, BCA, BCom, MBA, PhD)
+  board?: string;
+  boards?: string[];
+  gradeLevel?: string;
+  supportedLanguages?: string[];
   subject?: string;
   specialization?: string;
   deliveryMethod?: 'Self-paced online' | 'Live online' | 'Classroom' | 'Hybrid' | 'Workshop' | 'Professional training';
@@ -752,6 +762,7 @@ export interface StudentProfile {
   fullName: string;
   email: string;
   mobileNumber?: string;
+  alternativeMobileNumber?: string;
   whatsappNumber?: string;
   profilePhotoUrl?: string;
   dob?: string;
@@ -760,6 +771,8 @@ export interface StudentProfile {
   state?: string;
   district?: string;
   city?: string;
+  homeAddress?: string;
+  flatNumber?: string;
   houseNumber?: string;
   streetAddress?: string;
   pincode?: string;
@@ -846,6 +859,8 @@ export interface CourseEnrollment {
   studentName: string;
   studentEmail: string;
   studentPhone?: string;
+  mobileNumber?: string;
+  alternativeMobileNumber?: string;
   countryCode?: string;
   dob?: string;
   age?: number;
@@ -855,6 +870,9 @@ export interface CourseEnrollment {
   district?: string;
   city?: string;
   pincode?: string;
+  homeAddress?: string;
+  flatNumber?: string;
+  streetAddress?: string;
   address?: string;
   educationLevel?: string;
   degreeOrClass?: string;
@@ -883,6 +901,8 @@ export interface CourseEnrollment {
   status: CourseEnrollmentStatus;
   paymentStatus: 'Complimentary' | 'Paid' | 'Scholarship' | 'Pending';
   feeAmount: number;
+  marketBenchmarkPrice?: number;
+  discountPercent?: number;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   verifiedServerSide?: boolean;
@@ -937,6 +957,7 @@ export interface YouTubeVideoRecommendation {
   recommendedReason: string;
   rationale?: string;
   embedUrl: string;
+  youtubeUrl?: string;
   source?: string;
 }
 
@@ -1344,6 +1365,14 @@ export interface IssuedCertificate {
   qrCodeUrl?: string;
   accreditationBody?: string;
   authorizedSignatory?: string;
+  homeAddress?: string;
+  flatNumber?: string;
+  streetAddress?: string;
+  pincode?: string;
+  mobileNumber?: string;
+  alternativeMobileNumber?: string;
+  state?: string;
+  addressVerifiedAt?: string;
   status: 'Issued' | 'Pending Admin Approval' | 'Revoked' | 'VERIFIED';
   issuedAt?: string;
 }
@@ -2242,12 +2271,14 @@ export interface SchoolAnnouncement {
 
 export interface AiLearningModule {
   moduleNumber: number;
+  partLabel?: string;
   level: 'Beginner' | 'Intermediate' | 'Advanced';
   title: string;
   objectives: string[];
   summary: string;
   practiceExercises: string[];
   videoIds: string[];
+  recommendedVideos?: YouTubeVideoRecommendation[];
   miniQuizQuestion?: {
     question: string;
     options: string[];
@@ -2263,7 +2294,31 @@ export interface AiLearningPath {
   title: string;
   overview: string;
   aiDisclaimer: string;
-  sourceMode: 'gemini' | 'structured_fallback';
+  sourceMode: 'builtin_engine' | 'gemini' | 'structured_fallback';
+  partGroups?: Array<{
+    partNumber: number;
+    partTitle: string;
+    partSummary?: string;
+    level: 'Beginner' | 'Intermediate' | 'Advanced';
+    moduleNumbers: number[];
+  }>;
+  matchedCatalogCourses?: Array<{
+    id: string;
+    title: string;
+    category: string;
+    level: string;
+    duration: string;
+    price: number;
+    marketBenchmarkPrice?: number;
+    discountPercent?: number;
+    thumbnailUrl?: string;
+    youtubeVideoId?: string;
+  }>;
+  price?: number;
+  marketBenchmarkPrice?: number;
+  discountPercent?: number;
+  board?: string;
+  educationLevel?: string;
   modules: AiLearningModule[];
   approvedByAdmin?: boolean;
   createdByUid?: string;

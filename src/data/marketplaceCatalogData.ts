@@ -6,6 +6,7 @@ import {
 } from '../types';
 import { DISCOVERY_EDUCATION_FIELDS } from './discoveryTaxonomy';
 import { CORPORATE_TRAINING_CATEGORIES } from './corporateTrainingTaxonomy';
+import { compute90PercentCoursePricing } from '../utils/pricingEngine';
 
 export const ALL_90_CATEGORIES = [
   'Artificial Intelligence', 'Generative AI', 'Machine Learning', 'Deep Learning', 'Data Science',
@@ -393,17 +394,27 @@ export function synthesizeBaseCourse(index: number): MarketplaceCourse {
   const duration = durations[(index * 11) % durations.length];
   const estimatedHours = 16 + ((index * 9) % 45);
 
-  const pricingTier = MARKETPLACE_PRICING_TIERS[(index * 17) % MARKETPLACE_PRICING_TIERS.length];
-  const priceValues: Record<MarketplacePricingTier, number> = {
-    'Academic Access': 0,
-    'Corporate Track': 0,
-    Starter: 199,
-    Basic: 499,
+  const baseTier = MARKETPLACE_PRICING_TIERS[(index * 17) % MARKETPLACE_PRICING_TIERS.length];
+  const rawPriceValues: Record<MarketplacePricingTier, number> = {
+    'Academic Access': 300,
+    'Corporate Track': 1999,
+    Starter: 399,
+    Basic: 599,
     Professional: 999,
     Advanced: 1499,
     Specialised: 2499,
   };
-  const price = priceValues[pricingTier];
+  const priced = compute90PercentCoursePricing({
+    rawPrice: rawPriceValues[baseTier],
+    category,
+    categoryGroup,
+    level,
+    pricingTier: baseTier,
+  });
+  const pricingTier = priced.pricingTier;
+  const price = priced.finalPriceInr;
+  const marketBenchmarkPrice = priced.marketBenchmarkPrice;
+  const discountPercent = priced.discountPercent;
   const isFree = false;
 
   const rating = Number((4.65 + ((index % 35) / 100)).toFixed(2));
@@ -442,6 +453,8 @@ export function synthesizeBaseCourse(index: number): MarketplaceCourse {
     estimatedHours,
     pricingTier,
     price,
+    marketBenchmarkPrice,
+    discountPercent,
     isFree,
     status: index % 15 === 0 ? 'Ready to Publish' : 'Published',
     courseType: 'standard',

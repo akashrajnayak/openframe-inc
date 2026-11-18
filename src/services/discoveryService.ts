@@ -15,6 +15,7 @@ import {
   BatchImportProgress,
   extractYouTubeIdentifiers,
 } from './marketplaceService';
+import { compute90PercentCoursePricing } from '../utils/pricingEngine';
 import type {
   CourseContentType,
   CourseDedupKey,
@@ -725,6 +726,13 @@ class DiscoveryService {
         new Set([c.category, ...(c.categories || []), ...(c.emergingSubjects || [])].filter(Boolean))
       );
       const corpDef = getCorporateCategoryByName(c.category);
+      const pricing = compute90PercentCoursePricing({
+        category: c.category,
+        categoryGroup: c.categoryGroup || corpDef?.domainGroup || getDomainGroupForField(c.category),
+        title: c.title,
+        level: c.level || 'All Levels',
+        pricingTier: c.libraryCollection === 'corporate_training' ? 'Corporate Track' : 'Academic Access',
+      });
       return {
         title: c.title.slice(0, 280),
         category: c.category,
@@ -750,8 +758,10 @@ class DiscoveryService {
         language: c.language || 'English',
         level: c.level || 'All Levels',
         isFree: false,
-        price: 0,
-        pricingTier: c.libraryCollection === 'corporate_training' ? 'Corporate Track' : 'Academic Access',
+        price: pricing.finalPriceInr,
+        marketBenchmarkPrice: pricing.marketBenchmarkPrice,
+        discountPercent: pricing.discountPercent,
+        pricingTier: pricing.pricingTier,
         courseType: c.courseType,
         contentType:
           c.contentType ||

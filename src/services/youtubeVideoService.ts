@@ -1,4 +1,5 @@
 import { YouTubeVideoRecommendation } from '../types';
+import { scoreSearchMatch } from '../utils/searchIntelligence';
 
 export interface ExtendedYouTubeVideo extends YouTubeVideoRecommendation {
   subjectCategory: string;
@@ -287,6 +288,108 @@ export const MASTER_YOUTUBE_LIBRARY: ExtendedYouTubeVideo[] = [
     rationale: 'Design human-centered enterprise software interfaces.',
     embedUrl: 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU',
     keyTopicsCovered: ['Design Systems', 'Grid Layout', 'Component Variants', 'Prototyping']
+  },
+  {
+    id: 'yt-excel-001',
+    videoId: 'wbJcJCkBcMg',
+    youtubeId: 'wbJcJCkBcMg',
+    title: 'Microsoft Excel for Beginners — Complete Course from Scratch',
+    channelTitle: 'Kevin Stratvert / OpenFrame Curated',
+    thumbnail: ytThumb('wbJcJCkBcMg'),
+    thumbnailUrl: ytThumb('wbJcJCkBcMg'),
+    duration: '54:20',
+    level: 'Beginner',
+    difficultyLevel: 'Beginner',
+    subjectCategory: 'Microsoft Excel',
+    recommendedReason: 'Hands-on walkthrough of Excel ribbons, data entry, formatting, basic formulas, and worksheet organization.',
+    rationale: 'Excel foundations, cells, formatting, and introductory formulas.',
+    embedUrl: 'https://www.youtube-nocookie.com/embed/wbJcJCkBcMg',
+    keyTopicsCovered: ['Excel Basics', 'Cells & Formatting', 'SUM & AVERAGE', 'Spreadsheet Tables']
+  },
+  {
+    id: 'yt-excel-002',
+    videoId: '7QNgqq154gE',
+    youtubeId: '7QNgqq154gE',
+    title: 'Complete Excel Tutorial for Data Analysis (Formulas, VLOOKUP & Pivot Tables)',
+    channelTitle: 'Data Analytics Academy',
+    thumbnail: ytThumb('7QNgqq154gE'),
+    thumbnailUrl: ytThumb('7QNgqq154gE'),
+    duration: '4:00:00',
+    level: 'Intermediate',
+    difficultyLevel: 'Intermediate',
+    subjectCategory: 'Microsoft Excel',
+    recommendedReason: 'Covers logical formulas, XLOOKUP/VLOOKUP, PivotTables, and cleaning business datasets in Excel.',
+    rationale: 'Master Excel formulas, lookups, PivotTables, and business analysis.',
+    embedUrl: 'https://www.youtube-nocookie.com/embed/7QNgqq154gE',
+    keyTopicsCovered: ['Excel Formulas', 'VLOOKUP & XLOOKUP', 'Pivot Tables', 'Data Analysis']
+  },
+  {
+    id: 'yt-excel-003',
+    videoId: 'WV6X0rol5To',
+    youtubeId: 'WV6X0rol5To',
+    title: 'How to Build Interactive Dashboards & Reports in Microsoft Excel',
+    channelTitle: 'Excel BI & Reporting',
+    thumbnail: ytThumb('WV6X0rol5To'),
+    thumbnailUrl: ytThumb('WV6X0rol5To'),
+    duration: '38:15',
+    level: 'Advanced',
+    difficultyLevel: 'Advanced',
+    subjectCategory: 'Microsoft Excel',
+    recommendedReason: 'End-to-end KPI dashboard architecture using PivotCharts, slicers, and executive summaries.',
+    rationale: 'Create dynamic interactive dashboards and KPI reports in Excel.',
+    embedUrl: 'https://www.youtube-nocookie.com/embed/WV6X0rol5To',
+    keyTopicsCovered: ['Excel Dashboards', 'Pivot Charts', 'Slicers', 'KPI Reporting']
+  },
+  {
+    id: 'yt-website-001',
+    videoId: '-W9F__D3oY4',
+    youtubeId: '-W9F__D3oY4',
+    title: 'How to Build a Website from Scratch — Complete HTML5 & CSS3 Course',
+    channelTitle: 'freeCodeCamp / Web Mastery',
+    thumbnail: ytThumb('-W9F__D3oY4'),
+    thumbnailUrl: ytThumb('-W9F__D3oY4'),
+    duration: '2:30:00',
+    level: 'Beginner',
+    difficultyLevel: 'Beginner',
+    subjectCategory: 'Web Development',
+    recommendedReason: 'Step-by-step tutorial on building your first responsive website with clean HTML5 and CSS3.',
+    rationale: 'Build complete structured websites with HTML5 and CSS3 from zero.',
+    embedUrl: 'https://www.youtube-nocookie.com/embed/-W9F__D3oY4',
+    keyTopicsCovered: ['Build a Website', 'HTML5', 'CSS3', 'Responsive Layout']
+  },
+  {
+    id: 'yt-website-002',
+    videoId: 'l1EssrLxt7E',
+    youtubeId: 'l1EssrLxt7E',
+    title: 'Responsive Website Design & Flexbox/Grid Architecture Complete Guide',
+    channelTitle: 'Web Dev Simplified / Curated',
+    thumbnail: ytThumb('l1EssrLxt7E'),
+    thumbnailUrl: ytThumb('l1EssrLxt7E'),
+    duration: '1:45:00',
+    level: 'Intermediate',
+    difficultyLevel: 'Intermediate',
+    subjectCategory: 'Web Development',
+    recommendedReason: 'Mobile-first responsive page layout, navigation headers, and modern Flexbox/CSS Grid systems.',
+    rationale: 'Design mobile-friendly website layouts with Flexbox and CSS Grid.',
+    embedUrl: 'https://www.youtube-nocookie.com/embed/l1EssrLxt7E',
+    keyTopicsCovered: ['Website Design', 'Flexbox', 'CSS Grid', 'Mobile Responsive']
+  },
+  {
+    id: 'yt-website-003',
+    videoId: 'tVzUXW6siu0',
+    youtubeId: 'tVzUXW6siu0',
+    title: 'Modern Website Engineering: Tailwind CSS, JavaScript & Production Launch',
+    channelTitle: 'Frontend Engineering Lab',
+    thumbnail: ytThumb('tVzUXW6siu0'),
+    thumbnailUrl: ytThumb('tVzUXW6siu0'),
+    duration: '2:10:00',
+    level: 'Advanced',
+    difficultyLevel: 'Advanced',
+    subjectCategory: 'Web Development',
+    recommendedReason: 'Guides learners from component styling and interactive JavaScript to deploying a live website.',
+    rationale: 'Ship fast, production-ready websites with Tailwind and JavaScript.',
+    embedUrl: 'https://www.youtube-nocookie.com/embed/tVzUXW6siu0',
+    keyTopicsCovered: ['Tailwind CSS', 'Frontend JavaScript', 'Website Deployment', 'Performance']
   }
 ];
 
@@ -431,28 +534,35 @@ export class YouTubeVideoService {
   }
 
   getVideosForCourse(courseId: string, category: string, title: string): ExtendedYouTubeVideo[] {
-    const q = `${title} ${category}`.toLowerCase();
+    const queryStr = `${title} ${category}`.trim();
 
-    const matched = MASTER_YOUTUBE_LIBRARY.filter((v) => {
-      const vCat = v.subjectCategory.toLowerCase();
-      const vTitle = v.title.toLowerCase();
-      return (
-        q.includes(vCat) ||
-        vCat.includes(category.toLowerCase()) ||
-        q.includes(vTitle.slice(0, 15)) ||
-        v.keyTopicsCovered.some((t) => q.includes(t.toLowerCase()))
-      );
-    });
+    const scored = MASTER_YOUTUBE_LIBRARY.map((v) => ({
+      v,
+      score: scoreSearchMatch(
+        {
+          title: v.title,
+          category: v.subjectCategory,
+          keywords: v.keyTopicsCovered,
+          shortDesc: v.recommendedReason,
+          youtubeChannelName: v.channelTitle,
+        },
+        queryStr
+      ),
+    })).sort((a, b) => b.score - a.score);
+
+    const matched = scored[0]?.score > 0
+      ? scored.filter((s) => s.score > 0).map((s) => s.v)
+      : scored.slice(0, 3).map((s) => s.v);
 
     if (matched.length >= 3) {
       return matched.slice(0, 5);
     }
 
-    const defaults = matched.length > 0 ? [...matched] : [];
+    const defaults = [...matched];
     const fallbackIds = [
       matched[0]?.videoId || 'JMUxmLyrhSk',
-      matched[1]?.videoId || 'i_LwzRVP7bg',
-      matched[2]?.videoId || 'kCc8FmEb1nY',
+      matched[1]?.videoId || matched[0]?.videoId || 'i_LwzRVP7bg',
+      matched[2]?.videoId || matched[0]?.videoId || 'kCc8FmEb1nY',
     ];
 
     const generated: ExtendedYouTubeVideo[] = [
@@ -460,15 +570,15 @@ export class YouTubeVideoService {
         id: `gen-yt-${courseId}-1`,
         videoId: fallbackIds[0],
         youtubeId: fallbackIds[0],
-        title: `${title}: Foundational Principles & Architecture`,
-        channelTitle: 'MIT OpenCourseWare & OpenFrame Faculty',
+        title: `${title}: Foundational Principles & Setup`,
+        channelTitle: matched[0]?.channelTitle || 'OpenFrame Curated Faculty',
         thumbnail: ytThumb(fallbackIds[0]),
         thumbnailUrl: ytThumb(fallbackIds[0]),
         duration: '45:15',
         level: 'Beginner',
         difficultyLevel: 'Beginner',
         subjectCategory: category,
-        recommendedReason: `Curated by Quinn AI to establish foundational principles and terminology for ${title}.`,
+        recommendedReason: `Curated by OpenFrame to establish foundational principles and terminology for ${title}.`,
         rationale: `Foundational overview for ${title}.`,
         embedUrl: `https://www.youtube-nocookie.com/embed/${fallbackIds[0]}`,
         keyTopicsCovered: ['Foundations', 'Core Concepts', 'Setup', 'Best Practices'],
@@ -478,7 +588,7 @@ export class YouTubeVideoService {
         videoId: fallbackIds[1],
         youtubeId: fallbackIds[1],
         title: `${title}: Practical Implementation & Applied Lab`,
-        channelTitle: 'Stanford Online & OpenFrame Labs',
+        channelTitle: matched[1]?.channelTitle || matched[0]?.channelTitle || 'OpenFrame Applied Labs',
         thumbnail: ytThumb(fallbackIds[1]),
         thumbnailUrl: ytThumb(fallbackIds[1]),
         duration: '52:10',
@@ -494,15 +604,15 @@ export class YouTubeVideoService {
         id: `gen-yt-${courseId}-3`,
         videoId: fallbackIds[2],
         youtubeId: fallbackIds[2],
-        title: `${title}: Capstone Architecture & Production Strategy`,
-        channelTitle: 'OpenFrame Academic Council',
+        title: `${title}: Capstone Architecture & Project Defense`,
+        channelTitle: matched[2]?.channelTitle || matched[0]?.channelTitle || 'OpenFrame Academic Council',
         thumbnail: ytThumb(fallbackIds[2]),
         thumbnailUrl: ytThumb(fallbackIds[2]),
         duration: '1:08:00',
         level: 'Advanced',
         difficultyLevel: 'Advanced',
         subjectCategory: category,
-        recommendedReason: `Capstone guidance on production deployment, quality benchmarks, and project defense.`,
+        recommendedReason: `Capstone guidance on production execution, quality benchmarks, and project defense.`,
         rationale: `Production scale optimization.`,
         embedUrl: `https://www.youtube-nocookie.com/embed/${fallbackIds[2]}`,
         keyTopicsCovered: ['Architecture', 'Deployment', 'Evaluation', 'Defense'],
@@ -513,14 +623,20 @@ export class YouTubeVideoService {
   }
 
   searchVideos(queryText: string, categoryFilter = 'All'): ExtendedYouTubeVideo[] {
-    const q = queryText.trim().toLowerCase();
+    const q = queryText.trim();
     return MASTER_YOUTUBE_LIBRARY.filter((v) => {
       const matchQuery =
         !q ||
-        v.title.toLowerCase().includes(q) ||
-        v.channelTitle.toLowerCase().includes(q) ||
-        v.subjectCategory.toLowerCase().includes(q) ||
-        v.keyTopicsCovered.some((t) => t.toLowerCase().includes(q));
+        scoreSearchMatch(
+          {
+            title: v.title,
+            category: v.subjectCategory,
+            keywords: v.keyTopicsCovered,
+            shortDesc: v.recommendedReason,
+            youtubeChannelName: v.channelTitle,
+          },
+          q
+        ) > 0;
 
       const matchCat =
         categoryFilter === 'All' || v.subjectCategory.toLowerCase() === categoryFilter.toLowerCase();

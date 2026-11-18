@@ -256,13 +256,22 @@ export const CourseLearningPage: React.FC = () => {
       setActiveLessonId(targetLessonId);
       const lessonTopic = firstLesson?.title || firstLesson?.topicName || found.title;
 
-      // Load Quinn AI video recommendations
-      const recs = await quinnAiService.recommendVideos({
-        courseTitle: found.title,
-        category: found.category,
-        lessonTopic,
-        level: found.level,
-      });
+      // Prefer direct module/course assigned YouTube videos (modeled courses & YouTube tracks), fallback to Quinn AI
+      const preAssigned =
+        firstLesson?.recommendedVideos && firstLesson.recommendedVideos.length > 0
+          ? firstLesson.recommendedVideos
+          : found.recommendedVideos && found.recommendedVideos.length > 0
+          ? found.recommendedVideos
+          : [];
+      const recs =
+        preAssigned.length > 0
+          ? preAssigned
+          : await quinnAiService.recommendVideos({
+              courseTitle: found.title,
+              category: found.category,
+              lessonTopic,
+              level: found.level,
+            });
       if (!active) return;
       setRecommendedVideos(recs);
       if (recs[0]) setSelectedVideo(recs[0]);
@@ -357,15 +366,21 @@ export const CourseLearningPage: React.FC = () => {
     setUserQuizAnswers({});
     if (!course) return;
 
-      const topic = lesson.title || lesson.topicName || course.title;
+    const topic = lesson.title || lesson.topicName || course.title;
     setLessonSummary(null);
+    const directLessonVids =
+      lesson.recommendedVideos && lesson.recommendedVideos.length > 0
+        ? lesson.recommendedVideos
+        : [];
     const [recs, qCfg] = await Promise.all([
-      quinnAiService.recommendVideos({
-        courseTitle: course.title,
-        category: course.category,
-        lessonTopic: topic,
-        level: course.level,
-      }),
+      directLessonVids.length > 0
+        ? Promise.resolve(directLessonVids)
+        : quinnAiService.recommendVideos({
+            courseTitle: course.title,
+            category: course.category,
+            lessonTopic: topic,
+            level: course.level,
+          }),
       lmsService.getQuizConfig(course.id, lesson.id),
     ]);
     setRecommendedVideos(recs);

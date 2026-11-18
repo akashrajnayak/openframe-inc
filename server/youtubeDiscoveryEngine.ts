@@ -354,7 +354,9 @@ class YouTubeDiscoveryEngine {
   }
 
   private async searchPublicYouTubeFallback(query: string, maxResults = 25): Promise<any[]> {
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
+    const cleanQ = (query || '').trim();
+    if (!cleanQ) return [];
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(cleanQ)}&sp=EgIQAQ%3D%3D`;
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(8000),
@@ -367,19 +369,35 @@ class YouTubeDiscoveryEngine {
       });
       if (!res.ok) return [];
       const html = await res.text();
-      const match = html.match(/var ytInitialData = (\{.+?\});<\/script>/);
-      if (!match) return [];
-      const data: any = JSON.parse(match[1]);
+      const marker = 'var ytInitialData = ';
+      const startIdx = html.indexOf(marker);
+      let rawJson = '';
+      if (startIdx >= 0) {
+        const jsonStart = startIdx + marker.length;
+        const endIdx = html.indexOf(';</script>', jsonStart);
+        if (endIdx > jsonStart) {
+          rawJson = html.slice(jsonStart, endIdx);
+        }
+      }
+      if (!rawJson) {
+        const match = html.match(/var ytInitialData = (\{.+?\});<\/script>/);
+        if (!match) return [];
+        rawJson = match[1];
+      }
+
+      const data: any = JSON.parse(rawJson);
       const contents =
         data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
       const rawItems: any[] = [];
       for (const sec of contents) {
         const items = sec?.itemSectionRenderer?.contents || [];
         for (const item of items) {
-          const v = item?.videoRenderer;
+          const v = item?.videoRenderer || item?.richItemRenderer?.content?.videoRenderer;
           if (!v || !v.videoId || !/^[a-zA-Z0-9_-]{11}$/.test(v.videoId)) continue;
-          const title = (v.title?.runs || []).map((r: any) => r.text).join('').trim();
-          const channelTitle = (v.ownerText?.runs?.[0]?.text || '').trim() || 'OpenFrame Partner Channel';
+          const title = (v.title?.runs || []).map((r: any) => r.text).join('').trim() || v.title?.simpleText || '';
+          const channelTitle =
+            (v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || '').trim() ||
+            'OpenFrame Partner Channel';
           const channelId = v.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || undefined;
           const durText = (v.lengthText?.simpleText || '').trim();
           if (!title || !durText || durText.toUpperCase() === 'LIVE') continue;
@@ -393,11 +411,16 @@ class YouTubeDiscoveryEngine {
             : 10;
           if (mins < 2) continue;
           const isoDur = `PT${Math.floor(mins / 60) > 0 ? `${Math.floor(mins / 60)}H` : ''}${mins % 60}M`;
+          const viewText = String(v.viewCountText?.simpleText || '').replace(/[^0-9]/g, '');
+          const viewCount = viewText ? Number(viewText) : undefined;
+          const snippetDesc =
+            (v.detailedMetadataSnippets?.[0]?.snippetText?.runs || []).map((r: any) => r.text).join('') || title;
+
           rawItems.push({
             id: { videoId: v.videoId },
             snippet: {
               title,
-              description: (v.detailedMetadataSnippets?.[0]?.snippetText?.runs || []).map((r: any) => r.text).join('') || title,
+              description: snippetDesc,
               channelId,
               channelTitle,
               thumbnails: {
@@ -408,12 +431,13 @@ class YouTubeDiscoveryEngine {
               id: v.videoId,
               snippet: {
                 title,
-                description: title,
+                description: snippetDesc,
                 channelId,
                 channelTitle,
                 thumbnails: { high: { url: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg` } },
               },
               contentDetails: { duration: isoDur },
+              statistics: viewCount ? { viewCount: String(viewCount) } : undefined,
               status: { embeddable: true, privacyStatus: 'public' },
             },
           });
@@ -451,6 +475,14 @@ class YouTubeDiscoveryEngine {
     totalResults?: number;
     duplicatesSkipped: number;
   }> {
+    const isBatchJobScan = Boolean(params.jobId);
+    const enforceGlobalDedup =
+      isBatchJobScan ||
+      Boolean(params.extraKnownVideoIds?.length) ||
+      Boolean(params.extraKnownPlaylistIds?.length);
+    const seenVideoInCall = new Set<string>();
+    const seenPlaylistInCall = new Set<string>();
+
     if (params.extraKnownVideoIds?.length || params.extraKnownPlaylistIds?.length) {
       this.seedKnownDeduplicationSet({
         videoIds: params.extraKnownVideoIds,
@@ -486,10 +518,29 @@ class YouTubeDiscoveryEngine {
         },
         100
       );
-    } catch (err: any) {
       if (
+        !isBatchJobScan &&
         searchType === 'video' &&
-        (err?.code === 'API_KEY_REFERRER_BLOCKED' || err?.code === 'MISSING_API_KEY' || err?.code === 'YOUTUBE_API_DISABLED')
+        (!Array.isArray(searchJson?.items) || searchJson.items.length === 0)
+      ) {
+        const fallbackItems = await this.searchPublicYouTubeFallback(params.query, maxResults);
+        if (fallbackItems.length > 0) {
+          usedPublicFallback = true;
+          searchJson = { items: fallbackItems, pageInfo: { totalResults: fallbackItems.length } };
+        }
+      }
+    } catch (err: any) {
+      if (searchType === 'video' && !isBatchJobScan) {
+        usedPublicFallback = true;
+        const fallbackItems = await this.searchPublicYouTubeFallback(params.query, maxResults);
+        searchJson = { items: fallbackItems, pageInfo: { totalResults: fallbackItems.length } };
+      } else if (
+        searchType === 'video' &&
+        (err?.code === 'API_KEY_REFERRER_BLOCKED' ||
+          err?.code === 'MISSING_API_KEY' ||
+          err?.code === 'YOUTUBE_API_DISABLED' ||
+          err?.code === 'QUOTA_EXCEEDED' ||
+          err?.code === 'QUOTA_LIMIT_GUARD')
       ) {
         usedPublicFallback = true;
         const fallbackItems = await this.searchPublicYouTubeFallback(params.query, maxResults);
@@ -614,10 +665,14 @@ class YouTubeDiscoveryEngine {
 
         const title = `${ch.snippet?.title || raw.snippet?.title} — Educational Channel Series`;
         const normTitle = normalizeCourseTitleForDedup(title);
-        if (this.knownPlaylistIds.has(uploadsPlaylistId) || this.knownNormalizedTitles.has(normTitle)) {
+        if (
+          seenPlaylistInCall.has(uploadsPlaylistId) ||
+          (enforceGlobalDedup && (this.knownPlaylistIds.has(uploadsPlaylistId) || this.knownNormalizedTitles.has(normTitle)))
+        ) {
           duplicatesSkipped++;
           continue;
         }
+        seenPlaylistInCall.add(uploadsPlaylistId);
 
         const desc = ch.snippet?.description || raw.snippet?.description || '';
         const thumb =
@@ -681,10 +736,14 @@ class YouTubeDiscoveryEngine {
         if (!title) continue;
 
         const normTitle = normalizeCourseTitleForDedup(title);
-        if (this.knownPlaylistIds.has(playlistId) || this.knownNormalizedTitles.has(normTitle)) {
+        if (
+          seenPlaylistInCall.has(playlistId) ||
+          (enforceGlobalDedup && (this.knownPlaylistIds.has(playlistId) || this.knownNormalizedTitles.has(normTitle)))
+        ) {
           duplicatesSkipped++;
           continue;
         }
+        seenPlaylistInCall.add(playlistId);
 
         const desc: string = String(snippet.description || '');
         const itemCount = Number(pDetail?.contentDetails?.itemCount || 0);
@@ -750,10 +809,14 @@ class YouTubeDiscoveryEngine {
         if (!title) continue;
 
         const normTitle = normalizeCourseTitleForDedup(title);
-        if (this.knownVideoIds.has(videoId) || this.knownNormalizedTitles.has(normTitle)) {
+        if (
+          seenVideoInCall.has(videoId) ||
+          (enforceGlobalDedup && (this.knownVideoIds.has(videoId) || this.knownNormalizedTitles.has(normTitle)))
+        ) {
           duplicatesSkipped++;
           continue;
         }
+        seenVideoInCall.add(videoId);
 
         const desc: string = String(snippet.description || '');
         const parsedDur = parseIsoDuration(vDetail?.contentDetails?.duration);
@@ -826,8 +889,10 @@ class YouTubeDiscoveryEngine {
           discoveredAt: nowIso,
           updatedAt: nowIso,
         };
-        this.knownVideoIds.add(videoId);
-        this.knownNormalizedTitles.add(normTitle);
+        if (enforceGlobalDedup) {
+          this.knownVideoIds.add(videoId);
+          this.knownNormalizedTitles.add(normTitle);
+        }
         discovered.push(rec);
       }
     }

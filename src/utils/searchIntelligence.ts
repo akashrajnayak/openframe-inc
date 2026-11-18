@@ -260,12 +260,25 @@ export const POPULAR_SEARCH_TOPICS: string[] = [
 ];
 
 const SYNONYM_AND_TYPO_MAP: Record<string, { terms: string[]; hintLabel?: string }> = {
-  exel: { terms: ['excel', 'spreadsheet', 'ms excel'], hintLabel: 'Excel' },
-  excl: { terms: ['excel', 'microsoft excel'], hintLabel: 'Excel' },
-  excel: { terms: ['microsoft excel', 'spreadsheets', 'formulas', 'pivot tables'] },
+  exel: { terms: ['excel', 'spreadsheet', 'ms excel', 'microsoft excel'], hintLabel: 'Excel' },
+  excl: { terms: ['excel', 'microsoft excel', 'spreadsheets'], hintLabel: 'Excel' },
+  excel: { terms: ['microsoft excel', 'spreadsheets', 'formulas', 'pivot tables', 'vlookup', 'excel & data analytics'] },
+  spreadsheet: { terms: ['microsoft excel', 'excel', 'spreadsheets', 'formulas'] },
+  spreadsheets: { terms: ['microsoft excel', 'excel', 'spreadsheet', 'formulas'] },
+  vlookup: { terms: ['excel', 'microsoft excel', 'xlookup', 'formulas'] },
+  xlookup: { terms: ['excel', 'microsoft excel', 'vlookup', 'formulas'] },
+  pivot: { terms: ['excel', 'pivot table', 'microsoft excel', 'data analytics'] },
   ppt: { terms: ['powerpoint', 'presentation', 'slides'] },
   powrpoint: { terms: ['powerpoint', 'presentation', 'slides'], hintLabel: 'PowerPoint' },
   powerpoint: { terms: ['presentation', 'slides', 'ppt'] },
+  website: { terms: ['web development', 'website', 'html', 'css', 'javascript', 'wordpress', 'full stack development', 'frontend'] },
+  websites: { terms: ['web development', 'website', 'html', 'css', 'javascript', 'wordpress', 'full stack'] },
+  web: { terms: ['web development', 'website', 'html', 'css', 'javascript', 'full stack'] },
+  webpage: { terms: ['web development', 'website', 'html', 'css'] },
+  wordpress: { terms: ['web development', 'website', 'cms', 'wordpress'] },
+  html: { terms: ['web development', 'website', 'html', 'css', 'frontend'] },
+  css: { terms: ['web development', 'website', 'html', 'css', 'frontend'] },
+  react: { terms: ['web development', 'javascript', 'frontend', 'full stack'] },
   pyhton: { terms: ['python', 'programming'], hintLabel: 'Python' },
   pythn: { terms: ['python', 'programming'], hintLabel: 'Python' },
   py: { terms: ['python'] },
@@ -280,7 +293,7 @@ const SYNONYM_AND_TYPO_MAP: Record<string, { terms: string[]; hintLabel?: string
   machin: { terms: ['machine learning', 'ai'], hintLabel: 'Machine Learning' },
   lerning: { terms: ['learning', 'machine learning', 'course'], hintLabel: 'Learning' },
   genai: { terms: ['generative ai', 'llm', 'prompt engineering'] },
-  coding: { terms: ['programming', 'python', 'javascript', 'software development'] },
+  coding: { terms: ['programming', 'python', 'javascript', 'software development', 'web development'] },
   marketing: { terms: ['digital marketing', 'seo', 'social media'] },
   english: { terms: ['spoken english', 'communication skills'] },
   spokn: { terms: ['spoken english', 'communication skills'], hintLabel: 'Spoken English' },
@@ -356,11 +369,42 @@ export function detectQueryLanguage(query: string): { code: string; label: strin
   return { code: 'en', label: 'English' };
 }
 
+const CONVERSATIONAL_STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'am', 'i', 'me', 'my', 'you', 'your',
+  'what', 'why', 'who', 'when', 'where', 'which', 'how', 'do', 'does', 'did', 'can', 'could',
+  'to', 'of', 'in', 'on', 'for', 'with', 'from', 'by', 'at', 'as', 'into', 'about', 'around',
+  'and', 'or', 'vs', 'want', 'wanting', 'need', 'looking', 'seeking', 'search', 'searching',
+  'find', 'show', 'give', 'tell', 'explain', 'define', 'learn', 'learning', 'study', 'studying',
+  'build', 'create', 'make', 'develop', 'design', 'using', 'course', 'courses', 'class', 'classes',
+  'tutorial', 'tutorials', 'guide', 'guides', 'lesson', 'lessons', 'video', 'videos', 'youtube',
+  'best', 'top', 'complete', 'full', 'free', 'online', 'step', 'basics', 'basic', 'beginner',
+  'beginners', 'scratch', 'please', 'recommend', 'recommended', 'suggestion', 'suggestions',
+]);
+
+function escapeRegexLiteral(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function matchesWordBoundary(haystack: string, term: string): boolean {
+  const cleanTerm = term.trim().toLowerCase();
+  if (!cleanTerm || !haystack) return false;
+  if (cleanTerm.includes(' ')) {
+    const pattern = cleanTerm
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(escapeRegexLiteral)
+      .join('\\s+');
+    return new RegExp(`\\b${pattern}\\b`, 'i').test(haystack);
+  }
+  return new RegExp(`\\b${escapeRegexLiteral(cleanTerm)}\\b`, 'i').test(haystack);
+}
+
 /**
  * Expands search query with typo corrections & semantic synonyms without mutating user text destructively.
  */
 export function normalizeAndExpandQuery(rawQuery: string): {
   cleaned: string;
+  corePhrase: string;
   tokens: string[];
   expandedTerms: string[];
   correctionHint?: string;
@@ -371,16 +415,31 @@ export function normalizeAndExpandQuery(rawQuery: string): {
     .replace(/\s+/g, ' ');
   const lower = cleaned.toLowerCase();
 
-  // Strip natural conversational prefixes ("What is ...", "How to learn ...", "Best course for ...")
+  // Strip natural conversational prefixes ("What is ...", "How to build a ...", "Best course for ...")
   const corePhrase = lower
-    .replace(/^(what is|what are|how to learn|how to use|learn|course on|tutorial for|guide to)\s+/i, '')
+    .replace(
+      /^(what\s+is|what\s+are|what's|tell\s+me\s+about|meaning\s+of|definition\s+of|explain|how\s+to\s+learn|how\s+to\s+use|how\s+to\s+build|how\s+to\s+create|how\s+to\s+make|how\s+to|how\s+do\s+i|how\s+can\s+i|want\s+to\s+learn|learn|study|best\s+courses?\s+(?:on|for)|courses?\s+(?:on|for)|tutorial\s+(?:on|for)|guide\s+to)\s+/i,
+      ''
+    )
+    .replace(/^(a|an|the)\s+/i, '')
+    .replace(/\s+(course|courses|tutorial|tutorials|for\s+beginners|from\s+scratch|on\s+youtube)$/i, '')
     .trim();
 
-  const rawTokens = corePhrase.split(/[\s/+&,-]+/).filter((t) => t.length >= 2);
-  const expanded = new Set<string>(rawTokens);
+  const splitRaw = (corePhrase || lower)
+    .split(/[\s/+&,-]+/)
+    .map((t) => t.replace(/[^a-z0-9+.#]/g, '').trim())
+    .filter((t) => t.length >= 2);
+
+  const meaningfulTokens = splitRaw.filter((t) => !CONVERSATIONAL_STOP_WORDS.has(t));
+  const tokens = meaningfulTokens.length > 0 ? meaningfulTokens : splitRaw;
+
+  const expanded = new Set<string>(tokens);
+  if (corePhrase && corePhrase.length >= 2 && !CONVERSATIONAL_STOP_WORDS.has(corePhrase)) {
+    expanded.add(corePhrase);
+  }
   const hints: string[] = [];
 
-  for (const t of rawTokens) {
+  for (const t of tokens) {
     const mapped = SYNONYM_AND_TYPO_MAP[t];
     if (mapped) {
       mapped.terms.forEach((m) => expanded.add(m));
@@ -388,12 +447,120 @@ export function normalizeAndExpandQuery(rawQuery: string): {
     }
   }
 
+  // Handle multi-word phrases directly
+  if (/\b(build|create|make|design)\s+(?:a\s+)?websites?\b/i.test(lower) || /\bweb\s*site\b/i.test(lower)) {
+    ['website', 'web development', 'full stack development', 'html', 'css', 'javascript', 'wordpress'].forEach((m) =>
+      expanded.add(m)
+    );
+  }
+  if (/\bexcel\b|\bspreadsheet/i.test(lower)) {
+    ['excel', 'microsoft excel', 'excel & data analytics', 'formulas', 'pivot tables', 'data analytics'].forEach((m) =>
+      expanded.add(m)
+    );
+  }
+
   return {
     cleaned,
-    tokens: rawTokens,
+    corePhrase: corePhrase || lower,
+    tokens,
     expandedTerms: Array.from(expanded),
     correctionHint: hints.length > 0 ? `Showing results including "${hints.join(', ')}"` : undefined,
   };
+}
+
+/**
+ * Shared relevance scorer used across both server catalog index and client Firestore filtering.
+ * Uses word-boundary matching so "excel" matches "Excel" and NEVER ranks "Excellence" above Excel.
+ */
+export function scoreSearchMatch(
+  fields: {
+    id?: string;
+    aliasId?: string;
+    title?: string;
+    category?: string;
+    categories?: string[];
+    subcategory?: string;
+    topic?: string;
+    keywords?: string[];
+    skills?: string[];
+    shortDesc?: string;
+    instructorName?: string;
+    youtubeChannelName?: string;
+    language?: string;
+  },
+  rawQuery: string
+): number {
+  const qClean = (rawQuery || '').trim();
+  if (!qClean) return 1;
+
+  const expanded = normalizeAndExpandQuery(qClean);
+  const terms = expanded.tokens;
+  const altTerms = expanded.expandedTerms.filter((t) => !terms.includes(t));
+
+  const idStr = (fields.id || '').toLowerCase();
+  const aliasStr = (fields.aliasId || '').toLowerCase();
+  const titleStr = (fields.title || '').toLowerCase();
+  const catStr = [fields.category || '', ...(fields.categories || [])].join(' ').toLowerCase();
+  const subStr = `${fields.subcategory || ''} ${fields.topic || ''}`.toLowerCase();
+  const kwStr = [...(fields.keywords || []), ...(fields.skills || [])].join(' ').toLowerCase();
+  const metaStr = `${fields.shortDesc || ''} ${fields.instructorName || ''} ${fields.youtubeChannelName || ''} ${fields.language || ''}`.toLowerCase();
+
+  const lowerPhrase = expanded.corePhrase || qClean.toLowerCase();
+  if (idStr === qClean.toLowerCase() || (aliasStr && aliasStr === qClean.toLowerCase())) {
+    return 500;
+  }
+
+  let score = 0;
+
+  if (lowerPhrase.length >= 2) {
+    if (matchesWordBoundary(titleStr, lowerPhrase)) score += 190;
+    else if (matchesWordBoundary(catStr, lowerPhrase)) score += 155;
+    else if (matchesWordBoundary(subStr, lowerPhrase)) score += 75;
+  }
+
+  let matchedPrimaryCount = 0;
+  for (const term of terms) {
+    let termHit = false;
+    if (idStr.includes(term) && term.startsWith('of-')) {
+      score += 220;
+      termHit = true;
+    }
+    if (matchesWordBoundary(titleStr, term)) {
+      score += 120;
+      termHit = true;
+    } else if (matchesWordBoundary(catStr, term)) {
+      score += 95;
+      termHit = true;
+    } else if (matchesWordBoundary(subStr, term)) {
+      score += 50;
+      termHit = true;
+    } else if (matchesWordBoundary(kwStr, term)) {
+      score += 40;
+      termHit = true;
+    } else if (matchesWordBoundary(metaStr, term)) {
+      score += 22;
+      termHit = true;
+    }
+    if (termHit) matchedPrimaryCount++;
+  }
+
+  if (terms.length > 1 && matchedPrimaryCount === terms.length) {
+    score += 80;
+  }
+
+  // Semantic synonym expansions (ensures "build a website" ranks Web Development / HTML5 / WordPress top)
+  let altBonus = 0;
+  for (const alt of altTerms) {
+    if (alt.length < 2) continue;
+    if (matchesWordBoundary(titleStr, alt)) altBonus = Math.max(altBonus, 145);
+    else if (matchesWordBoundary(catStr, alt)) altBonus = Math.max(altBonus, 130);
+    else if (matchesWordBoundary(subStr, alt)) altBonus = Math.max(altBonus, 42);
+    else if (matchesWordBoundary(kwStr, alt)) altBonus = Math.max(altBonus, 32);
+    else if (matchesWordBoundary(metaStr, alt)) altBonus = Math.max(altBonus, 15);
+  }
+  score += altBonus;
+
+  return score;
 }
 
 const SKILL_MATCH_PATTERNS: Array<{ label: string; regex: RegExp }> = [
@@ -404,9 +571,9 @@ const SKILL_MATCH_PATTERNS: Array<{ label: string; regex: RegExp }> = [
   { label: 'Accounting & Taxation', regex: /\b(accounting|accountancy|bookkeeping|tally|gst|ledger|balance sheet)\b/i },
   { label: 'Research Methodology', regex: /\b(research methodology|academic writing|literature review|hypothesis|spss|biostatistics)\b/i },
   { label: 'Communication Skills', regex: /\b(communication skills|spoken english|public speaking|interpersonal|soft skills|business writing)\b/i },
-  { label: 'Microsoft Excel', regex: /\b(microsoft excel|advanced excel|\bexcel\b|pivot table|vlookup|xlookup)\b/i },
+  { label: 'Microsoft Excel', regex: /\b(microsoft excel|advanced excel|\bexcel\b|spreadsheet|spreadsheets|pivot table|vlookup|xlookup)\b/i },
   { label: 'PowerPoint Presentation', regex: /\b(powerpoint|presentation|\bppt\b|slides)\b/i },
-  { label: 'Web Development', regex: /\b(web development|html|css|javascript|react|node\.js|full stack)\b/i },
+  { label: 'Web Development', regex: /\b(web development|website|websites|build a website|create a website|web design|wordpress|landing page|html|css|javascript|react|node\.js|full stack)\b/i },
   { label: 'Data Analytics', regex: /\b(data analytics|data science|power bi|tableau|sql)\b/i },
   { label: 'Graphic Design', regex: /\b(graphic design|ui\/ux|figma|canva|photoshop|illustrator)\b/i },
   { label: 'Video Editing', regex: /\b(video editing|premiere|after effects|filmmaking)\b/i },
@@ -539,6 +706,8 @@ export function parseEducationalIntent(
     'Python Programming': ['python', 'python programming', 'programming'],
     'Artificial Intelligence': ['artificial intelligence', 'generative ai', 'machine learning', 'ai'],
     'Communication Skills': ['communication skills', 'spoken english', 'public speaking', 'communication'],
+    'Microsoft Excel': ['excel', 'microsoft excel', 'excel & data analytics', 'formulas', 'pivot tables', 'data analytics'],
+    'Web Development': ['web development', 'website', 'full stack development', 'html', 'css', 'javascript', 'wordpress'],
   };
 
   const matchedExtras = matchedSkills.flatMap((sk) => skillSynonymExtras[sk] || [sk.toLowerCase()]);

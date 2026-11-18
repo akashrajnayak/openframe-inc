@@ -48,6 +48,12 @@ import {
   RecommendationAnalyticsEvent,
 } from '../types';
 import { quinnAiService } from './quinnAiService';
+import { aiPathToMarketplaceCourse, cacheModeledCourse } from './marketplaceService';
+import {
+  compute90PercentCoursePricing,
+  validateCertificateAddressDetails,
+  type CertificateAddressDetails,
+} from '../utils/pricingEngine';
 
 function sanitizeId(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
@@ -108,6 +114,7 @@ export class LmsService {
       fullName: string;
       email: string;
       registrationNumber?: string;
+      addressDetails?: Partial<CertificateAddressDetails>;
     },
     paymentStatusOverride?: CourseEnrollment['paymentStatus'],
     feeAmountOverride?: number
@@ -115,42 +122,81 @@ export class LmsService {
     const now = new Date().toISOString();
     const enrollmentId = sanitizeId(`${student.uid}_${course.id}`);
     const regNo = student.registrationNumber || `OF-STU-${student.uid.slice(0, 6).toUpperCase()}`;
+    const priced = compute90PercentCoursePricing({
+      rawPrice: feeAmountOverride !== undefined ? feeAmountOverride : course.price,
+      category: course.category,
+      categoryGroup: course.categoryGroup,
+      title: course.title,
+      level: course.level,
+      pricingTier: course.pricingTier,
+    });
+    const resolvedFee = feeAmountOverride !== undefined && Number(feeAmountOverride) >= 300
+      ? Math.min(2500, Math.round(Number(feeAmountOverride)))
+      : priced.finalPriceInr;
 
     // Check existing enrollment or student profile for assigned teacher
     let assignedTeacherId = '';
     let assignedTeacherName = '';
     try {
       const stuSnap = await getDoc(doc(db, 'student_profiles', student.uid));
-      if (stuSnap.exists()) {
-        const stuData = stuSnap.data() as StudentProfile;
-        assignedTeacherId = stuData.assignedTeacherId || '';
-        assignedTeacherName = stuData.assignedTeacherName || '';
-        const existingCourses = new Set(stuData.enrolledCourseIds || []);
-        if (!existingCourses.has(course.id)) {
-          existingCourses.add(course.id);
-          await updateDoc(doc(db, 'student_profiles', student.uid), {
-            enrolledCourseIds: Array.from(existingCourses),
-            updatedAt: now,
-          });
-        }
+      const existingData = stuSnap.exists() ? (stuSnap.data() as StudentProfile) : undefined;
+      if (existingData) {
+        assignedTeacherId = existingData.assignedTeacherId || '';
+        assignedTeacherName = existingData.assignedTeacherName || '';
       }
+      const existingCourses = new Set(existingData?.enrolledCourseIds || []);
+      existingCourses.add(course.id);
+      const profileUpdate: Record<string, any> = {
+        uid: student.uid,
+        studentId: student.uid,
+        registrationNumber: regNo,
+        fullName: student.fullName,
+        email: student.email,
+        enrolledCourseIds: Array.from(existingCourses),
+        updatedAt: now,
+      };
+      if (student.addressDetails) {
+        const ad = student.addressDetails;
+        if (ad.homeAddress) profileUpdate.homeAddress = ad.homeAddress.trim();
+        if (ad.flatNumber) {
+          profileUpdate.flatNumber = ad.flatNumber.trim();
+          profileUpdate.houseNumber = ad.flatNumber.trim();
+        }
+        if (ad.streetAddress) profileUpdate.streetAddress = ad.streetAddress.trim();
+        if (ad.pincode) profileUpdate.pincode = ad.pincode.trim();
+        if (ad.mobileNumber) profileUpdate.mobileNumber = ad.mobileNumber.trim();
+        if (ad.alternativeMobileNumber) profileUpdate.alternativeMobileNumber = ad.alternativeMobileNumber.trim();
+        if (ad.state) profileUpdate.state = ad.state.trim();
+      }
+      await setDoc(doc(db, 'student_profiles', student.uid), stripUndefinedDeep(profileUpdate), { merge: true });
     } catch {
-      // Non-blocking if profile read restricted
+      // Non-blocking if profile read/write restricted
     }
 
+    const ad = student.addressDetails || {};
     const enrollment: CourseEnrollment = {
       id: enrollmentId,
       studentId: student.uid,
       studentName: student.fullName,
       studentEmail: student.email,
+      studentPhone: ad.mobileNumber || undefined,
+      mobileNumber: ad.mobileNumber || undefined,
+      alternativeMobileNumber: ad.alternativeMobileNumber || undefined,
+      homeAddress: ad.homeAddress || undefined,
+      flatNumber: ad.flatNumber || undefined,
+      streetAddress: ad.streetAddress || undefined,
+      pincode: ad.pincode || undefined,
+      state: ad.state || undefined,
       registrationNumber: regNo,
       courseId: course.id,
       courseTitle: course.title,
       teacherId: assignedTeacherId || undefined,
       teacherName: assignedTeacherName || undefined,
       status: 'Active',
-      paymentStatus: paymentStatusOverride || (course.price === 0 ? 'Complimentary' : 'Paid'),
-      feeAmount: feeAmountOverride !== undefined ? Number(feeAmountOverride) : Number(course.price || 0),
+      paymentStatus: paymentStatusOverride || 'Pending',
+      feeAmount: resolvedFee,
+      marketBenchmarkPrice: priced.marketBenchmarkPrice,
+      discountPercent: priced.discountPercent,
       enrolledAt: now,
       updatedAt: now,
     };
@@ -369,14 +415,34 @@ export class LmsService {
           },
         ];
 
+    const courseRecMap = new Map<string, any>();
+    for (const rv of course.recommendedVideos || []) {
+      const k = rv.videoId || rv.youtubeId || rv.id;
+      if (k) courseRecMap.set(String(k), rv);
+    }
+
     baseModules.forEach((mod, mIdx) => {
       const modId = sanitizeId(`${course.id}_mod_${mIdx + 1}`);
+      const partPrefix = mod.partLabel ? `${mod.partLabel} — ` : '';
+      const modVideos =
+        mod.recommendedVideos && mod.recommendedVideos.length > 0
+          ? mod.recommendedVideos
+          : (mod.videoIds || [])
+              .map((vid) => courseRecMap.get(vid))
+              .filter(Boolean);
+      const effectiveLessonVideos =
+        modVideos.length > 0
+          ? modVideos
+          : course.recommendedVideos && course.recommendedVideos.length > 0
+          ? [course.recommendedVideos[mIdx % course.recommendedVideos.length]]
+          : undefined;
+
       fallbackModules.push({
         id: modId,
         courseId: course.id,
         moduleNumber: mod.moduleNumber || mIdx + 1,
-        title: mod.title,
-        description: `Module ${mod.moduleNumber || mIdx + 1} covering ${mod.title}`,
+        title: mod.partLabel ? `${mod.partLabel}: ${mod.title}` : mod.title,
+        description: `${partPrefix}Module ${mod.moduleNumber || mIdx + 1} covering ${mod.title}`,
         duration: mod.duration || '1 Week',
         createdBy: 'system',
         updatedAt: new Date().toISOString(),
@@ -401,6 +467,7 @@ export class LmsService {
           topics: [lessonTitle, ...(course.skillsAcquired || []).slice(0, 3)],
           durationMinutes: 45,
           mandatory: true,
+          recommendedVideos: effectiveLessonVideos,
           learningObjectives: course.learningObjectives?.slice(0, 3) || [
             `Understand the foundational principles of ${lessonTitle}`,
             `Apply ${lessonTitle} in a structured practical exercise`,
@@ -588,6 +655,53 @@ export class LmsService {
       progress.currentStage = 'QUIZ_COMPLETION';
     }
     progress.overallProgressPercent = Math.max(progress.overallProgressPercent || 0, 30);
+    await this.saveStudentProgress(progress);
+    return progress;
+  }
+
+  async completeLessonModule(
+    studentId: string,
+    courseId: string,
+    lessonId: string,
+    courseTitle?: string,
+    totalMandatoryLessons = 3
+  ): Promise<StudentProgressRecord> {
+    const now = new Date().toISOString();
+    const completionId = sanitizeId(`${studentId}_${courseId}_${lessonId}`);
+    try {
+      await setDoc(
+        doc(db, 'lesson_completions', completionId),
+        {
+          id: completionId,
+          studentId,
+          courseId,
+          lessonId,
+          videoCompleted: true,
+          quizPassed: false,
+          completedAt: now,
+        },
+        { merge: true }
+      );
+    } catch {
+      // non-blocking
+    }
+
+    const progress = await this.getStudentProgress(courseId, studentId, {
+      courseTitle,
+      totalMandatoryLessons,
+    });
+    const lessonSet = new Set(progress.completedLessonIds || []);
+    lessonSet.add(lessonId);
+    progress.completedLessonIds = Array.from(lessonSet);
+    const stageSet = new Set<LearningStage>(progress.completedStages || []);
+    stageSet.add('COURSE_ENROLLMENT');
+    stageSet.add('VIDEO_LEARNING');
+    progress.completedStages = Array.from(stageSet);
+    if (progress.currentStage === 'COURSE_ENROLLMENT' || progress.currentStage === 'VIDEO_LEARNING') {
+      progress.currentStage = 'QUIZ_COMPLETION';
+    }
+    const ratio = Math.min(1, progress.completedLessonIds.length / Math.max(1, totalMandatoryLessons));
+    progress.overallProgressPercent = Math.max(progress.overallProgressPercent || 0, Math.round(15 + ratio * 35));
     await this.saveStudentProgress(progress);
     return progress;
   }
@@ -1314,6 +1428,7 @@ export class LmsService {
     adminApproverEmail?: string;
     certificateType?: CertificateType;
     status?: IssuedCertificate['status'];
+    addressDetails?: CertificateAddressDetails;
   }): Promise<IssuedCertificate> {
     const year = new Date().getFullYear();
     const uniqueSuffix = `${Date.now().toString(36).toUpperCase().slice(-4)}${Math.floor(100 + Math.random() * 900)}`;
@@ -1339,6 +1454,7 @@ export class LmsService {
     }
 
     const template = (await this.getCertificateTemplates())[0] || DEFAULT_CERT_TEMPLATE;
+    const ad = params.addressDetails;
 
     const cert: IssuedCertificate = stripUndefinedDeep({
       id: certificateId,
@@ -1368,16 +1484,166 @@ export class LmsService {
       qrCodeUrl: qrDataUrl,
       accreditationBody: template.accreditationLine,
       authorizedSignatory: `${template.authorizedSignatoryName}, ${template.authorizedSignatoryTitle}`,
+      homeAddress: ad?.homeAddress,
+      flatNumber: ad?.flatNumber,
+      streetAddress: ad?.streetAddress,
+      pincode: ad?.pincode,
+      mobileNumber: ad?.mobileNumber,
+      alternativeMobileNumber: ad?.alternativeMobileNumber,
+      state: ad?.state,
+      addressVerifiedAt: ad ? now : undefined,
       status: params.status || 'Issued',
     });
 
     try {
       await setDoc(doc(db, 'certificates', certificateId), cert, { merge: true });
+      // Write strictly PII-free public QR verification record (never includes address/phone)
+      await setDoc(
+        doc(db, 'certificate_verification', certificateId),
+        stripUndefinedDeep({
+          id: certificateId,
+          certificateId,
+          studentId: params.studentId,
+          studentName: params.studentName,
+          courseId: params.courseId,
+          courseTitle: params.courseTitle,
+          grade,
+          score: params.score,
+          issueDate: cert.issuedDate,
+          issuerName: cert.authorizedSignatory,
+          status: cert.status === 'Issued' ? 'Issued' : cert.status,
+          verifiedAt: now,
+        }),
+        { merge: true }
+      ).catch(() => {});
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `certificates/${certificateId}`);
     }
 
     return cert;
+  }
+
+  /**
+   * Direct Assessment & Module Completion Certificate Claim (with Mandatory 7-Field Address Gate).
+   * Enables learners who completed modules, passed the Verification Quiz (>=70%),
+   * and verified all 7 address/contact details to claim their official QR-verified certificate.
+   */
+  async claimVerifiedAssessmentCertificate(params: {
+    course: MarketplaceCourse;
+    studentId: string;
+    studentName: string;
+    studentEmail: string;
+    registrationNumber?: string;
+    progress: StudentProgressRecord;
+    addressDetails: CertificateAddressDetails;
+  }): Promise<{ certificate: IssuedCertificate; progress: StudentProgressRecord }> {
+    const validation = validateCertificateAddressDetails(params.addressDetails);
+    if (!validation.valid) {
+      throw new Error(validation.error || 'All 7 certificate address & mobile verification fields are required.');
+    }
+
+    const lessonsDone =
+      (params.progress.completedLessonIds?.length || 0) >= 1 ||
+      params.progress.completedStages.includes('VIDEO_LEARNING');
+    if (!lessonsDone) {
+      throw new Error('Please mark at least one module/lesson complete before claiming your certificate.');
+    }
+
+    const quizPassed =
+      (params.progress.quizAveragePercent || 0) >= 70 ||
+      params.progress.completedStages.includes('QUIZ_COMPLETION');
+    if (!quizPassed) {
+      throw new Error('Please pass the Verification Quiz (>= 70%) before issuing your certificate.');
+    }
+
+    // Persist verified 7-field details to student profile & enrollment
+    const now = new Date().toISOString();
+    await this.updateStudentProfile(params.studentId, {
+      homeAddress: params.addressDetails.homeAddress.trim(),
+      flatNumber: params.addressDetails.flatNumber.trim(),
+      houseNumber: params.addressDetails.flatNumber.trim(),
+      streetAddress: params.addressDetails.streetAddress.trim(),
+      pincode: params.addressDetails.pincode.trim(),
+      mobileNumber: params.addressDetails.mobileNumber.trim(),
+      alternativeMobileNumber: params.addressDetails.alternativeMobileNumber.trim(),
+      state: params.addressDetails.state.trim(),
+    });
+
+    const enrollmentId = sanitizeId(`${params.studentId}_${params.course.id}`);
+    try {
+      await setDoc(
+        doc(db, 'course_enrollments', enrollmentId),
+        stripUndefinedDeep({
+          id: enrollmentId,
+          studentId: params.studentId,
+          studentName: params.studentName,
+          studentEmail: params.studentEmail,
+          courseId: params.course.id,
+          courseTitle: params.course.title,
+          homeAddress: params.addressDetails.homeAddress.trim(),
+          flatNumber: params.addressDetails.flatNumber.trim(),
+          streetAddress: params.addressDetails.streetAddress.trim(),
+          pincode: params.addressDetails.pincode.trim(),
+          mobileNumber: params.addressDetails.mobileNumber.trim(),
+          alternativeMobileNumber: params.addressDetails.alternativeMobileNumber.trim(),
+          state: params.addressDetails.state.trim(),
+          updatedAt: now,
+        }),
+        { merge: true }
+      );
+    } catch {
+      // ignore non-blocking merge error
+    }
+
+    const finalScore = Math.max(
+      params.progress.teacherEvaluation?.totalScore || 0,
+      params.progress.quizAveragePercent || 75
+    );
+
+    const certificate = await this.issueCertificate({
+      courseId: params.course.id,
+      courseTitle: params.course.title,
+      courseDuration: params.course.duration || 'Self-Paced',
+      studentId: params.studentId,
+      studentName: params.studentName,
+      registrationNumber: params.registrationNumber || params.progress.registrationNumber,
+      score: finalScore,
+      teacherName: params.progress.assignedTeacherName || 'OpenFrame Assessment Board',
+      approvedByAdmin: true,
+      certificateType: 'Course Completion Certificate',
+      status: 'Issued',
+      addressDetails: params.addressDetails,
+    });
+
+    const updatedProgress: StudentProgressRecord = {
+      ...params.progress,
+      completedStages: Array.from(
+        new Set<LearningStage>([...(params.progress.completedStages || []), 'CERTIFICATE'])
+      ),
+      currentStage: 'CERTIFICATE',
+      overallProgressPercent: 100,
+      certificate,
+      certificateId: certificate.certificateId,
+      certificateIssued: true,
+      certificateEligible: true,
+    };
+
+    await this.saveStudentProgress(updatedProgress, true);
+
+    await this.createNotification({
+      id: `notif_${Date.now()}_cert_issued`,
+      recipientId: params.studentId,
+      recipientEmail: params.studentEmail,
+      recipientRole: 'STUDENT',
+      type: 'certificate_ready',
+      title: `Official Certificate Issued (${certificate.certificateId})`,
+      message: `Your verified OpenFrame certificate for ${params.course.title} is ready for download.`,
+      actionUrl: `/verify-certificate/${certificate.certificateId}`,
+      createdAt: now,
+      read: false,
+    });
+
+    return { certificate, progress: updatedProgress };
   }
 
   async approveCertificateByAdmin(certificateId: string, adminEmail: string): Promise<void> {
@@ -2232,6 +2498,7 @@ export class LmsService {
       id,
       updatedAt: new Date().toISOString(),
     });
+    cacheModeledCourse(aiPathToMarketplaceCourse(payload));
     try {
       await setDoc(doc(db, 'ai_learning_paths', id), payload, { merge: true });
     } catch {
