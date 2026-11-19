@@ -17,6 +17,7 @@ import { quinnAiService } from '../services/quinnAiService';
 import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
 import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import {
   CourseEnrollment,
   IssuedCertificate,
@@ -136,13 +137,20 @@ export const ProfessionalDashboardPage: React.FC = () => {
           <p className="text-xs text-[#64748B]">
             Sign in to access AI upskilling pathways, corporate training libraries, certificates, and Quinn AI interview mentoring.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/portal/professional?redirect=/professional/dashboard')}
-            className="w-full py-3 rounded-xl bg-[#2563EB] text-white text-xs font-semibold cursor-pointer"
-          >
-            Sign In to Professional Portal
-          </button>
+          <div className="space-y-2.5 pt-1">
+            <GoogleSignInButton
+              role="professional"
+              label="Continue with Google (Professional)"
+              variant="dark"
+            />
+            <button
+              type="button"
+              onClick={() => navigate('/portal/professional?redirect=/professional/dashboard')}
+              className="w-full py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+            >
+              Email / Portal Sign In
+            </button>
+          </div>
         </div>
       </div>
     );

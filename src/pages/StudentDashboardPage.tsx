@@ -44,6 +44,7 @@ import { marketplaceService } from '../services/marketplaceService';
 import { getSchoolEnrollment } from '../services/schoolService';
 import { SCHOOL_BOARDS, SCHOOL_CLASSES } from '../data/schoolCurriculumData';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { StudentAnalytics20Charts } from '../components/student/StudentAnalytics20Charts';
 import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
 import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
@@ -605,14 +606,21 @@ export const StudentDashboardPage: React.FC = () => {
           <p className="text-xs text-[#64748B] leading-relaxed">
             Sign in with your student account to access enrolled courses, Quinn AI YouTube lectures, verification quizzes, 20 real-time analytics charts, notes, and certificates.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/portal/student?redirect=/student/dashboard')}
-            className="w-full py-3 bg-[#123D32] hover:bg-[#0D2E25] text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-          >
-            <span>Sign In to Student Portal</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="space-y-2.5 pt-1">
+            <GoogleSignInButton
+              role="student"
+              label="Continue with Google (Student)"
+              variant="dark"
+            />
+            <button
+              type="button"
+              onClick={() => navigate('/portal/student?redirect=/student/dashboard')}
+              className="w-full py-2.5 bg-[#123D32] hover:bg-[#0D2E25] text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <span>Email / Portal Sign In</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     );

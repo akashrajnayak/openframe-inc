@@ -73,20 +73,24 @@ import {
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with ignoreUndefinedProperties so optional fields never crash writes
+// Initialize Firestore with long-polling transport (prevents 10s WebChannel timeout in iframes/proxies)
+// and ignoreUndefinedProperties so optional fields never crash writes
 let dbInstance: Firestore;
+const hasNamedFirestoreDb =
+  Boolean(firebaseConfig.firestoreDatabaseId) &&
+  firebaseConfig.firestoreDatabaseId !== '(default)';
+const firestoreInitSettings = {
+  ignoreUndefinedProperties: true,
+  experimentalForceLongPolling: true,
+};
 try {
-  if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
-    dbInstance = initializeFirestore(
-      app,
-      { ignoreUndefinedProperties: true },
-      firebaseConfig.firestoreDatabaseId
-    );
-  } else {
-    dbInstance = initializeFirestore(app, { ignoreUndefinedProperties: true });
-  }
+  dbInstance = hasNamedFirestoreDb
+    ? initializeFirestore(app, firestoreInitSettings, firebaseConfig.firestoreDatabaseId)
+    : initializeFirestore(app, firestoreInitSettings);
 } catch {
-  dbInstance = getFirestore(app);
+  dbInstance = hasNamedFirestoreDb
+    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
 }
 
 export function stripUndefinedDeep<T>(value: T): T {
@@ -183,6 +187,10 @@ export interface FirestoreErrorInfo {
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
     tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
   };
 }
 
@@ -202,6 +210,11 @@ export function handleFirestoreError(
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
+      providerInfo:
+        auth.currentUser?.providerData?.map((provider) => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
     }
   };
   console.warn('Firestore Operation Error:', JSON.stringify(errInfo));

@@ -69,6 +69,7 @@ import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModa
 import { LearningRoadmapPanel } from '../components/discovery/LearningRoadmapPanel';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { useAuth } from '../context/AuthContext';
 import { lmsService } from '../services/lmsService';
@@ -1975,13 +1976,22 @@ export const CourseMarketplacePage: React.FC = () => {
                   </button>
                 ))}
               </div>
-              <Link
-                to={`/qa${searchQuery.trim().length >= 2 ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`}
-                className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                <span>Ask Concept Q&amp;A</span>
-              </Link>
+              <div className="flex items-center gap-2 shrink-0">
+                {!currentUser && (
+                  <GoogleSignInButton
+                    role="student"
+                    label="Google Login"
+                    variant="compact"
+                  />
+                )}
+                <Link
+                  to={`/qa${searchQuery.trim().length >= 2 ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`}
+                  className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Ask Concept Q&amp;A</span>
+                </Link>
+              </div>
             </div>
 
             {/* Parsed Educational Intent Banner + Quinn AI Discovery Loading */}
@@ -2878,6 +2888,13 @@ export const CourseMarketplacePage: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    {!currentUser && (
+                      <GoogleSignInButton
+                        role="student"
+                        label="Google Sign In"
+                        variant="compact"
+                      />
+                    )}
                     {(searchQuery.trim().length >= 2 || activeYouTubeQuery.trim().length >= 2 || selectedChannel.trim()) && (
                       <button
                         type="button"

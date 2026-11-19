@@ -11,6 +11,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { GoogleSignInButton } from './GoogleSignInButton';
 
 export const Header: React.FC = () => {
   const { currentPath, navigate } = useRouter();
@@ -217,15 +218,22 @@ export const Header: React.FC = () => {
               </div>
             ) : (
               <div className="hidden sm:flex items-center gap-2">
+                <GoogleSignInButton
+                  role="student"
+                  label="Google Login"
+                  variant="compact"
+                  showInlineError={false}
+                  onError={() => navigate('/portal/student')}
+                />
                 <Link
                   to="/portal"
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#18221F] hover:bg-black/5 border border-slate-300/80 bg-white/80 transition-colors whitespace-nowrap"
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-[#18221F] hover:bg-black/5 border border-slate-300/80 bg-white/80 transition-colors whitespace-nowrap"
                 >
-                  Login
+                  Portals
                 </Link>
                 <Link
                   to="/portal?mode=register"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-700 shadow-sm transition-colors whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-700 shadow-sm transition-colors whitespace-nowrap"
                 >
                   <span>Get Started</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -300,19 +308,27 @@ export const Header: React.FC = () => {
                 </button>
               </>
             ) : (
-              <div className="grid grid-cols-2 gap-2.5">
-                <Link
-                  to="/portal"
-                  className="py-2.5 px-4 rounded-xl border border-slate-300 bg-white text-[#18221F] font-semibold text-sm text-center"
-                >
-                  Login
-                </Link>
-                <Link
-                  to="/portal?mode=register"
-                  className="py-2.5 px-4 rounded-xl bg-[#2563EB] text-white font-semibold text-sm text-center"
-                >
-                  Get Started
-                </Link>
+              <div className="space-y-2.5">
+                <GoogleSignInButton
+                  role="student"
+                  label="Continue with Google"
+                  variant="dark"
+                  onSuccess={() => setMobileMenuOpen(false)}
+                />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <Link
+                    to="/portal"
+                    className="py-2.5 px-4 rounded-xl border border-slate-300 bg-white text-[#18221F] font-semibold text-sm text-center"
+                  >
+                    All 8 Portals
+                  </Link>
+                  <Link
+                    to="/portal?mode=register"
+                    className="py-2.5 px-4 rounded-xl bg-[#2563EB] text-white font-semibold text-sm text-center"
+                  >
+                    Get Started
+                  </Link>
+                </div>
               </div>
             )}
           </div>

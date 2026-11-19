@@ -20,6 +20,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { GoogleLogoSvg } from '../components/common/GoogleSignInButton';
 import { storageService } from '../services/storageService';
 import { submitSchoolPartnerEnquiry, triggerAdminNotification } from '../services/firebase';
 import { schoolPartnerService, SchoolAuditActor } from '../services/schoolPartnerService';
@@ -654,9 +655,10 @@ export const SchoolPartnerPage: React.FC = () => {
                   type="button"
                   disabled={authBusy}
                   onClick={() => void handleQuickLoginGoogle()}
-                  className="w-full py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
+                  className="w-full py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Continue with Google
+                  <GoogleLogoSvg className="w-4 h-4 shrink-0" />
+                  <span>Continue with Google</span>
                 </button>
 
                 <div className="text-[11px] text-center text-[#64748B] pt-1">

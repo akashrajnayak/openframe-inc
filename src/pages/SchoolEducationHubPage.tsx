@@ -119,6 +119,7 @@ import { AllIndiaBoardDirectory } from '../components/school/AllIndiaBoardDirect
 import { BoardGradeStructurePanel } from '../components/school/BoardGradeStructurePanel';
 import { MultilingualLanguagePanel } from '../components/school/MultilingualLanguagePanel';
 import { StudyOnYourOwnSelfWorkspace } from '../components/school/StudyOnYourOwnSelfWorkspace';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { getOrCreateStudentTokenWallet } from '../services/selfStudyService';
 
 type HubTab =
@@ -920,12 +921,21 @@ export const SchoolEducationHubPage: React.FC = () => {
               )}
             </div>
 
-            <div className="flex items-end">
+            <div className="flex items-end gap-2">
+              {!currentUser && (
+                <GoogleSignInButton
+                  role="student"
+                  label="Google Login"
+                  variant="compact"
+                  showInlineError={false}
+                  className="py-2 rounded-lg"
+                />
+              )}
               <button
                 type="button"
                 onClick={handleSaveEnrollment}
                 disabled={savingEnrollment}
-                className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                className="flex-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm whitespace-nowrap"
               >
                 {savingEnrollment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 <span>{currentUser ? 'Save & Open Daily Classes' : 'Sign In to Save'}</span>

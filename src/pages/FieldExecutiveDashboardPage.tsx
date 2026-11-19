@@ -24,6 +24,7 @@ import { useAuth } from '../context/AuthContext';
 import { useRouter } from '../router/RouterContext';
 import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
 import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 
 type FieldNavId = 'overview' | 'visits' | 'lead_intake' | 'attendance';
 
@@ -195,13 +196,20 @@ export const FieldExecutiveDashboardPage: React.FC = () => {
           <p className="text-xs text-[#64748B]">
             Sign in with your Field Executive credentials to log school outreach visits, check-ins, and student admissions.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/portal/field?redirect=/field/dashboard')}
-            className="w-full py-3 rounded-xl bg-[#123D32] text-white text-xs font-semibold cursor-pointer"
-          >
-            Sign In to Field Portal
-          </button>
+          <div className="space-y-2.5 pt-1">
+            <GoogleSignInButton
+              role="field_executive"
+              label="Continue with Google (Field Executive)"
+              variant="dark"
+            />
+            <button
+              type="button"
+              onClick={() => navigate('/portal/field?redirect=/field/dashboard')}
+              className="w-full py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-semibold cursor-pointer"
+            >
+              Email / Portal Sign In
+            </button>
+          </div>
         </div>
       </div>
     );

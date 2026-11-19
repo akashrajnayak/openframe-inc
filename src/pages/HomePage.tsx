@@ -28,7 +28,9 @@ import { storageService } from '../services/storageService';
 import { StudentRegistrationModal } from '../components/common/StudentRegistrationModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { HomepageSchoolSection } from '../components/school/HomepageSchoolSection';
+import { useAuth } from '../context/AuthContext';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { marketplaceService } from '../services/marketplaceService';
 import { initialBlogPosts } from '../data/initialData';
@@ -58,6 +60,7 @@ const FEATURED_FILTERS = [
 
 export const HomePage: React.FC = () => {
   const { navigate } = useRouter();
+  const { currentUser } = useAuth();
 
   // Pop-up modal states
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
@@ -574,6 +577,16 @@ export const HomePage: React.FC = () => {
                 >
                   <span>Login / Get Started</span>
                 </Link>
+
+                {!currentUser && (
+                  <GoogleSignInButton
+                    role="student"
+                    label="Continue with Google"
+                    variant="light"
+                    className="!w-auto px-5 py-3.5"
+                    onSuccess={() => navigate('/portal/student')}
+                  />
+                )}
 
                 <button
                   type="button"
@@ -1398,6 +1411,15 @@ export const HomePage: React.FC = () => {
             Join thousands of students, educators, parents, schools, and professionals building real capabilities on OpenFrame.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+            {!currentUser && (
+              <GoogleSignInButton
+                role="student"
+                label="Continue with Google"
+                variant="light"
+                className="!w-auto px-6 py-3.5 shadow-lg"
+                onSuccess={() => navigate('/portal/student')}
+              />
+            )}
             <Link
               to="/portal?mode=register"
               className="px-7 py-3.5 rounded-xl bg-[#2563EB] hover:bg-blue-500 text-white text-sm font-semibold shadow-lg transition-colors whitespace-nowrap"

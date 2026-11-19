@@ -28,6 +28,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { GoogleSignInButton } from '../common/GoogleSignInButton';
 import { ALL_INDIA_BOARDS } from '../../data/allIndiaBoardsData';
 import { ALL_INDIA_LANGUAGE_PACKS } from '../../data/allIndiaLanguagesData';
 import { NON_CLINICAL_EDUCATIONAL_DISCLAIMER } from '../../data/iqEqSqQuestionsData';
@@ -866,6 +867,19 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
             <p className="text-xs sm:text-sm text-slate-600 max-w-3xl">
               Explore all 10 academic levels across every Indian board and 14 languages. Watch matched YouTube lectures or read auto-generated Chapter PDF Notes, enroll with 90% OpenFrame Grant ({formatInr(300)}–{formatInr(2500)}), complete the 30-question exam + IQ/EQ/SQ tests, and download your 20-graph progress report.
             </p>
+            {!currentUser && (
+              <div className="pt-1 flex flex-wrap items-center gap-2.5">
+                <GoogleSignInButton
+                  role="student"
+                  label="Sign in with Google to Sync Progress"
+                  variant="compact"
+                  showInlineError
+                />
+                <span className="text-[11px] text-slate-500">
+                  Keep your weekly tokens, chapters &amp; 20-graph reports synced across sessions
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Weekly Token Wallet Card */}

@@ -25,6 +25,7 @@ import { useRouter, Link } from '../router/RouterContext';
 import { LmsUserProfile, LmsUserRole } from '../types';
 import { db, formatFirebaseAuthError } from '../services/firebase';
 import { getSchoolEnrollment, isSchoolQualificationLabel } from '../services/schoolService';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 
 interface CategoryMeta {
   role: LmsUserRole;
@@ -429,8 +430,20 @@ export const PortalLoginPage: React.FC = () => {
                   Welcome to OpenFrame
                 </h1>
                 <p className="text-sm sm:text-base text-[#64748B] leading-relaxed">
-                  One platform. Multiple possibilities. Your learning journey starts here — choose your portal to continue.
+                  One platform. Multiple possibilities. Your learning journey starts here — sign in instantly with Google or choose your portal below.
                 </p>
+                <div className="pt-2 max-w-xs mx-auto">
+                  <GoogleSignInButton
+                    role="student"
+                    label="Continue with Google"
+                    variant="dark"
+                    onSuccess={async (profile) => {
+                      if (profile) {
+                        navigate(await resolveDestination(profile));
+                      }
+                    }}
+                  />
+                </div>
               </div>
 
               {/* 8 Graphical Role Portal Cards */}

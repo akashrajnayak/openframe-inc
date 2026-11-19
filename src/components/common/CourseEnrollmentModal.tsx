@@ -32,6 +32,7 @@ import {
   validateCertificateAddressDetails,
   type CertificateAddressDetails,
 } from '../../utils/pricingEngine';
+import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface CourseEnrollmentModalProps {
   isOpen: boolean;
@@ -543,24 +544,31 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
                   </p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    navigate('/login/student');
-                  }}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#2563EB] text-white text-sm font-semibold rounded-xl hover:bg-blue-700 cursor-pointer"
-                >
-                  Sign In / Register Student Account <ArrowRight className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-4 py-2.5 border border-slate-300 bg-white text-sm font-medium text-slate-700 rounded-xl cursor-pointer"
-                >
-                  Continue Browsing
-                </button>
+              <div className="space-y-3">
+                <GoogleSignInButton
+                  role="student"
+                  label="Continue with Google to Enroll"
+                  variant="dark"
+                />
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      navigate('/login/student');
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#2563EB] text-white text-xs sm:text-sm font-semibold rounded-xl hover:bg-blue-700 cursor-pointer"
+                  >
+                    Email Sign In / Register <ArrowRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-4 py-2.5 border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-700 rounded-xl cursor-pointer"
+                  >
+                    Continue Browsing
+                  </button>
+                </div>
               </div>
             </div>
           ) : step === 'details' ? (

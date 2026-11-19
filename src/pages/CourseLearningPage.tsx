@@ -45,6 +45,7 @@ import { youtubeVideoService } from '../services/youtubeVideoService';
 import { lmsService } from '../services/lmsService';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../utils/searchIntelligence';
 import {
   ALL_INDIAN_STATES_AND_UTS,
@@ -1375,13 +1376,20 @@ export const CourseLearningPage: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => navigate(`/portal?role=student&redirect=/learn/${course.id}`)}
-                className="px-3.5 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold whitespace-nowrap"
-              >
-                Sign In to Track Progress
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <GoogleSignInButton
+                  role="student"
+                  label="Google Login"
+                  variant="compact"
+                />
+                <button
+                  type="button"
+                  onClick={() => navigate(`/portal?role=student&redirect=/learn/${course.id}`)}
+                  className="px-3.5 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold whitespace-nowrap cursor-pointer"
+                >
+                  Sign In
+                </button>
+              </div>
             )}
 
             <button

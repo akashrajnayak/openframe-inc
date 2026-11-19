@@ -17,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { lmsService } from '../services/lmsService';
 import { marketplaceService } from '../services/marketplaceService';
 import { TeacherSchoolPanel } from '../components/school/TeacherSchoolPanel';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
 import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
 import {
@@ -254,20 +255,27 @@ export const TeacherDashboardPage: React.FC = () => {
           <p className="text-xs text-[#64748B] leading-relaxed">
             Sign in with your Teacher account to evaluate student submissions, grade rubrics, configure course assessments, and manage class lessons.
           </p>
-          <div className="flex flex-col sm:flex-row gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => navigate('/portal/teacher')}
-              className="flex-1 py-2.5 px-4 bg-[#123D32] hover:bg-[#0D2E25] text-white rounded-xl text-xs font-semibold cursor-pointer"
-            >
-              Sign In as Teacher
-            </button>
-            <Link
-              to="/"
-              className="py-2.5 px-4 border border-slate-200 text-[#18221F] hover:bg-[#FAF7F2] rounded-xl text-xs font-semibold"
-            >
-              Return Home
-            </Link>
+          <div className="space-y-2.5 pt-2">
+            <GoogleSignInButton
+              role="teacher"
+              label="Continue with Google (Teacher)"
+              variant="dark"
+            />
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/portal/teacher')}
+                className="flex-1 py-2.5 px-4 bg-[#123D32] hover:bg-[#0D2E25] text-white rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Email Sign In as Teacher
+              </button>
+              <Link
+                to="/"
+                className="py-2.5 px-4 border border-slate-200 text-[#18221F] hover:bg-[#FAF7F2] rounded-xl text-xs font-semibold"
+              >
+                Return Home
+              </Link>
+            </div>
           </div>
         </div>
       </div>

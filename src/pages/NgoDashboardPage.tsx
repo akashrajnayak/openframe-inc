@@ -26,6 +26,7 @@ import { useAuth } from '../context/AuthContext';
 import { useRouter, Link } from '../router/RouterContext';
 import { SocialAppShell, WorkspaceNavItem } from '../components/workspace/SocialAppShell';
 import { DonutRingChart, MiniBarChart } from '../components/workspace/DashboardCharts';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 
 type NgoNavId = 'overview' | 'programmes' | 'beneficiaries' | 'volunteers' | 'hopenest';
 
@@ -187,13 +188,20 @@ export const NgoDashboardPage: React.FC = () => {
           <p className="text-xs text-[#64748B]">
             Sign in with your NGO Partner account to coordinate digital literacy drives, volunteers, and community beneficiaries.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/portal/ngo?redirect=/ngo/dashboard')}
-            className="w-full py-3 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-xs font-semibold cursor-pointer"
-          >
-            Sign In to NGO Portal
-          </button>
+          <div className="space-y-2.5 pt-1">
+            <GoogleSignInButton
+              role="ngo_partner"
+              label="Continue with Google (NGO Partner)"
+              variant="dark"
+            />
+            <button
+              type="button"
+              onClick={() => navigate('/portal/ngo?redirect=/ngo/dashboard')}
+              className="w-full py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-xs font-semibold cursor-pointer"
+            >
+              Email / Portal Sign In
+            </button>
+          </div>
         </div>
       </div>
     );

@@ -46,6 +46,7 @@ import { EDUCATION_CATEGORY_BY_CODE } from '../data/educationClassificationData'
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { useAuth } from '../context/AuthContext';
 import { compute90PercentCoursePricing, formatInr } from '../utils/pricingEngine';
@@ -1064,6 +1065,16 @@ export const CourseDetailPage: React.FC = () => {
                     <span>Share</span>
                   </button>
                 </div>
+
+                {!currentUser && (
+                  <GoogleSignInButton
+                    role="student"
+                    label="Continue with Google to Save & Enroll"
+                    variant="light"
+                    showInlineError
+                    onSuccess={() => showToast('Signed in with Google! You can now enroll or save this course.')}
+                  />
+                )}
               </div>
 
               <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
