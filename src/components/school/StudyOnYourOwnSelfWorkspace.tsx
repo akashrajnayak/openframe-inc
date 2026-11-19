@@ -152,7 +152,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
   const [assessmentTab, setAssessmentTab] = useState<AssessmentTab>('thirty_q');
   const [examQuestions, setExamQuestions] = useState<SelfStudyExamQuestion[]>([]);
   const [examAnswers, setExamAnswers] = useState<Record<string, number>>({});
-  const [examPage, setExamPage] = useState<number>(0); // 6 pages x 5 questions = 30
+  const examAnswersRef = useRef<Record<string, number>>({});
   const [iqEqSqBank, setIqEqSqBank] = useState<Record<AssessmentDimension, IqEqSqQuestionItem[]> | null>(null);
   const [iqAnswers, setIqAnswers] = useState<Record<string, number>>({});
   const [eqAnswers, setEqAnswers] = useState<Record<string, number>>({});
@@ -563,88 +563,105 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
       return next;
     });
 
-    setLoadingAssessment(true);
-    setAssessmentUnlocked(true);
-    setAssessmentTab('thirty_q');
+    // Immediately populate all 30 short questions and IQ/EQ/SQ assessments synchronously so they open with 0ms wait
+    const instantQuestions = buildDeterministic30QuestionExam({
+      boardName: activeBoard?.officialName || 'Karnataka State Board',
+      classOrDepartment: activeClassSpec.label,
+      subject: activeSubjectSpec.name,
+      chapterTitle: selectedChapterTitle,
+      videoTitle: activeVideo?.title || '',
+    });
+    const instantBank = buildSubjectContextualIqEqSqBank({
+      gradeBand: activeClassSpec.gradeBand,
+      subject: activeSubjectSpec.name,
+      chapterTitle: selectedChapterTitle,
+    });
+
+    examAnswersRef.current = {};
+    setExamQuestions(instantQuestions);
+    setIqEqSqBank(instantBank);
     setExamAnswers({});
     setIqAnswers({});
     setEqAnswers({});
     setSqAnswers({});
-    setExamPage(0);
+    setAssessmentTab('thirty_q');
+    setAssessmentUnlocked(true);
+    setLoadingAssessment(false);
 
-    try {
-      const [examRes, iqRes] = await Promise.all([
-        fetch('/api/self-study/analyze-chapter', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            boardId: activeBoard?.id || selectedBoardId,
-            boardName: activeBoard?.officialName || 'Karnataka State Board',
-            levelLabel: activeLevel.title,
-            classOrDepartment: activeClassSpec.label,
-            gradeBand: activeClassSpec.gradeBand,
-            subject: activeSubjectSpec.name,
-            chapterTitle: selectedChapterTitle,
-            videoTitle: activeVideo?.title || '',
-            language: selectedLanguage,
-            mode: 'thirty_q_exam',
-          }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-        fetch('/api/self-study/analyze-chapter', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            gradeBand: activeClassSpec.gradeBand,
-            subject: activeSubjectSpec.name,
-            chapterTitle: selectedChapterTitle,
-            mode: 'iq_eq_sq',
-          }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-      ]);
+    setTimeout(() => {
+      assessmentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
 
-      const questions: SelfStudyExamQuestion[] =
-        Array.isArray(examRes?.questions) && examRes.questions.length === 30
-          ? examRes.questions
-          : buildDeterministic30QuestionExam({
-              boardName: activeBoard?.officialName || 'Karnataka State Board',
-              classOrDepartment: activeClassSpec.label,
-              subject: activeSubjectSpec.name,
-              chapterTitle: selectedChapterTitle,
-              videoTitle: activeVideo?.title || '',
-            });
-
-      const bank: Record<AssessmentDimension, IqEqSqQuestionItem[]> =
-        iqRes?.bank?.IQ && iqRes?.bank?.EQ && iqRes?.bank?.SQ
-          ? iqRes.bank
-          : buildSubjectContextualIqEqSqBank({
-              gradeBand: activeClassSpec.gradeBand,
-              subject: activeSubjectSpec.name,
-              chapterTitle: selectedChapterTitle,
-            });
-
-      setExamQuestions(questions);
-      setIqEqSqBank(bank);
-      setTimeout(() => {
-        assessmentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 150);
-    } finally {
-      setLoadingAssessment(false);
-    }
+    // Optional fast non-blocking AI enrichment for unanswered questions (never blocks opening all 30 questions)
+    const targetChapter = selectedChapterTitle;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+    fetch('/api/self-study/analyze-chapter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        boardId: activeBoard?.id || selectedBoardId,
+        boardName: activeBoard?.officialName || 'Karnataka State Board',
+        levelLabel: activeLevel.title,
+        classOrDepartment: activeClassSpec.label,
+        gradeBand: activeClassSpec.gradeBand,
+        subject: activeSubjectSpec.name,
+        chapterTitle: targetChapter,
+        videoTitle: activeVideo?.title || '',
+        language: selectedLanguage,
+        mode: 'thirty_q_exam',
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((examRes) => {
+        if (
+          examRes?.generatedBy === 'gemini' &&
+          Array.isArray(examRes?.questions) &&
+          examRes.questions.length === 30 &&
+          Object.keys(examAnswersRef.current).length === 0
+        ) {
+          setExamQuestions(examRes.questions as SelfStudyExamQuestion[]);
+        }
+      })
+      .catch(() => {
+        // Keep the 30 deterministic syllabus questions already open
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+      });
   };
+
+  // Guarantee all 30 questions and IQ/EQ/SQ bank are always available once unlocked
+  const displayedExamQuestions = useMemo<SelfStudyExamQuestion[]>(() => {
+    if (examQuestions.length === 30) return examQuestions;
+    return buildDeterministic30QuestionExam({
+      boardName: activeBoard?.officialName || 'Karnataka State Board',
+      classOrDepartment: activeClassSpec.label,
+      subject: activeSubjectSpec.name,
+      chapterTitle: selectedChapterTitle,
+      videoTitle: activeVideo?.title || '',
+    });
+  }, [examQuestions, activeBoard, activeClassSpec, activeSubjectSpec, selectedChapterTitle, activeVideo]);
+
+  const displayedIqEqSqBank = useMemo<Record<AssessmentDimension, IqEqSqQuestionItem[]>>(() => {
+    if (iqEqSqBank) return iqEqSqBank;
+    return buildSubjectContextualIqEqSqBank({
+      gradeBand: activeClassSpec.gradeBand,
+      subject: activeSubjectSpec.name,
+      chapterTitle: selectedChapterTitle,
+    });
+  }, [iqEqSqBank, activeClassSpec, activeSubjectSpec, selectedChapterTitle]);
 
   // Submit 30-Question Exam + IQ/EQ/SQ Assessments → Save to Firestore & Render 20 Graphs + Downloadable Report
   const handleSubmitFullEvaluation = async () => {
-    if (examQuestions.length === 0 || !iqEqSqBank) return;
+    if (displayedExamQuestions.length === 0) return;
     setSubmittingReport(true);
     try {
-      const examEval = evaluate30QuestionExam(examQuestions, examAnswers);
-      const iqEval = evaluateCustomIqEqSqDimension('IQ', iqEqSqBank.IQ, iqAnswers);
-      const eqEval = evaluateCustomIqEqSqDimension('EQ', iqEqSqBank.EQ, eqAnswers);
-      const sqEval = evaluateCustomIqEqSqDimension('SQ', iqEqSqBank.SQ, sqAnswers);
+      const examEval = evaluate30QuestionExam(displayedExamQuestions, examAnswers);
+      const iqEval = evaluateCustomIqEqSqDimension('IQ', displayedIqEqSqBank.IQ, iqAnswers);
+      const eqEval = evaluateCustomIqEqSqDimension('EQ', displayedIqEqSqBank.EQ, eqAnswers);
+      const sqEval = evaluateCustomIqEqSqDimension('SQ', displayedIqEqSqBank.SQ, sqAnswers);
 
       const saved = await saveSelfStudyProgressReport({
         studentId: studentUid,
@@ -820,10 +837,10 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
     };
   }, [submittedReports, localEnrollments, searchLogs]);
 
-  const answered30Count = Object.keys(examAnswers).length;
-  const answeredIqCount = iqEqSqBank ? iqEqSqBank.IQ.filter((q) => iqAnswers[q.id] !== undefined).length : 0;
-  const answeredEqCount = iqEqSqBank ? iqEqSqBank.EQ.filter((q) => eqAnswers[q.id] !== undefined).length : 0;
-  const answeredSqCount = iqEqSqBank ? iqEqSqBank.SQ.filter((q) => sqAnswers[q.id] !== undefined).length : 0;
+  const answered30Count = displayedExamQuestions.filter((q) => examAnswers[q.id] !== undefined).length;
+  const answeredIqCount = displayedIqEqSqBank.IQ.filter((q) => iqAnswers[q.id] !== undefined).length;
+  const answeredEqCount = displayedIqEqSqBank.EQ.filter((q) => eqAnswers[q.id] !== undefined).length;
+  const answeredSqCount = displayedIqEqSqBank.SQ.filter((q) => sqAnswers[q.id] !== undefined).length;
 
   const daysRemaining = wallet ? getWalletDaysRemaining(wallet) : 7;
   const lowTokens = wallet ? wallet.balance <= 6 || isWalletExpired(wallet) : false;
@@ -1534,6 +1551,23 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
           )}
         </div>
 
+        {walletBanner?.type === 'error' && !assessmentUnlocked && (
+          <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-rose-800">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{walletBanner.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleWeeklyRecharge}
+              disabled={recharging}
+              className="px-3 py-1.5 rounded-lg bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+            >
+              Recharge ₹{WEEKLY_RECHARGE_PRICE_INR}/week (+{WEEKLY_RECHARGE_TOKENS} tokens)
+            </button>
+          </div>
+        )}
+
         {!assessmentUnlocked ? (
           <div className="rounded-xl bg-slate-50 border border-slate-200 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1">
@@ -1541,7 +1575,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
                 Ready to evaluate &ldquo;{selectedChapterTitle}&rdquo;?
               </div>
               <p className="text-xs text-slate-600 max-w-2xl">
-                After watching the YouTube lecture or reading the Chapter PDF Notes, click Launch to unlock 30 chapter-specific diagnostic questions plus dedicated IQ (Logical), EQ (Emotional Resilience), and SQ (Social &amp; Ethical) evaluations.
+                After watching the YouTube lecture or reading the Chapter PDF Notes, click Launch to open all 30 short chapter-specific questions at once plus dedicated IQ (Logical), EQ (Emotional Resilience), and SQ (Social &amp; Ethical) evaluations.
               </p>
             </div>
             <button
@@ -1556,7 +1590,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
           <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-600">
             <Loader2 className="w-6 h-6 animate-spin text-[#123D32]" />
             <p className="text-xs font-semibold">
-              Quinn AI is analyzing the chapter &amp; building 30 subject questions + IQ/EQ/SQ assessments...
+              Opening all 30 short subject questions + IQ/EQ/SQ assessments...
             </p>
           </div>
         ) : (
@@ -1564,10 +1598,10 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
             {/* Assessment Sub-Tabs */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               {[
-                { id: 'thirty_q' as AssessmentTab, label: `Part A: 30-Question Exam (${answered30Count}/30)`, icon: BookOpen },
-                { id: 'iq' as AssessmentTab, label: `Part B1: IQ Test (${answeredIqCount}/${iqEqSqBank?.IQ.length || 6})`, icon: Brain },
-                { id: 'eq' as AssessmentTab, label: `Part B2: EQ Test (${answeredEqCount}/${iqEqSqBank?.EQ.length || 5})`, icon: Heart },
-                { id: 'sq' as AssessmentTab, label: `Part B3: SQ Test (${answeredSqCount}/${iqEqSqBank?.SQ.length || 5})`, icon: ShieldCheck },
+                { id: 'thirty_q' as AssessmentTab, label: `Part A: All 30 Short Questions (${answered30Count}/30)`, icon: BookOpen },
+                { id: 'iq' as AssessmentTab, label: `Part B1: IQ Test (${answeredIqCount}/${displayedIqEqSqBank.IQ.length})`, icon: Brain },
+                { id: 'eq' as AssessmentTab, label: `Part B2: EQ Test (${answeredEqCount}/${displayedIqEqSqBank.EQ.length})`, icon: Heart },
+                { id: 'sq' as AssessmentTab, label: `Part B3: SQ Test (${answeredSqCount}/${displayedIqEqSqBank.SQ.length})`, icon: ShieldCheck },
               ].map((t) => {
                 const Icon = t.icon;
                 const active = assessmentTab === t.id;
@@ -1589,116 +1623,90 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
               })}
             </div>
 
-            {/* PART A: 30-QUESTION SUBJECT EXAM (Paginated 5 per page) */}
+            {/* PART A: ALL 30 SHORT QUESTIONS OPEN TOGETHER (NO NEXT BUTTON / NO PAGINATION) */}
             {assessmentTab === 'thirty_q' && (
               <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
                   <div className="text-xs font-semibold text-slate-700 tabular-nums">
-                    Showing Questions {examPage * 5 + 1}–{Math.min(examQuestions.length, (examPage + 1) * 5)} of {examQuestions.length}
+                    All {displayedExamQuestions.length} Short Questions Open · Answered {answered30Count} / {displayedExamQuestions.length}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    {[0, 1, 2, 3, 4, 5].map((pg) => {
-                      const slice = examQuestions.slice(pg * 5, (pg + 1) * 5);
-                      const doneCount = slice.filter((q) => examAnswers[q.id] !== undefined).length;
-                      return (
-                        <button
-                          key={pg}
-                          type="button"
-                          onClick={() => setExamPage(pg)}
-                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold tabular-nums cursor-pointer ${
-                            examPage === pg
-                              ? 'bg-[#123D32] text-white'
-                              : doneCount === slice.length && slice.length > 0
-                              ? 'bg-emerald-100 text-emerald-900'
-                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                          }`}
-                        >
-                          Q{pg * 5 + 1}–{(pg + 1) * 5}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {examQuestions.slice(examPage * 5, (examPage + 1) * 5).map((q) => (
-                    <div key={q.id} className="p-4 rounded-xl border border-slate-200 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-[#123D32] tabular-nums">
-                          Question {q.number} of 30 · {q.cognitiveLevel}
-                        </span>
-                        <span className="text-[11px] font-medium text-slate-500">{q.subTopic}</span>
-                      </div>
-                      <p className="text-sm font-semibold text-slate-900 leading-snug">{q.questionText}</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {q.options.map((opt, oIdx) => {
-                          const selected = examAnswers[q.id] === oIdx;
-                          return (
-                            <button
-                              key={oIdx}
-                              type="button"
-                              onClick={() => setExamAnswers((prev) => ({ ...prev, [q.id]: oIdx }))}
-                              className={`text-left px-3 py-2.5 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
-                                selected
-                                  ? 'bg-[#0B1930] border-[#0B1930] text-white font-semibold'
-                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                              }`}
-                            >
-                              <span className="font-mono font-bold mr-2">
-                                {String.fromCharCode(65 + oIdx)}.
-                              </span>
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
+                  <div className="flex items-center gap-2.5 min-w-[160px]">
+                    <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#123D32] transition-all duration-200"
+                        style={{ width: `${Math.round((answered30Count / Math.max(1, displayedExamQuestions.length)) * 100)}%` }}
+                      />
                     </div>
-                  ))}
+                    <span className="text-[11px] font-bold text-[#123D32] tabular-nums">
+                      {Math.round((answered30Count / Math.max(1, displayedExamQuestions.length)) * 100)}%
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    disabled={examPage === 0}
-                    onClick={() => setExamPage((p) => Math.max(0, p - 1))}
-                    className="px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-bold text-slate-700 disabled:opacity-40 cursor-pointer"
-                  >
-                    Previous 5 Questions
-                  </button>
-                  {examPage < 5 ? (
-                    <button
-                      type="button"
-                      onClick={() => setExamPage((p) => Math.min(5, p + 1))}
-                      className="px-4 py-2 rounded-lg bg-[#0B1930] text-white text-xs font-bold cursor-pointer"
-                    >
-                      Next 5 Questions
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setAssessmentTab('iq')}
-                      className="px-4 py-2 rounded-lg bg-[#123D32] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span>Proceed to IQ Assessment</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                <div className="space-y-2.5">
+                  {displayedExamQuestions.map((q) => {
+                    const isAnswered = examAnswers[q.id] !== undefined;
+                    return (
+                      <div
+                        key={q.id}
+                        className={`p-3.5 rounded-xl border space-y-2.5 transition-colors ${
+                          isAnswered ? 'border-emerald-200 bg-emerald-50/20' : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-[#123D32] tabular-nums">
+                            Q{q.number}. <span className="text-slate-400 font-semibold">({q.cognitiveLevel})</span>
+                          </span>
+                          <span className="text-[11px] font-medium text-slate-500">{q.subTopic}</span>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-900 leading-snug">{q.questionText}</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {q.options.map((opt, oIdx) => {
+                            const selected = examAnswers[q.id] === oIdx;
+                            return (
+                              <button
+                                key={oIdx}
+                                type="button"
+                                onClick={() => {
+                                  setExamAnswers((prev) => {
+                                    const next = { ...prev, [q.id]: oIdx };
+                                    examAnswersRef.current = next;
+                                    return next;
+                                  });
+                                }}
+                                className={`text-left px-3 py-2 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                                  selected
+                                    ? 'bg-[#0B1930] border-[#0B1930] text-white font-semibold'
+                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span className="font-mono font-bold mr-2">
+                                  {String.fromCharCode(65 + oIdx)}.
+                                </span>
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             {/* PART B1 / B2 / B3: DEDICATED IQ, EQ & SQ TESTS */}
-            {assessmentTab !== 'thirty_q' && iqEqSqBank && (
+            {assessmentTab !== 'thirty_q' && (
               <div className="space-y-4">
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
                   {NON_CLINICAL_EDUCATIONAL_DISCLAIMER}
                 </div>
 
                 {(assessmentTab === 'iq'
-                  ? iqEqSqBank.IQ
+                  ? displayedIqEqSqBank.IQ
                   : assessmentTab === 'eq'
-                  ? iqEqSqBank.EQ
-                  : iqEqSqBank.SQ
+                  ? displayedIqEqSqBank.EQ
+                  : displayedIqEqSqBank.SQ
                 ).map((q, idx) => {
                   const ansMap =
                     assessmentTab === 'iq' ? iqAnswers : assessmentTab === 'eq' ? eqAnswers : sqAnswers;

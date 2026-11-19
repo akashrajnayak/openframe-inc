@@ -4877,13 +4877,13 @@ Return JSON with:
         () =>
           ai.models.generateContent({
             model: MODEL_TEXT,
-            contents: `Generate 10 high-quality syllabus-accurate multiple choice questions for an Indian student after watching a lecture on:
+            contents: `Generate 10 SHORT, crisp 1-line syllabus-accurate multiple choice questions (max 15 words per question, concise options max 10 words each) for an Indian student on:
 Board: ${safeBoardName}
 Class/Department: ${safeClass}
 Subject: ${safeSubject}
 Chapter: ${safeChapter}
 ${videoTitle ? `Lecture Video Title: ${String(videoTitle)}` : ''}
-Return a JSON array of 10 objects with: questionText, subTopic, cognitiveLevel ("Recall"|"Understanding"|"Application"|"Analysis"), options (exactly 4 strings), correctIndex (0-3), explanation.`,
+Return a JSON array of 10 objects with: questionText, subTopic, cognitiveLevel ("Recall"|"Understanding"|"Application"|"Analysis"), options (exactly 4 short strings), correctIndex (0-3), explanation.`,
             config: {
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
               responseMimeType: 'application/json',
@@ -4903,7 +4903,7 @@ Return a JSON array of 10 objects with: questionText, subTopic, cognitiveLevel (
               },
             },
           }),
-        11000,
+        4500,
         'Self-Study 30-Question Analysis'
       );
 
