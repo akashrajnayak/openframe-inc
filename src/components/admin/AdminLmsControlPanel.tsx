@@ -19,6 +19,7 @@ import {
 import { lmsService } from '../../services/lmsService';
 import { youtubeVideoService } from '../../services/youtubeVideoService';
 import { marketplaceService } from '../../services/marketplaceService';
+import { compute90PercentCoursePricing } from '../../utils/pricingEngine';
 import { getActivityLogs } from '../../services/firebase';
 import {
   LmsGlobalSettings,
@@ -176,6 +177,13 @@ export const AdminLmsControlPanel: React.FC<{
       const allVideoIds = (path.modules || []).flatMap((m) => m.videoIds || []).filter(Boolean);
       const firstVideoId = allVideoIds[0];
 
+      const pricing = compute90PercentCoursePricing({
+        category: inferredCategory,
+        title: path.title,
+        level: 'All Levels',
+        existingPrice: path.price,
+      });
+
       const created = await marketplaceService.addCourse({
         title: path.title,
         shortDesc: path.overview || `Structured ${path.modules?.length || 3}-module AI learning path for ${path.topic}.`,
@@ -185,9 +193,11 @@ export const AdminLmsControlPanel: React.FC<{
         subcategory: path.topic,
         language: path.language || 'English',
         level: 'All Levels',
-        price: 0,
-        isFree: true,
-        pricingTier: 'Starter',
+        price: pricing.finalPriceInr,
+        marketBenchmarkPrice: pricing.marketBenchmarkPriceInr,
+        discountPercent: pricing.discountPercent,
+        isFree: false,
+        pricingTier: pricing.pricingTier,
         status: 'Published',
         courseType: firstVideoId ? 'youtube_video' : 'standard',
         youtubeVideoId: firstVideoId,

@@ -62,8 +62,9 @@ import { useAuth } from './context/AuthContext';
 
 function AppContent() {
   const { currentPath, navigate } = useRouter();
-  const { currentUser, schoolEnrollment } = useAuth();
+  const { currentUser, lmsUser, schoolEnrollment, authorizedDashboardPath, loading } = useAuth();
   const [isStandalonePwa, setIsStandalonePwa] = React.useState(false);
+  const autoRestoredTabRef = React.useRef(false);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -79,6 +80,51 @@ function AppContent() {
   React.useEffect(() => {
     testFirestoreConnection().catch(() => {});
   }, []);
+
+  // Keep logged-in student account open automatically in the same browser tab
+  React.useEffect(() => {
+    if (loading || !currentUser || !lmsUser) return;
+    const activeRole = lmsUser.role;
+    if (activeRole !== 'student' && activeRole !== 'professional') return;
+
+    const clean = currentPath.split('?')[0] || '/';
+    const qp = new URLSearchParams(currentPath.split('?')[1] || '');
+    const stayOnPublic = qp.get('stay') === '1' || qp.get('switch') === '1';
+
+    // Persist last active student workspace route so refresh / tab reopen restores exact spot
+    if (
+      clean === '/school' ||
+      clean.startsWith('/school/') ||
+      clean === '/student/dashboard' ||
+      clean === '/student-portal' ||
+      clean.startsWith('/learn/')
+    ) {
+      try {
+        localStorage.setItem('openframe_student_active_uid', currentUser.uid);
+        localStorage.setItem('openframe_student_active_route', currentPath);
+      } catch {
+        // ignore storage errors
+      }
+      autoRestoredTabRef.current = true;
+      return;
+    }
+
+    // When a logged-in student reopens the browser tab at `/` (initial load), open their account automatically
+    if (!autoRestoredTabRef.current && clean === '/' && !stayOnPublic) {
+      autoRestoredTabRef.current = true;
+      let targetRoute = authorizedDashboardPath || '/school?tab=self_study';
+      try {
+        const savedUid = localStorage.getItem('openframe_student_active_uid');
+        const savedRoute = localStorage.getItem('openframe_student_active_route');
+        if (savedUid === currentUser.uid && savedRoute && savedRoute.startsWith('/')) {
+          targetRoute = savedRoute;
+        }
+      } catch {
+        // ignore storage errors
+      }
+      navigate(targetRoute, { replace: true });
+    }
+  }, [loading, currentUser, lmsUser, currentPath, authorizedDashboardPath, navigate]);
 
   // Dynamic SEO page titles & meta tags
   React.useEffect(() => {

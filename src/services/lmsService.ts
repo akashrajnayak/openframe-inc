@@ -1558,15 +1558,16 @@ export class LmsService {
 
     // Persist verified 7-field details to student profile & enrollment
     const now = new Date().toISOString();
+    const cleaned = validation.cleaned;
     await this.updateStudentProfile(params.studentId, {
-      homeAddress: params.addressDetails.homeAddress.trim(),
-      flatNumber: params.addressDetails.flatNumber.trim(),
-      houseNumber: params.addressDetails.flatNumber.trim(),
-      streetAddress: params.addressDetails.streetAddress.trim(),
-      pincode: params.addressDetails.pincode.trim(),
-      mobileNumber: params.addressDetails.mobileNumber.trim(),
-      alternativeMobileNumber: params.addressDetails.alternativeMobileNumber.trim(),
-      state: params.addressDetails.state.trim(),
+      homeAddress: cleaned.homeAddress,
+      flatNumber: cleaned.flatNumber,
+      houseNumber: cleaned.flatNumber,
+      streetAddress: cleaned.streetAddress,
+      pincode: cleaned.pincode,
+      mobileNumber: cleaned.mobileNumber,
+      alternativeMobileNumber: cleaned.alternativeMobileNumber,
+      state: cleaned.state,
     });
 
     const enrollmentId = sanitizeId(`${params.studentId}_${params.course.id}`);
@@ -1580,13 +1581,13 @@ export class LmsService {
           studentEmail: params.studentEmail,
           courseId: params.course.id,
           courseTitle: params.course.title,
-          homeAddress: params.addressDetails.homeAddress.trim(),
-          flatNumber: params.addressDetails.flatNumber.trim(),
-          streetAddress: params.addressDetails.streetAddress.trim(),
-          pincode: params.addressDetails.pincode.trim(),
-          mobileNumber: params.addressDetails.mobileNumber.trim(),
-          alternativeMobileNumber: params.addressDetails.alternativeMobileNumber.trim(),
-          state: params.addressDetails.state.trim(),
+          homeAddress: cleaned.homeAddress,
+          flatNumber: cleaned.flatNumber,
+          streetAddress: cleaned.streetAddress,
+          pincode: cleaned.pincode,
+          mobileNumber: cleaned.mobileNumber,
+          alternativeMobileNumber: cleaned.alternativeMobileNumber,
+          state: cleaned.state,
           updatedAt: now,
         }),
         { merge: true }
@@ -1704,11 +1705,16 @@ export class LmsService {
     if (!cleanId) return null;
     try {
       const sanitized = sanitizeId(cleanId);
-      let snap = await getDoc(doc(db, 'certificates', sanitized));
       let cert: any = null;
-      if (snap.exists()) {
-        cert = { id: snap.id, ...(snap.data() as any) };
-      } else {
+      try {
+        const snap = await getDoc(doc(db, 'certificates', sanitized));
+        if (snap.exists()) {
+          cert = { id: snap.id, ...(snap.data() as any) };
+        }
+      } catch {
+        // Anonymous / public QR scanners read the PII-free certificate_verification record below
+      }
+      if (!cert) {
         const pubSnap = await getDoc(doc(db, 'certificate_verification', sanitized));
         if (!pubSnap.exists()) return null;
         const p = pubSnap.data() as any;
@@ -1718,15 +1724,15 @@ export class LmsService {
           studentId: p.studentId || '',
           studentName: p.studentName || 'Verified Learner',
           courseId: p.courseId || 'school-program',
-          courseTitle: p.courseTitle || 'OpenFrame Partner Program',
-          courseName: p.courseTitle || 'OpenFrame Partner Program',
+          courseTitle: p.courseTitle || 'OpenFrame Verified Course',
+          courseName: p.courseTitle || 'OpenFrame Verified Course',
           schoolName: p.schoolName,
           teacherName: p.issuerName || 'Authorized Institutional Signatory',
           authorizedSignatory: p.schoolName ? `Issued with ${p.schoolName}` : 'Authorized Signatory · OpenFrame Education',
           accreditationBody: p.schoolName
             ? `OpenFrame School Partner Credential · ${p.schoolName}`
             : 'Academic Alliance with HopeNest Global Foundation',
-          certificateType: 'School Partner Completion Credential',
+          certificateType: p.certificateType || 'Course Completion Certificate',
           grade: p.grade || 'Verified',
           score: p.score ?? 100,
           completionDate: p.issueDate || '',

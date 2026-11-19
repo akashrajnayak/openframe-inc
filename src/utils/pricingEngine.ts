@@ -50,9 +50,14 @@ export interface PricingComputationInput {
   categoryGroup?: string;
   level?: string;
   educationLevels?: EducationCategoryCode[] | string[];
+  educationLevel?: EducationCategoryCode | string;
+  educationCategory?: EducationCategoryCode | string;
   degreeProgrammes?: string[];
+  degreeOrClass?: string;
   estimatedHours?: number;
   rawPrice?: number;
+  existingPrice?: number;
+  pricingTier?: MarketplacePricingTier | string;
   libraryCollection?: string;
   board?: string;
 }
@@ -60,11 +65,13 @@ export interface PricingComputationInput {
 export interface ComputedCoursePricing {
   finalPriceInr: number;
   marketBenchmarkPrice: number;
+  marketBenchmarkPriceInr: number;
   discountPercent: number;
   savingsInr: number;
   isFree: false;
   pricingTier: MarketplacePricingTier;
   tierLabel: string;
+  bandLabel: string;
 }
 
 function stableHash(input: string): number {
@@ -77,7 +84,11 @@ function stableHash(input: string): number {
 }
 
 function detectEducationBand(input: PricingComputationInput): 'early_primary' | 'middle_secondary' | 'puc_diploma' | 'undergraduate' | 'postgraduate' | 'professional' {
-  const levels = (input.educationLevels || []).map((c) => String(c).toUpperCase());
+  const levels = [
+    ...(input.educationLevels || []),
+    ...(input.educationLevel ? [input.educationLevel] : []),
+    ...(input.educationCategory ? [input.educationCategory] : []),
+  ].map((c) => String(c).toUpperCase());
   if (levels.includes('A') || levels.includes('B')) return 'early_primary';
   if (levels.includes('C') || levels.includes('D')) return 'middle_secondary';
   if (levels.includes('E') || levels.includes('F')) return 'puc_diploma';
@@ -85,7 +96,7 @@ function detectEducationBand(input: PricingComputationInput): 'early_primary' | 
   if (levels.includes('G')) return 'undergraduate';
   if (levels.includes('J')) return 'professional';
 
-  const text = `${input.title || ''} ${input.category || ''} ${(input.degreeProgrammes || []).join(' ')} ${input.board || ''}`.toLowerCase();
+  const text = `${input.title || ''} ${input.category || ''} ${(input.degreeProgrammes || []).join(' ')} ${input.degreeOrClass || ''} ${input.board || ''}`.toLowerCase();
   if (/\b(lkg|ukg|kindergarten|nursery|phonics|class\s*[1-5]|grade\s*[1-5]|evs|early childhood)\b/.test(text)) {
     return 'early_primary';
   }
@@ -160,7 +171,7 @@ export function compute90PercentCoursePricing(input: PricingComputationInput): C
   }
 
   // If course explicitly has a non-zero rawPrice in legacy catalog, map cleanly or honor clamped range
-  const raw = Number(input.rawPrice || 0);
+  const raw = Number(input.rawPrice ?? input.existingPrice ?? 0);
   let netFee: number;
   if (raw >= MIN_COURSE_FEE_INR && raw <= MAX_COURSE_FEE_INR) {
     netFee = Math.round(raw);
@@ -194,11 +205,13 @@ export function compute90PercentCoursePricing(input: PricingComputationInput): C
   return {
     finalPriceInr,
     marketBenchmarkPrice,
+    marketBenchmarkPriceInr: marketBenchmarkPrice,
     discountPercent: GRANT_DISCOUNT_PERCENT,
     savingsInr,
     isFree: false,
     pricingTier,
     tierLabel,
+    bandLabel: tierLabel,
   };
 }
 
@@ -220,7 +233,9 @@ export interface AddressValidationResult {
   valid: boolean;
   missingFields: string[];
   errorMessage?: string;
+  error?: string;
   cleaned: Required<CertificateAddressDetails>;
+  sanitized: Required<CertificateAddressDetails>;
 }
 
 /**
@@ -246,21 +261,26 @@ export function validateCertificateAddressDetails(
   if (!/^\d{10}$/.test(altDigits)) missingFields.push('10-Digit Alternative Mobile Number');
   if (state.length < 2) missingFields.push('State');
 
+  const msg =
+    missingFields.length > 0
+      ? `Complete mandatory certificate dispatch & verification fields: ${missingFields.join(', ')}.`
+      : undefined;
+  const cleaned: Required<CertificateAddressDetails> = {
+    homeAddress,
+    flatNumber,
+    streetAddress,
+    pincode,
+    mobileNumber: mobileDigits,
+    alternativeMobileNumber: altDigits,
+    state,
+  };
+
   return {
     valid: missingFields.length === 0,
     missingFields,
-    errorMessage:
-      missingFields.length > 0
-        ? `Complete mandatory certificate dispatch & verification fields: ${missingFields.join(', ')}.`
-        : undefined,
-    cleaned: {
-      homeAddress,
-      flatNumber,
-      streetAddress,
-      pincode,
-      mobileNumber: mobileDigits,
-      alternativeMobileNumber: altDigits,
-      state,
-    },
+    errorMessage: msg,
+    error: msg,
+    cleaned,
+    sanitized: cleaned,
   };
 }

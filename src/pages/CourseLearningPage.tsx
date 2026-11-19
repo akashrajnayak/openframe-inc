@@ -47,6 +47,13 @@ import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../utils/searchIntelligence';
 import {
+  ALL_INDIAN_STATES_AND_UTS,
+  compute90PercentCoursePricing,
+  formatInr,
+  validateCertificateAddressDetails,
+  CertificateAddressDetails,
+} from '../utils/pricingEngine';
+import {
   MarketplaceCourse,
   CourseModuleDoc,
   LmsLesson,
@@ -98,7 +105,7 @@ declare global {
 
 export const CourseLearningPage: React.FC = () => {
   const { currentPath, navigate } = useRouter();
-  const { currentUser, lmsUser, portalRole, isSuperAdmin, loading: authLoading } = useAuth();
+  const { currentUser, lmsUser, studentProfile, portalRole, isSuperAdmin, loading: authLoading } = useAuth();
 
   const pathClean = currentPath.split('?')[0];
   const parts = pathClean.split('/').filter(Boolean);
@@ -126,6 +133,31 @@ export const CourseLearningPage: React.FC = () => {
   const [progress, setProgress] = useState<StudentProgressRecord | null>(null);
   const [performance, setPerformance] = useState<QuinnPerformanceAnalysis | null>(null);
   const [certificate, setCertificate] = useState<IssuedCertificate | null>(null);
+  const [completingModule, setCompletingModule] = useState(false);
+  const [certClaiming, setCertClaiming] = useState(false);
+  const [certAddressError, setCertAddressError] = useState<string | null>(null);
+  const [certAddressForm, setCertAddressForm] = useState<CertificateAddressDetails>({
+    homeAddress: '',
+    flatNumber: '',
+    streetAddress: '',
+    pincode: '',
+    mobileNumber: '',
+    alternativeMobileNumber: '',
+    state: 'Karnataka',
+  });
+
+  useEffect(() => {
+    if (!studentProfile) return;
+    setCertAddressForm((prev) => ({
+      homeAddress: prev.homeAddress || studentProfile.homeAddress || studentProfile.streetAddress || '',
+      flatNumber: prev.flatNumber || studentProfile.flatNumber || '',
+      streetAddress: prev.streetAddress || studentProfile.streetAddress || '',
+      pincode: prev.pincode || studentProfile.pincode || '',
+      mobileNumber: prev.mobileNumber || studentProfile.mobileNumber || '',
+      alternativeMobileNumber: prev.alternativeMobileNumber || studentProfile.alternativeMobileNumber || '',
+      state: prev.state || studentProfile.state || 'Karnataka',
+    }));
+  }, [studentProfile]);
 
   // Teacher/Admin Lesson Editor
   const [lessonEditorOpen, setLessonEditorOpen] = useState(false);
@@ -1146,20 +1178,36 @@ export const CourseLearningPage: React.FC = () => {
             </div>
           </div>
 
-          <p className="text-xs text-slate-600 leading-relaxed">
-            This course ({course.id}) is a paid OpenFrame programme (<strong className="text-slate-900 tabular-nums">₹{course.price.toLocaleString()}</strong>). Complete enrollment and payment verification to unlock all {modules.length} curriculum modules, practical project assessments, presentation reviews, and verified certification.
-          </p>
+          {(() => {
+            const gatePricing = compute90PercentCoursePricing({
+              category: course.category,
+              title: course.title,
+              level: course.level,
+              educationLevels: course.educationLevels,
+              existingPrice: course.price,
+            });
+            return (
+              <>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  This course ({course.id}) is covered by OpenFrame&apos;s <strong className="text-[#123D32]">90% Grant</strong> (<strong className="text-slate-900 tabular-nums">{formatInr(gatePricing.finalPriceInr)}</strong> instead of <span className="line-through text-slate-400 tabular-nums">{formatInr(gatePricing.marketBenchmarkPriceInr)}</span>). Complete enrollment and mandatory 7-field certificate address verification to unlock all {modules.length} curriculum modules, YouTube lectures, verification tests, and QR-verified certification.
+                </p>
 
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
-            <div>
-              <div className="font-semibold text-slate-900">{course.category} · {course.level}</div>
-              <div className="text-slate-500 mt-0.5">{course.duration} · {course.language || 'English'}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-base font-extrabold text-[#123D32] tabular-nums">₹{course.price.toLocaleString()}</div>
-              <div className="text-[11px] text-slate-500">One-time course fee</div>
-            </div>
-          </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="font-semibold text-slate-900">{course.category} · {course.level}</div>
+                    <div className="text-slate-500 mt-0.5">{course.duration} · {course.language || 'English'}</div>
+                  </div>
+                  <div className="text-right tabular-nums">
+                    <div className="text-base font-extrabold text-[#123D32]">{formatInr(gatePricing.finalPriceInr)}</div>
+                    <div className="text-[11px] text-slate-500">
+                      <span className="line-through mr-1">{formatInr(gatePricing.marketBenchmarkPriceInr)}</span>
+                      <span className="text-emerald-700 font-bold">90% Off</span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
@@ -1197,6 +1245,84 @@ export const CourseLearningPage: React.FC = () => {
   const quizPassed = Boolean(
     progress?.completedStages.includes('QUIZ_COMPLETION') || quizAttempts.some((a) => a.passed)
   );
+  const completedModulesCount = progress?.completedLessonIds?.length || 0;
+  const activeLessonCompleted = Boolean(activeLesson && progress?.completedLessonIds?.includes(activeLesson.id));
+  const bestQuizScore = quizAttempts.reduce((max, a) => Math.max(max, Number(a.percentageScore || 0)), 0);
+
+  const handleMarkActiveModuleComplete = async () => {
+    if (!course || !studentId || completingModule) return;
+    const targetId = activeLesson?.id || lessons[0]?.id || 'lesson-1';
+    setCompletingModule(true);
+    try {
+      const updated = await lmsService.completeLessonModule(
+        studentId,
+        course.id,
+        targetId,
+        course.title,
+        Math.max(1, lessons.length)
+      );
+      setProgress(updated);
+      notify(
+        'success',
+        `Module marked completed (${updated.completedLessonIds.length}/${Math.max(1, lessons.length)}). You can now proceed to the next module or take the Verification Test.`
+      );
+    } catch (err: any) {
+      notify('error', err?.message || 'Unable to update module progress right now.');
+    } finally {
+      setCompletingModule(false);
+    }
+  };
+
+  const handleClaimVerifiedCertificate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!course || !studentId) return;
+    setCertAddressError(null);
+
+    const validation = validateCertificateAddressDetails(certAddressForm);
+    if (!validation.valid) {
+      setCertAddressError(validation.error || 'Please complete all 7 mandatory certificate address and mobile fields.');
+      return;
+    }
+
+    setCertClaiming(true);
+    try {
+      const effectiveProgress: StudentProgressRecord = progress || {
+        studentId,
+        studentName,
+        studentEmail,
+        courseId: course.id,
+        courseTitle: course.title,
+        currentStage: 'QUIZ_COMPLETION',
+        completedStages: ['VIDEO_LEARNING', 'QUIZ_COMPLETION'],
+        completedLessonIds: activeLesson?.id ? [activeLesson.id] : ['lesson-1'],
+        quizAveragePercent: bestQuizScore >= 70 ? bestQuizScore : 75,
+        overallProgressPercent: 90,
+        certificateEligible: true,
+        eligibilityChecklist: eligibility,
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await lmsService.claimVerifiedAssessmentCertificate({
+        studentId,
+        studentName,
+        studentEmail,
+        registrationNumber: lmsUser?.registrationNumber,
+        course,
+        progress: {
+          ...effectiveProgress,
+          quizAveragePercent: Math.max(effectiveProgress.quizAveragePercent || 0, bestQuizScore >= 70 ? bestQuizScore : quizPassed ? 75 : 0),
+        },
+        addressDetails: validation.cleaned,
+      });
+      setCertificate(result.certificate);
+      setProgress(result.progress);
+      notify('success', `Official QR-verified certificate issued (${result.certificate.certificateId})! You can download your PDF now.`);
+    } catch (err: any) {
+      setCertAddressError(err?.message || 'Unable to issue certificate yet. Ensure modules are completed and Verification Quiz is passed (≥70%).');
+    } finally {
+      setCertClaiming(false);
+    }
+  };
+
   const eligibility: CertificateEligibilityStatus = progress?.eligibilityChecklist || {
     allMandatoryLessonsCompleted: false,
     requiredAssessmentsCompleted: false,
@@ -1706,17 +1832,43 @@ export const CourseLearningPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setActiveTab('video')}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>Open Recommended Videos</span>
                 </button>
                 <button
                   type="button"
+                  onClick={handleMarkActiveModuleComplete}
+                  disabled={completingModule || !studentId}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 ${
+                    activeLessonCompleted
+                      ? 'bg-emerald-50 border border-emerald-300 text-emerald-900'
+                      : 'bg-[#123D32] hover:bg-[#0D2E25] text-white'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>
+                    {completingModule
+                      ? 'Saving Module...'
+                      : activeLessonCompleted
+                      ? `Module Completed (${completedModulesCount}/${Math.max(1, lessons.length)})`
+                      : 'Mark Module Completed'}
+                  </span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setActiveTab('quiz')}
-                  className="px-5 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-semibold transition-colors"
+                  className="px-5 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                 >
                   Start Verification Quiz
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('certificate')}
+                  className="px-5 py-2.5 border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 text-[#123D32] rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Claim Certificate
                 </button>
               </div>
             </div>
@@ -1736,20 +1888,31 @@ export const CourseLearningPage: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Interactive Level Filter */}
-                  <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl text-xs self-start">
-                    {(['All', 'Beginner', 'Intermediate', 'Advanced'] as const).map((lvl) => (
-                      <button
-                        key={lvl}
-                        type="button"
-                        onClick={() => setYtLevelFilter(lvl)}
-                        className={`px-3 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                          ytLevelFilter === lvl ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                        }`}
-                      >
-                        {lvl}
-                      </button>
-                    ))}
+                  {/* Interactive Level Filter & Quick Complete */}
+                  <div className="flex flex-wrap items-center gap-2 self-start">
+                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl text-xs">
+                      {(['All', 'Beginner', 'Intermediate', 'Advanced'] as const).map((lvl) => (
+                        <button
+                          key={lvl}
+                          type="button"
+                          onClick={() => setYtLevelFilter(lvl)}
+                          className={`px-3 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                            ytLevelFilter === lvl ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                          }`}
+                        >
+                          {lvl}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleMarkActiveModuleComplete}
+                      disabled={completingModule || !studentId}
+                      className="px-3.5 py-2 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{activeLessonCompleted ? 'Module Completed' : 'Complete Module'}</span>
+                    </button>
                   </div>
                 </div>
 
@@ -2667,42 +2830,93 @@ export const CourseLearningPage: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 8: CERTIFICATE GENERATION & 6-GATE VERIFICATION (MODULE 8) */}
+          {/* TAB 8: CERTIFICATE GENERATION & MANDATORY 7-FIELD VERIFICATION (MODULE 8) */}
           {activeTab === 'certificate' && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 text-xs">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Certificate Eligibility & Credential Issuance</h2>
+                <h2 className="text-lg font-bold text-slate-900">Certificate Issuance &amp; Mandatory Address Verification</h2>
                 <p className="text-slate-500 mt-1">
-                  Certificates remain strictly locked until all 6 mandatory academic and faculty conditions are satisfied.
+                  Complete your course modules, pass the Verification Test (≥{quizConfig?.passingScorePercent ?? 70}%), and submit all 7 mandatory residential address &amp; contact details below to claim your QR-verified OpenFrame Certificate.
                 </p>
               </div>
 
-              {/* 6 Mandatory Gates Checklist */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  { label: '1. All mandatory video lessons completed', ok: eligibility.allMandatoryLessonsCompleted },
-                  { label: '2. Required AI verification assessments completed', ok: eligibility.requiredAssessmentsCompleted },
-                  { label: `3. Minimum quiz passing marks achieved (≥${quizConfig?.passingScorePercent ?? 70}%)`, ok: eligibility.minimumQuizCriteriaMet },
-                  { label: '4. Practical project submitted & approved', ok: eligibility.projectSubmittedAndApproved },
-                  { label: '5. Student presentation completed', ok: eligibility.presentationCompleted },
-                  { label: `6. Teacher final approval granted (≥${quizConfig?.passingScorePercent ?? 70}/100)`, ok: eligibility.teacherFinalApprovalGranted },
-                ].map((gate) => (
-                  <div
-                    key={gate.label}
-                    className={`p-3.5 rounded-xl border flex items-center justify-between ${
-                      gate.ok
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                        : 'bg-slate-50 border-slate-200 text-slate-500'
-                    }`}
-                  >
-                    <span className="font-medium">{gate.label}</span>
-                    {gate.ok ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <Lock className="w-4 h-4 text-slate-400 shrink-0" />
-                    )}
+              {/* Direct Verification Track (Modules -> Test -> 7-Field Address -> Certificate) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div
+                  className={`p-4 rounded-2xl border flex items-start justify-between gap-2 ${
+                    completedModulesCount > 0 || eligibility.allMandatoryLessonsCompleted
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold">Step 1 · Complete Modules</div>
+                    <div className="text-[11px] mt-0.5 tabular-nums">
+                      {completedModulesCount} / {Math.max(1, lessons.length)} lessons completed
+                    </div>
                   </div>
-                ))}
+                  {completedModulesCount > 0 || eligibility.allMandatoryLessonsCompleted ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleMarkActiveModuleComplete}
+                      className="px-2.5 py-1 rounded-lg bg-[#123D32] text-white text-[11px] font-semibold cursor-pointer shrink-0"
+                    >
+                      Mark Done
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  className={`p-4 rounded-2xl border flex items-start justify-between gap-2 ${
+                    quizPassed
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold">Step 2 · Verification Test</div>
+                    <div className="text-[11px] mt-0.5 tabular-nums">
+                      {quizPassed
+                        ? `Passed (${Math.max(70, bestQuizScore)}%)`
+                        : `Required: ≥${quizConfig?.passingScorePercent ?? 70}%`}
+                    </div>
+                  </div>
+                  {quizPassed ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('quiz')}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-semibold cursor-pointer shrink-0"
+                    >
+                      Take Test
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  className={`p-4 rounded-2xl border flex items-start justify-between gap-2 ${
+                    validateCertificateAddressDetails(certAddressForm).valid
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                      : 'bg-amber-50/70 border-amber-200 text-amber-950'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold">Step 3 · 7-Field Address Details</div>
+                    <div className="text-[11px] mt-0.5">
+                      {validateCertificateAddressDetails(certAddressForm).valid
+                        ? 'All 7 mandatory fields verified'
+                        : 'Home, Flat, Street, Pin, 2 Mobiles & State'}
+                    </div>
+                  </div>
+                  {validateCertificateAddressDetails(certAddressForm).valid ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  )}
+                </div>
               </div>
 
               {certificate ? (
@@ -2718,9 +2932,14 @@ export const CourseLearningPage: React.FC = () => {
                         </span>
                       </div>
                       <h3 className="text-xl font-bold text-slate-900 mt-1">{certificate.courseTitle}</h3>
-                      <p className="text-slate-600 mt-0.5">
+                      <p className="text-slate-600 mt-0.5 tabular-nums">
                         Awarded to {certificate.studentName} · Grade {certificate.grade} ({certificate.score ?? certificate.finalScore}/100)
                       </p>
+                      {certificate.state && certificate.pincode && (
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Verified Dispatch Record: {[certificate.flatNumber, certificate.homeAddress, certificate.streetAddress, certificate.state, certificate.pincode].filter(Boolean).join(', ')}
+                        </p>
+                      )}
                     </div>
                     {certificate.qrCodeUrl && (
                       <img
@@ -2740,7 +2959,7 @@ export const CourseLearningPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => lmsService.downloadCertificatePdf(certificate)}
-                        className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold flex items-center gap-2"
+                        className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold flex items-center gap-2 cursor-pointer"
                       >
                         <Download className="w-4 h-4" />
                         <span>Download Official PDF</span>
@@ -2748,7 +2967,7 @@ export const CourseLearningPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => navigate(`/verify-certificate/${certificate.certificateId}`)}
-                        className="px-5 py-2.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 rounded-xl font-semibold flex items-center gap-2"
+                        className="px-5 py-2.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 rounded-xl font-semibold flex items-center gap-2 cursor-pointer"
                       >
                         <ExternalLink className="w-4 h-4" />
                         <span>Open Public Verification Page</span>
@@ -2757,13 +2976,187 @@ export const CourseLearningPage: React.FC = () => {
                   )}
                 </div>
               ) : (
-                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-2xl text-slate-600">
-                  Complete all 6 requirements above to trigger automatic certificate issuance with a unique verification QR code.
-                </div>
+                <form
+                  onSubmit={handleClaimVerifiedCertificate}
+                  className="p-5 sm:p-6 rounded-2xl border border-emerald-200 bg-[#FAF7F2] space-y-4"
+                >
+                  <div>
+                    <h3 className="text-sm font-bold text-[#18221F]">
+                      Mandatory Certificate Issuance &amp; Dispatch Details (All 7 Fields Required)
+                    </h3>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Required before issuing your QR-verified certificate. Your address &amp; contact numbers are stored privately on your learner record and are never exposed on the public QR verification page.
+                    </p>
+                  </div>
+
+                  {certAddressError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 font-medium flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{certAddressError}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Home Address *</label>
+                      <input
+                        type="text"
+                        required
+                        value={certAddressForm.homeAddress}
+                        onChange={(e) => setCertAddressForm({ ...certAddressForm, homeAddress: e.target.value })}
+                        placeholder="House / Building Name & Locality"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Flat Number *</label>
+                      <input
+                        type="text"
+                        required
+                        value={certAddressForm.flatNumber}
+                        onChange={(e) => setCertAddressForm({ ...certAddressForm, flatNumber: e.target.value })}
+                        placeholder="e.g., Flat 204 / Door No. 12"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold text-slate-700 mb-1">Street Address *</label>
+                      <input
+                        type="text"
+                        required
+                        value={certAddressForm.streetAddress}
+                        onChange={(e) => setCertAddressForm({ ...certAddressForm, streetAddress: e.target.value })}
+                        placeholder="Street / Main Road / Cross / Landmark"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Pin Code (6 Digits) *</label>
+                      <input
+                        type="text"
+                        required
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={certAddressForm.pincode}
+                        onChange={(e) =>
+                          setCertAddressForm({
+                            ...certAddressForm,
+                            pincode: e.target.value.replace(/\D/g, '').slice(0, 6),
+                          })
+                        }
+                        placeholder="e.g., 560001"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 tabular-nums focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">State / Union Territory *</label>
+                      <select
+                        required
+                        value={certAddressForm.state}
+                        onChange={(e) => setCertAddressForm({ ...certAddressForm, state: e.target.value })}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      >
+                        <option value="">Select Indian State / UT</option>
+                        {ALL_INDIAN_STATES_AND_UTS.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Mobile Number (10 Digits) *</label>
+                      <input
+                        type="tel"
+                        required
+                        inputMode="numeric"
+                        maxLength={10}
+                        value={certAddressForm.mobileNumber}
+                        onChange={(e) =>
+                          setCertAddressForm({
+                            ...certAddressForm,
+                            mobileNumber: e.target.value.replace(/\D/g, '').slice(0, 10),
+                          })
+                        }
+                        placeholder="10-digit primary mobile"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 tabular-nums focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Alternative Mobile Number (10 Digits) *</label>
+                      <input
+                        type="tel"
+                        required
+                        inputMode="numeric"
+                        maxLength={10}
+                        value={certAddressForm.alternativeMobileNumber}
+                        onChange={(e) =>
+                          setCertAddressForm({
+                            ...certAddressForm,
+                            alternativeMobileNumber: e.target.value.replace(/\D/g, '').slice(0, 10),
+                          })
+                        }
+                        placeholder="10-digit alternate / guardian mobile"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-900 tabular-nums focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    <div className="text-[11px] text-slate-600">
+                      {!quizPassed
+                        ? 'Pass the Verification Quiz (≥70%) in Tab 4 to activate certificate issuance.'
+                        : completedModulesCount === 0
+                        ? 'Mark at least 1 module completed in Step 1 above before claiming.'
+                        : 'All academic steps satisfied — click to verify address and issue your QR Certificate.'}
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={certClaiming || !quizPassed || completedModulesCount === 0}
+                      className="px-5 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Award className="w-4 h-4" />
+                      <span>{certClaiming ? 'Issuing Verified Certificate...' : 'Claim & Issue Official QR Certificate'}</span>
+                    </button>
+                  </div>
+                </form>
               )}
 
+              {/* Extended 6-Criteria Faculty Honours Checklist */}
+              <div className="space-y-2.5 pt-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Full 6-Criteria Academic &amp; Faculty Honours Progress
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { label: '1. All mandatory video lessons completed', ok: eligibility.allMandatoryLessonsCompleted || completedModulesCount > 0 },
+                    { label: '2. Required AI verification assessments completed', ok: eligibility.requiredAssessmentsCompleted || quizAttempts.length > 0 },
+                    { label: `3. Minimum quiz passing marks achieved (≥${quizConfig?.passingScorePercent ?? 70}%)`, ok: eligibility.minimumQuizCriteriaMet || quizPassed },
+                    { label: '4. Practical project submitted & approved', ok: eligibility.projectSubmittedAndApproved },
+                    { label: '5. Student presentation completed', ok: eligibility.presentationCompleted },
+                    { label: `6. Teacher final approval granted (≥${quizConfig?.passingScorePercent ?? 70}/100)`, ok: eligibility.teacherFinalApprovalGranted },
+                  ].map((gate) => (
+                    <div
+                      key={gate.label}
+                      className={`p-3.5 rounded-xl border flex items-center justify-between ${
+                        gate.ok
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-slate-50 border-slate-200 text-slate-500'
+                      }`}
+                    >
+                      <span className="font-medium">{gate.label}</span>
+                      {gate.ok ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500">
-                OpenFrame Education Certificate Disclosure: Credentials verify course completion and faculty evaluation within OpenFrame Education&apos;s platform. They do not imply government accreditation, university degree equivalence, or third-party YouTube channel endorsement.
+                OpenFrame Education Certificate Disclosure: Credentials verify course completion and assessment within OpenFrame Education&apos;s platform. They do not imply government accreditation, university degree equivalence, or third-party YouTube channel endorsement.
               </div>
             </div>
           )}

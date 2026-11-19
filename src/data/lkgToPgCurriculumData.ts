@@ -1038,5 +1038,6 @@ export const LKG_TO_PG_CURRICULUM_COURSES: MarketplaceCourse[] = BLUEPRINTS.map(
       },
     ],
     publishedDate: '2026-11-18',
+    updatedAt: '2026-11-18T00:00:00.000Z',
   };
 });

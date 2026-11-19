@@ -254,6 +254,7 @@ export async function registerPortalAccountWithEmail(
   email: string,
   pass: string
 ): Promise<User> {
+  await setPersistence(auth, browserLocalPersistence).catch(() => {});
   const result = await createUserWithEmailAndPassword(auth, email, pass);
   if (displayName.trim()) {
     await updateProfile(result.user, { displayName: displayName.trim() });

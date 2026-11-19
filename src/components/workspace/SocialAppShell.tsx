@@ -16,6 +16,7 @@ import {
 import { useRouter, Link } from '../../router/RouterContext';
 import { marketplaceService } from '../../services/marketplaceService';
 import { MarketplaceCourse } from '../../types';
+import { compute90PercentCoursePricing, formatInr } from '../../utils/pricingEngine';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 
@@ -425,9 +426,21 @@ export const SocialAppShell: React.FC<SocialAppShellProps> = ({
                       <div className="text-xs font-bold text-[#18221F] mt-0.5 line-clamp-2">
                         {course.title}
                       </div>
-                      <div className="text-[11px] text-[#64748B] mt-1 tabular-nums">
-                        {course.duration} · {course.isFree || course.price === 0 ? 'Free' : `₹${course.price}`}
-                      </div>
+                      {(() => {
+                        const p = compute90PercentCoursePricing({
+                          category: course.category,
+                          title: course.title,
+                          level: course.level,
+                          educationLevels: course.educationLevels,
+                          existingPrice: course.price,
+                        });
+                        return (
+                          <div className="text-[11px] text-[#64748B] mt-1 tabular-nums">
+                            {course.duration} · <span className="font-semibold text-[#18221F]">{formatInr(p.finalPriceInr)}</span>{' '}
+                            <span className="line-through text-slate-400">{formatInr(p.marketBenchmarkPriceInr)}</span> · 90% Off
+                          </div>
+                        );
+                      })()}
                     </Link>
                   ))}
                 </div>

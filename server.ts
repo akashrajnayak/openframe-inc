@@ -30,6 +30,11 @@ import {
   matchesWordBoundary,
 } from './src/utils/searchIntelligence';
 import { EDUCATION_CATEGORY_BY_CODE } from './src/data/educationClassificationData';
+import { compute90PercentCoursePricing } from './src/utils/pricingEngine';
+import {
+  LKG_TO_PG_CURRICULUM_COURSES,
+  LKG_TO_PG_YOUTUBE_SEEDS,
+} from './src/data/lkgToPgCurriculumData';
 import type {
   MarketplaceCourse,
   MarketplaceAutocompleteSuggestion,
@@ -42,6 +47,11 @@ import {
   NON_CLINICAL_EDUCATIONAL_DISCLAIMER,
   type IqEqSqGradeBand,
 } from './src/data/iqEqSqQuestionsData';
+import {
+  buildDeterministicChapterNote,
+  buildDeterministic30QuestionExam,
+  buildSubjectContextualIqEqSqBank,
+} from './src/data/selfStudyMasterCatalog';
 
 const geminiTelemetry = {
   dateKey: new Date().toISOString().slice(0, 10),
@@ -509,6 +519,7 @@ const VERIFIED_EDUCATIONAL_VIDEO_POOL: CuratedVideoSeed[] = [
     subject: 'website full stack frontend tailwind javascript deploy hosting seo build website',
     recommendedReason: 'Guides learners from component styling and interactive JavaScript to deploying a live website.',
   },
+  ...LKG_TO_PG_YOUTUBE_SEEDS,
 ];
 
 function selectCuratedFallbackVideos(queryText: string, category = ''): any[] {
@@ -648,16 +659,21 @@ function normalizeLoadedCourse(raw: any): MarketplaceCourse {
       ? 'youtube_video'
       : 'standard');
 
-  const price = Math.max(0, Number(raw.price ?? 0));
-  const isFree = price === 0 || Boolean(raw.isFree);
-  const pricingTier =
-    raw.pricingTier && raw.pricingTier !== 'Free'
-      ? raw.pricingTier
-      : price === 0
-      ? raw.libraryCollection === 'corporate_training'
-        ? 'Corporate Track'
-        : 'Academic Access'
-      : 'Basic';
+  const priced = compute90PercentCoursePricing({
+    rawPrice: raw.price,
+    category: raw.category,
+    categoryGroup: raw.categoryGroup,
+    level: raw.level,
+    pricingTier: raw.pricingTier,
+    educationLevel: Array.isArray(raw.educationLevels) ? raw.educationLevels[0] : undefined,
+    degreeOrClass: Array.isArray(raw.degreeProgrammes) ? raw.degreeProgrammes[0] : raw.gradeLevel,
+    title: raw.title,
+  });
+  const price = priced.finalPriceInr;
+  const marketBenchmarkPrice = priced.marketBenchmarkPrice;
+  const discountPercent = priced.discountPercent;
+  const isFree = false;
+  const pricingTier = priced.pricingTier;
   const instructorName =
     raw.instructorName ||
     raw.instructor?.name ||
@@ -693,6 +709,8 @@ function normalizeLoadedCourse(raw: any): MarketplaceCourse {
     categories,
     pricingTier,
     price,
+    marketBenchmarkPrice,
+    discountPercent,
     isFree,
     reviewCount,
     hasVerifiedReviews,
@@ -906,6 +924,14 @@ function getBaseCatalogIndex(): BaseCatalogIndex {
     }
   }
 
+  // Inject LKG to Post-Graduation & All-India Boards (Karnataka KSEAB/DPUE, NCERT, CBSE, ICSE, NIOS, State Boards, UG/PG/PhD)
+  for (let i = LKG_TO_PG_CURRICULUM_COURSES.length - 1; i >= 0; i--) {
+    const lkgCourse = LKG_TO_PG_CURRICULUM_COURSES[i];
+    if (!normalizedList.some((c) => c.id === lkgCourse.id)) {
+      normalizedList.unshift(normalizeLoadedCourse(lkgCourse));
+    }
+  }
+
   const byId = new Map<string, MarketplaceCourse>();
   const categoryCounts: Record<string, number> = {};
   const subMap = new Map<string, { name: string; category: string; count: number }>();
@@ -959,6 +985,10 @@ function getBaseCatalogIndex(): BaseCatalogIndex {
       ...(course.skillsAcquired || []),
       ...(course.educationLevels || []),
       ...(course.degreeProgrammes || []),
+      course.board || '',
+      ...(course.boards || []),
+      course.gradeLevel || '',
+      ...(course.supportedLanguages || []),
     ]
       .join(' ')
       .toLowerCase();
@@ -1137,7 +1167,13 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
     if (params.libraryCollection && params.libraryCollection !== 'all') {
       if ((course.libraryCollection || 'standard') !== params.libraryCollection) continue;
     }
-    if (language && (course.language || 'English').toLowerCase() !== language) continue;
+    if (language) {
+      const courseLang = (course.language || 'English').toLowerCase();
+      const supported = (course.supportedLanguages || []).map((l) => l.toLowerCase());
+      if (courseLang !== language && !courseLang.includes(language) && !supported.some((l) => l === language || l.includes(language))) {
+        continue;
+      }
+    }
     if (level && course.level !== level && course.level !== 'All Levels') continue;
     if (params.duration && params.duration !== 'all' && !matchesDurationFilter(course, String(params.duration))) continue;
     if (certificateOnly && !course.certificateEligibility) continue;
@@ -1154,8 +1190,16 @@ function filterBaseIndex(params: any, excludeSet: Set<string>): MarketplaceCours
       const ch = (course.youtubeChannelName || '').toLowerCase();
       if (!ch.includes(channelFilter)) continue;
     }
-    if (params.accessType === 'free' && course.price > 0) continue;
+    if (params.accessType === 'free' && course.price > 799) continue;
     if (params.accessType === 'paid' && course.price <= 0) continue;
+    if (params.priceBand === 'school_300_799' && (course.price < 300 || course.price > 799)) continue;
+    if (params.priceBand === 'degree_800_1499' && (course.price < 800 || course.price > 1499)) continue;
+    if (params.priceBand === 'pg_1500_2500' && (course.price < 1500 || course.price > 2500)) continue;
+    if (params.board && params.board !== 'All') {
+      const targetBoard = String(params.board).toLowerCase();
+      const courseBoards = [course.board, ...(course.boards || [])].filter(Boolean).map((b) => String(b).toLowerCase());
+      if (!courseBoards.some((b) => b.includes(targetBoard)) && !searchBlob.includes(targetBoard)) continue;
+    }
     if (params.educationLevel && params.educationLevel !== 'All') {
       const targetLvl = String(params.educationLevel).toLowerCase();
       const levels = (course.educationLevels || []).map((l) => l.toLowerCase());
@@ -1938,9 +1982,7 @@ async function startServer() {
           level: pooled?.level || 'Beginner',
           duration: pooled?.duration || 'Self-Paced Tutorial',
           estimatedHours: 2,
-          pricingTier: 'Academic Access',
-          price: 0,
-          isFree: true,
+          pricingTier: 'Starter',
           status: 'Published',
           courseType: 'youtube_video',
           contentType: 'Tutorial',
@@ -3330,16 +3372,28 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
         .filter((pg) => pg.moduleNumbers.length > 0);
 
       const primaryCourseMatch = matchedCatalog[0];
+      const modeledPricing = compute90PercentCoursePricing({
+        rawPrice: primaryCourseMatch?.price,
+        category: primaryCourseMatch?.category || intent.primarySubject,
+        title: topic,
+        educationLevel: intent.educationLevelCode,
+        degreeOrClass: intent.degreeOrClass,
+      });
       return {
         id: `ai-path-${topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28) || 'course'}-${targetModuleCount}`,
         topic,
         language: targetLanguage,
+        price: modeledPricing.finalPriceInr,
+        marketBenchmarkPrice: modeledPricing.marketBenchmarkPrice,
+        discountPercent: modeledPricing.discountPercent,
+        educationLevel: intent.educationLevelCode,
+        board: primaryCourseMatch?.board || (/\bkarnataka|sslc|puc|kseab|dpue\b/i.test(topic) ? 'Karnataka State Board (KSEAB / DPUE)' : /\bcbse|ncert\b/i.test(topic) ? 'CBSE / NCERT' : undefined),
         title: primaryCourseMatch
           ? `${displayTopic}: Complete Modeled Course & Enrollment Path`
           : `${displayTopic} — Structured ${partGroups.length}-Part, ${modules.length}-Module Course`,
         overview: primaryCourseMatch
-          ? `Recommended OpenFrame programme paired with "${primaryCourseMatch.title}" and ${videoMetadataList.length} live YouTube tutorials, organized into ${partGroups.length} progressive parts and ${modules.length} hands-on modules.`
-          : `Complete ${targetLanguage} learning pathway for ${displayTopic}, structured into ${partGroups.length} progressive parts and ${modules.length} actionable modules with embedded YouTube tutorials and direct enrollment.`,
+          ? `Recommended OpenFrame programme paired with "${primaryCourseMatch.title}" and ${videoMetadataList.length} live YouTube tutorials, organized into ${partGroups.length} progressive parts and ${modules.length} hands-on modules. Fee: ₹${modeledPricing.finalPriceInr.toLocaleString('en-IN')} (90% OpenFrame Grant off ₹${modeledPricing.marketBenchmarkPrice.toLocaleString('en-IN')} market value).`
+          : `Complete ${targetLanguage} learning pathway for ${displayTopic}, structured into ${partGroups.length} progressive parts and ${modules.length} actionable modules with embedded YouTube tutorials, verification quiz, and QR certification (₹${modeledPricing.finalPriceInr.toLocaleString('en-IN')} · 90% Off).`,
         aiDisclaimer,
         sourceMode: 'builtin_engine' as const,
         createdAt: new Date().toISOString(),
@@ -3353,6 +3407,8 @@ Provide honest, specific strengths, weaknesses, areasForImprovement, and a perso
           level: c.level,
           duration: c.duration,
           price: c.price,
+          marketBenchmarkPrice: c.marketBenchmarkPrice,
+          discountPercent: c.discountPercent || 90,
           thumbnailUrl: c.thumbnailUrl,
           youtubeVideoId: c.youtubeVideoId,
           youtubeUrl: c.youtubeUrl,
@@ -4663,6 +4719,251 @@ Allowed Categories: ${catChoices.join(', ')}`,
       return res.status(403).json({ ok: false, verified: false, error: 'Invalid enrollment payment token.' });
     }
     return res.json({ ok: true, verified: true, orderId, paymentId, uid: caller.uid });
+  });
+
+  // ------------------------------------------------------------------
+  // STUDY ON YOUR OWN SELF — Chapter PDF Notes, 30-Question Exam & IQ/EQ/SQ
+  // ------------------------------------------------------------------
+  app.post('/api/self-study/analyze-chapter', async (req, res) => {
+    const {
+      boardId = 'KAR_STATE',
+      boardName = 'Karnataka State Board (KTBS/KSEAB)',
+      levelLabel = '3. Middle School (Class 6 to Class 8)',
+      classOrDepartment = 'Class 8 (8th Standard)',
+      gradeBand = 'Middle (6-8)',
+      subject = 'Science',
+      chapterTitle = 'Force and Pressure',
+      videoTitle = '',
+      language = 'English',
+      mode = 'pdf_notes',
+      useAi = true,
+    } = req.body || {};
+
+    const safeChapter = String(chapterTitle || '').trim() || `${String(subject)} Core Chapter`;
+    const safeSubject = String(subject || 'Science').trim();
+    const safeBoardName = String(boardName || 'Karnataka State Board').trim();
+    const safeClass = String(classOrDepartment || 'Class 8').trim();
+    const safeLanguage = String(language || 'English').trim();
+
+    if (mode === 'iq_eq_sq') {
+      const validBand: IqEqSqGradeBand =
+        gradeBand === 'Primary (1-5)' || gradeBand === 'Secondary (9-12)' ? gradeBand : 'Middle (6-8)';
+      const bank = buildSubjectContextualIqEqSqBank({
+        gradeBand: validBand,
+        subject: safeSubject,
+        chapterTitle: safeChapter,
+      });
+      return res.json({
+        ok: true,
+        mode: 'iq_eq_sq',
+        bank,
+        disclaimer: NON_CLINICAL_EDUCATIONAL_DISCLAIMER,
+        generatedBy: 'structured_engine',
+      });
+    }
+
+    if (mode === 'pdf_notes') {
+      const fallbackNote = buildDeterministicChapterNote({
+        boardId: String(boardId),
+        boardName: safeBoardName,
+        levelLabel: String(levelLabel),
+        classOrDepartment: safeClass,
+        subject: safeSubject,
+        chapterTitle: safeChapter,
+        language: safeLanguage,
+      });
+
+      const ai = useAi ? getGeminiClient() : null;
+      if (!ai) {
+        return res.json({ ok: true, mode: 'pdf_notes', note: fallbackNote });
+      }
+
+      try {
+        trackGeminiCall('/api/self-study/analyze-chapter:pdf_notes');
+        const response = await withGeminiTimeout(
+          () =>
+            ai.models.generateContent({
+              model: MODEL_TEXT,
+              contents: `Create concise, syllabus-accurate self-study chapter notes for an Indian student.
+Board: ${safeBoardName}
+Class / Department: ${safeClass}
+Subject: ${safeSubject}
+Chapter: ${safeChapter}
+Language: ${safeLanguage}
+Return JSON with:
+- overview (3-4 sentences)
+- keyDefinitions (array of 5 objects with term and definition)
+- formulasOrKeyRules (array of 4 strings)
+- quickRevisionChecklist (array of 5 strings)`,
+              config: {
+                thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+                responseMimeType: 'application/json',
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    overview: { type: Type.STRING },
+                    keyDefinitions: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          term: { type: Type.STRING },
+                          definition: { type: Type.STRING },
+                        },
+                      },
+                    },
+                    formulasOrKeyRules: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    quickRevisionChecklist: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  },
+                },
+              },
+            }),
+          10000,
+          'Self-Study Chapter PDF Notes'
+        );
+
+        const parsed = JSON.parse((response.text || '{}').trim());
+        const enrichedNote = {
+          ...fallbackNote,
+          overview: typeof parsed.overview === 'string' && parsed.overview.length > 40 ? parsed.overview : fallbackNote.overview,
+          keyDefinitions:
+            Array.isArray(parsed.keyDefinitions) && parsed.keyDefinitions.length >= 3
+              ? parsed.keyDefinitions.slice(0, 6)
+              : fallbackNote.keyDefinitions,
+          formulasOrKeyRules:
+            Array.isArray(parsed.formulasOrKeyRules) && parsed.formulasOrKeyRules.length >= 2
+              ? parsed.formulasOrKeyRules.slice(0, 6)
+              : fallbackNote.formulasOrKeyRules,
+          quickRevisionChecklist:
+            Array.isArray(parsed.quickRevisionChecklist) && parsed.quickRevisionChecklist.length >= 3
+              ? parsed.quickRevisionChecklist.slice(0, 6)
+              : fallbackNote.quickRevisionChecklist,
+          generatedBy: 'gemini' as const,
+          generatedAt: new Date().toISOString(),
+        };
+        return res.json({ ok: true, mode: 'pdf_notes', note: enrichedNote });
+      } catch (err: any) {
+        const classified = classifyGeminiError(err);
+        trackGeminiCall('/api/self-study/analyze-chapter:pdf_notes', true);
+        if (classified.status === 429) {
+          geminiQuotaExhaustedUntilMs = Date.now() + extractGeminiRetrySeconds(err) * 1000;
+        }
+        return res.json({ ok: true, mode: 'pdf_notes', note: fallbackNote });
+      }
+    }
+
+    // Default / 'thirty_q_exam': Always deliver exactly 30 structured subject questions
+    const fallbackQuestions = buildDeterministic30QuestionExam({
+      boardName: safeBoardName,
+      classOrDepartment: safeClass,
+      subject: safeSubject,
+      chapterTitle: safeChapter,
+      videoTitle: String(videoTitle || ''),
+    });
+
+    const ai = useAi ? getGeminiClient() : null;
+    if (!ai) {
+      return res.json({
+        ok: true,
+        mode: 'thirty_q_exam',
+        questions: fallbackQuestions,
+        generatedBy: 'structured_engine',
+      });
+    }
+
+    try {
+      trackGeminiCall('/api/self-study/analyze-chapter:thirty_q_exam');
+      const response = await withGeminiTimeout(
+        () =>
+          ai.models.generateContent({
+            model: MODEL_TEXT,
+            contents: `Generate 10 high-quality syllabus-accurate multiple choice questions for an Indian student after watching a lecture on:
+Board: ${safeBoardName}
+Class/Department: ${safeClass}
+Subject: ${safeSubject}
+Chapter: ${safeChapter}
+${videoTitle ? `Lecture Video Title: ${String(videoTitle)}` : ''}
+Return a JSON array of 10 objects with: questionText, subTopic, cognitiveLevel ("Recall"|"Understanding"|"Application"|"Analysis"), options (exactly 4 strings), correctIndex (0-3), explanation.`,
+            config: {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    questionText: { type: Type.STRING },
+                    subTopic: { type: Type.STRING },
+                    cognitiveLevel: { type: Type.STRING },
+                    options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    correctIndex: { type: Type.INTEGER },
+                    explanation: { type: Type.STRING },
+                  },
+                },
+              },
+            },
+          }),
+        11000,
+        'Self-Study 30-Question Analysis'
+      );
+
+      const rawList = JSON.parse((response.text || '[]').trim());
+      if (Array.isArray(rawList) && rawList.length > 0) {
+        const aiValidated = rawList
+          .filter(
+            (q: any) =>
+              q &&
+              typeof q.questionText === 'string' &&
+              Array.isArray(q.options) &&
+              q.options.length === 4 &&
+              Number.isInteger(q.correctIndex) &&
+              q.correctIndex >= 0 &&
+              q.correctIndex <= 3
+          )
+          .slice(0, 10)
+          .map((q: any, idx: number) => ({
+            id: `ss-ai-q-${idx + 1}`,
+            number: idx + 1,
+            questionText: q.questionText.trim(),
+            subTopic: String(q.subTopic || `${safeChapter}: Core Concepts`).slice(0, 100),
+            cognitiveLevel: (['Recall', 'Understanding', 'Application', 'Analysis'].includes(q.cognitiveLevel)
+              ? q.cognitiveLevel
+              : 'Understanding') as 'Recall' | 'Understanding' | 'Application' | 'Analysis',
+            options: q.options.map((o: any) => String(o)),
+            correctIndex: q.correctIndex,
+            explanation: String(q.explanation || 'Verified against board syllabus principles.'),
+          }));
+
+        // Merge AI questions with remaining structured syllabus questions to guarantee exactly 30 questions
+        const merged = [
+          ...aiValidated,
+          ...fallbackQuestions.slice(aiValidated.length).map((q, idx) => ({
+            ...q,
+            number: aiValidated.length + idx + 1,
+          })),
+        ].slice(0, 30);
+
+        return res.json({
+          ok: true,
+          mode: 'thirty_q_exam',
+          questions: merged,
+          generatedBy: aiValidated.length > 0 ? 'gemini' : 'structured_engine',
+        });
+      }
+    } catch (err: any) {
+      const classified = classifyGeminiError(err);
+      trackGeminiCall('/api/self-study/analyze-chapter:thirty_q_exam', true);
+      if (classified.status === 429) {
+        geminiQuotaExhaustedUntilMs = Date.now() + extractGeminiRetrySeconds(err) * 1000;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      mode: 'thirty_q_exam',
+      questions: fallbackQuestions,
+      generatedBy: 'structured_engine',
+    });
   });
 
   app.post('/api/payments/razorpay/webhook', (req: any, res) => {

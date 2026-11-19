@@ -1557,6 +1557,8 @@ export interface MarketplaceFilterParams {
   subject?: string;
   deliveryMethod?: string;
   accessType?: 'all' | 'free' | 'paid';
+  board?: string;
+  priceBand?: 'all' | 'school_300_799' | 'degree_800_1499' | 'pg_1500_2500';
   skill?: string;
   certificateOnly?: boolean;
   status?: string;
@@ -2943,8 +2945,121 @@ export interface RecommendationAnalyticsEvent {
   createdAt: string;
 }
 
+// ====================================================
+// STUDY ON YOUR OWN SELF — WEEKLY TOKEN WALLET & ANALYTICS
+// ====================================================
 
+export type SelfStudyTokenAction =
+  | 'video_ai_analysis'
+  | 'chapter_pdf'
+  | 'thirty_q_exam'
+  | 'iq_eq_sq_test';
 
+export interface TokenUsageEntry {
+  id: string;
+  action: SelfStudyTokenAction;
+  tokensDeducted: number;
+  subject?: string;
+  chapterTitle?: string;
+  timestamp: string;
+}
 
+export interface StudentTokenWallet {
+  uid: string;
+  studentEmail?: string;
+  balance: number;
+  weeklyStarterQuota: number;
+  rechargedTokens: number;
+  totalTokensUsed: number;
+  cycleStartedAt: string;
+  cycleExpiresAt: string;
+  lastRechargeAt?: string;
+  usageHistory: TokenUsageEntry[];
+  updatedAt: string;
+}
 
+export interface TokenRechargeRecord {
+  id: string;
+  uid: string;
+  studentName?: string;
+  studentEmail?: string;
+  amountInr: number;
+  tokensGranted: number;
+  durationDays: number;
+  paymentMethod: 'Razorpay' | 'Provisional Dev Activation';
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  verifiedServerSide: boolean;
+  status: 'Paid' | 'Provisional' | 'Pending';
+  createdAt: string;
+}
 
+export interface SelfStudyChapterNote {
+  chapterTitle: string;
+  boardName: string;
+  levelLabel: string;
+  classOrDepartment: string;
+  subject: string;
+  language: string;
+  overview: string;
+  keyDefinitions: Array<{ term: string; definition: string }>;
+  coreConcepts: Array<{ heading: string; explanation: string; bulletPoints: string[] }>;
+  formulasOrKeyRules: string[];
+  workedExamples: Array<{ problem: string; solution: string }>;
+  quickRevisionChecklist: string[];
+  officialTextbookLinks: Array<{ label: string; url: string; authority: string }>;
+  generatedBy: 'gemini' | 'structured_engine';
+  generatedAt: string;
+}
+
+export interface SelfStudyExamQuestion {
+  id: string;
+  number: number;
+  questionText: string;
+  subTopic: string;
+  cognitiveLevel: 'Recall' | 'Understanding' | 'Application' | 'Analysis';
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+}
+
+export interface SelfStudyTopicDiagnostic {
+  topic: string;
+  total: number;
+  correct: number;
+  accuracyPercent: number;
+  status: 'Strong' | 'Developing' | 'Weak';
+}
+
+export interface SelfStudyProgressReport {
+  id: string;
+  studentId: string;
+  studentName: string;
+  studentEmail?: string;
+  boardId: string;
+  boardName: string;
+  educationLevelNumber: number; // 1 to 10
+  educationLevelLabel: string;
+  classOrDepartment: string;
+  subject: string;
+  chapterTitle: string;
+  language: string;
+  sourceType: 'youtube_video' | 'chapter_pdf';
+  videoId?: string;
+  videoTitle?: string;
+  totalQuestions: number;
+  correctAnswers: number;
+  thirtyQuestionScore: number; // 0-100
+  iqScore: number; // 0-100
+  eqScore: number; // 0-100
+  sqScore: number; // 0-100
+  iqBand: string;
+  eqBand: string;
+  sqBand: string;
+  strongTopics: string[];
+  weakTopics: string[];
+  topicDiagnostics: SelfStudyTopicDiagnostic[];
+  remediationPlan: string[];
+  tokensSpent: number;
+  submittedAt: string;
+}

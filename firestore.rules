@@ -383,7 +383,14 @@ service cloud.firestore {
       allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.parentEmail == request.auth.token.email || isParentAccount()));
       allow create, update: if isValidId(uid) && (isOwner(uid) || isLmsEducatorOrAdmin()) &&
         incoming().uid is string && incoming().uid.size() <= 128 &&
-        incoming().fullName is string && incoming().fullName.size() <= 120;
+        incoming().fullName is string && incoming().fullName.size() <= 120 &&
+        (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
+        (!('flatNumber' in incoming()) || (incoming().flatNumber is string && incoming().flatNumber.size() <= 60)) &&
+        (!('streetAddress' in incoming()) || (incoming().streetAddress is string && incoming().streetAddress.size() <= 240)) &&
+        (!('pincode' in incoming()) || (incoming().pincode is string && incoming().pincode.size() <= 12)) &&
+        (!('mobileNumber' in incoming()) || (incoming().mobileNumber is string && incoming().mobileNumber.size() <= 20)) &&
+        (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
+        (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80));
       allow delete: if isValidId(uid) && isAdmin();
     }
 
@@ -412,6 +419,13 @@ service cloud.firestore {
         (incoming().studentId == request.auth.uid || isLmsEducatorOrAdmin()) &&
         incoming().courseId is string && incoming().courseId.size() <= 128 &&
         incoming().status in ['Submitted', 'Pending Verification', 'Verified', 'Pending Payment', 'Payment Completed', 'Approved', 'Rejected', 'Cancelled', 'Active', 'Completed', 'Suspended'] &&
+        (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
+        (!('flatNumber' in incoming()) || (incoming().flatNumber is string && incoming().flatNumber.size() <= 60)) &&
+        (!('streetAddress' in incoming()) || (incoming().streetAddress is string && incoming().streetAddress.size() <= 240)) &&
+        (!('pincode' in incoming()) || (incoming().pincode is string && incoming().pincode.size() <= 12)) &&
+        (!('mobileNumber' in incoming()) || (incoming().mobileNumber is string && incoming().mobileNumber.size() <= 20)) &&
+        (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
+        (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80)) &&
         (!('paymentStatus' in incoming()) || incoming().paymentStatus != 'Paid' || isSuperAdmin() || (
           incoming().razorpayPaymentId is string &&
           incoming().razorpayPaymentId.size() >= 6 &&
@@ -423,7 +437,14 @@ service cloud.firestore {
           (isLmsEducatorOrAdmin() || (isSignedIn() && existing().studentId == request.auth.uid)) &&
           !incoming().diff(existing()).affectedKeys().hasAny(['paymentStatus', 'feeAmount', 'razorpayOrderId', 'razorpayPaymentId', 'verifiedServerSide']) &&
           incoming().studentId == existing().studentId &&
-          incoming().courseId == existing().courseId
+          incoming().courseId == existing().courseId &&
+          (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
+          (!('flatNumber' in incoming()) || (incoming().flatNumber is string && incoming().flatNumber.size() <= 60)) &&
+          (!('streetAddress' in incoming()) || (incoming().streetAddress is string && incoming().streetAddress.size() <= 240)) &&
+          (!('pincode' in incoming()) || (incoming().pincode is string && incoming().pincode.size() <= 12)) &&
+          (!('mobileNumber' in incoming()) || (incoming().mobileNumber is string && incoming().mobileNumber.size() <= 20)) &&
+          (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
+          (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80))
         )
       );
       allow delete: if isValidId(id) && isSuperAdmin();
@@ -535,8 +556,9 @@ service cloud.firestore {
     }
 
     match /certificates/{certId} {
-      // Public single-document verification by certificateId; no private PII stored here
-      allow get: if isValidId(certId);
+      // Owner/Parent/Educator/Admin access only (stores private residential dispatch address & mobile numbers);
+      // Public QR verification reads PII-free certificate_verification/{certId}.
+      allow get: if isValidId(certId) && (isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId))));
       allow list: if isLmsEducatorOrAdmin() || (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)));
       allow create: if isValidId(certId) && (
         isLmsEducatorOrAdmin() ||
@@ -544,7 +566,14 @@ service cloud.firestore {
           incoming().studentId == request.auth.uid &&
           incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
           incoming().courseId is string && incoming().courseId.size() <= 128 &&
-          incoming().status in ['Issued', 'VERIFIED'])
+          incoming().status in ['Issued', 'VERIFIED'] &&
+          (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
+          (!('flatNumber' in incoming()) || (incoming().flatNumber is string && incoming().flatNumber.size() <= 60)) &&
+          (!('streetAddress' in incoming()) || (incoming().streetAddress is string && incoming().streetAddress.size() <= 240)) &&
+          (!('pincode' in incoming()) || (incoming().pincode is string && incoming().pincode.size() <= 12)) &&
+          (!('mobileNumber' in incoming()) || (incoming().mobileNumber is string && incoming().mobileNumber.size() <= 20)) &&
+          (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
+          (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80)))
       );
       allow update: if isValidId(certId) && isLmsEducatorOrAdmin() &&
         incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
@@ -559,7 +588,7 @@ service cloud.firestore {
     }
 
     match /certificate_verification/{certId} {
-      // Minimal public QR verification lookup; zero private contact PII allowed
+      // Minimal public QR verification lookup; zero private residential or contact PII allowed
       allow get: if isValidId(certId);
       allow list: if isLmsEducatorOrAdmin() || isEducationAdmin() || isAdmin();
       allow create, update: if isValidId(certId) &&
@@ -567,7 +596,12 @@ service cloud.firestore {
         !('studentEmail' in incoming()) &&
         !('studentPhone' in incoming()) &&
         !('mobileNumber' in incoming()) &&
+        !('alternativeMobileNumber' in incoming()) &&
         !('address' in incoming()) &&
+        !('homeAddress' in incoming()) &&
+        !('flatNumber' in incoming()) &&
+        !('streetAddress' in incoming()) &&
+        !('pincode' in incoming()) &&
         !('parentMobile' in incoming()) &&
         (
           isLmsEducatorOrAdmin() ||
@@ -1696,6 +1730,76 @@ service cloud.firestore {
         incoming().query is string && incoming().query.size() <= 250 &&
         incoming().createdAt is string;
       allow update, delete: if false;
+    }
+
+    // ====================================================
+    // STUDY ON YOUR OWN SELF — TOKEN WALLETS & PROGRESS REPORTS
+    // ====================================================
+
+    match /student_token_wallets/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || isEducationAdmin() || isOwner(uid));
+      allow list: if isAdmin() || isEducationAdmin();
+      allow create: if isValidId(uid) && isSignedIn() && (isAdmin() || isOwner(uid)) &&
+        incoming().uid == uid &&
+        incoming().balance is number && incoming().balance >= 0 && incoming().balance <= 5000 &&
+        incoming().weeklyStarterQuota is number && incoming().weeklyStarterQuota >= 0 && incoming().weeklyStarterQuota <= 100 &&
+        incoming().usageHistory is list && incoming().usageHistory.size() <= 30 &&
+        incoming().cycleStartedAt is string && incoming().cycleExpiresAt is string;
+      allow update: if isValidId(uid) && isSignedIn() && (
+        isAdmin() ||
+        (
+          isOwner(uid) &&
+          incoming().uid == existing().uid &&
+          incoming().balance is number && incoming().balance >= 0 && incoming().balance <= 5000 &&
+          incoming().usageHistory is list && incoming().usageHistory.size() <= 30
+        )
+      );
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    match /token_recharges/{id} {
+      allow get: if isValidId(id) && (isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
+      allow list: if isAdmin() || isEducationAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().uid == request.auth.uid &&
+        incoming().amountInr is number && incoming().amountInr >= 100 && incoming().amountInr <= 5000 &&
+        incoming().tokensGranted is number && incoming().tokensGranted >= 50 && incoming().tokensGranted <= 2500 &&
+        incoming().durationDays is number && incoming().durationDays >= 1 && incoming().durationDays <= 365 &&
+        incoming().status in ['Paid', 'Provisional', 'Pending'] &&
+        (incoming().status != 'Paid' || (incoming().verifiedServerSide == true && incoming().razorpayPaymentId is string && incoming().razorpayPaymentId.size() >= 6)) &&
+        incoming().createdAt is string;
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+
+    match /self_study_reports/{id} {
+      allow get: if isValidId(id) && (
+        isAdmin() || isEducationAdmin() || isLmsEducatorOrAdmin() ||
+        (isSignedIn() && (resource.data.studentId == request.auth.uid || isLinkedParent(resource.data.studentId)))
+      );
+      allow list: if isAdmin() || isEducationAdmin() || isLmsEducatorOrAdmin() ||
+        (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isValidId(id) && isSignedIn() &&
+        incoming().id == id &&
+        incoming().studentId == request.auth.uid &&
+        incoming().studentName is string && incoming().studentName.size() >= 1 && incoming().studentName.size() <= 120 &&
+        incoming().boardName is string && incoming().boardName.size() <= 140 &&
+        incoming().educationLevelNumber is number && incoming().educationLevelNumber >= 1 && incoming().educationLevelNumber <= 10 &&
+        incoming().subject is string && incoming().subject.size() <= 100 &&
+        incoming().chapterTitle is string && incoming().chapterTitle.size() <= 180 &&
+        incoming().thirtyQuestionScore is number && incoming().thirtyQuestionScore >= 0 && incoming().thirtyQuestionScore <= 100 &&
+        incoming().iqScore is number && incoming().iqScore >= 0 && incoming().iqScore <= 100 &&
+        incoming().eqScore is number && incoming().eqScore >= 0 && incoming().eqScore <= 100 &&
+        incoming().sqScore is number && incoming().sqScore >= 0 && incoming().sqScore <= 100 &&
+        incoming().strongTopics is list && incoming().strongTopics.size() <= 12 &&
+        incoming().weakTopics is list && incoming().weakTopics.size() <= 12 &&
+        incoming().topicDiagnostics is list && incoming().topicDiagnostics.size() <= 12 &&
+        incoming().remediationPlan is list && incoming().remediationPlan.size() <= 8 &&
+        incoming().submittedAt is string;
+      allow update: if isValidId(id) && isSignedIn() && (
+        isAdmin() || (existing().studentId == request.auth.uid && incoming().studentId == existing().studentId)
+      );
+      allow delete: if isValidId(id) && (isAdmin() || (isSignedIn() && existing().studentId == request.auth.uid));
     }
 
     // Connection testing

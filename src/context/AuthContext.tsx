@@ -328,6 +328,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     setAuthError(null);
+    try {
+      localStorage.removeItem('openframe_student_active_route');
+      localStorage.removeItem('openframe_student_active_uid');
+    } catch {
+      // ignore storage errors
+    }
     await logoutAdmin();
     setCurrentUser(null);
     setAdminProfile(null);

@@ -15,6 +15,7 @@ import { VisualLearningRoadmap, MarketplaceCourse, YouTubeVideoRecommendation } 
 import { lmsService } from '../../services/lmsService';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../router/RouterContext';
+import { compute90PercentCoursePricing, formatInr } from '../../utils/pricingEngine';
 
 interface LearningRoadmapPanelProps {
   roadmap: VisualLearningRoadmap | null;
@@ -228,9 +229,21 @@ export const LearningRoadmapPanel: React.FC<LearningRoadmapPanelProps> = ({
                         >
                           {course.title}
                         </button>
-                        <p className="text-[11px] text-slate-500">
-                          {course.price === 0 ? 'Free' : `₹${course.price.toLocaleString('en-IN')}`} · {course.duration}
-                        </p>
+                        {(() => {
+                          const p = compute90PercentCoursePricing({
+                            category: course.category,
+                            title: course.title,
+                            level: course.level,
+                            educationLevels: course.educationLevels,
+                            existingPrice: course.price,
+                          });
+                          return (
+                            <p className="text-[11px] text-slate-500 tabular-nums">
+                              <span className="font-semibold text-[#18221F]">{formatInr(p.finalPriceInr)}</span>{' '}
+                              <span className="line-through text-slate-400">{formatInr(p.marketBenchmarkPriceInr)}</span> · 90% Off · {course.duration}
+                            </p>
+                          );
+                        })()}
                       </div>
                       {onEnrollCourse && (
                         <button

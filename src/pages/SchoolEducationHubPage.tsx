@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Coins,
   Compass,
   Download,
   ExternalLink,
@@ -72,6 +73,7 @@ import {
   SchoolSubject,
   SchoolSubmission,
   SchoolTimetableSlot,
+  StudentTokenWallet,
   TranslatedConceptBundle,
 } from '../types';
 import { getBoardGradeFrameworkSpec } from '../data/boardGradeFrameworkData';
@@ -116,9 +118,12 @@ import { AiTutorDrawer } from '../components/school/AiTutorDrawer';
 import { AllIndiaBoardDirectory } from '../components/school/AllIndiaBoardDirectory';
 import { BoardGradeStructurePanel } from '../components/school/BoardGradeStructurePanel';
 import { MultilingualLanguagePanel } from '../components/school/MultilingualLanguagePanel';
+import { StudyOnYourOwnSelfWorkspace } from '../components/school/StudyOnYourOwnSelfWorkspace';
+import { getOrCreateStudentTokenWallet } from '../services/selfStudyService';
 
 type HubTab =
   | 'daily'
+  | 'self_study'
   | 'boards'
   | 'structure'
   | 'languages'
@@ -166,7 +171,7 @@ export const SchoolEducationHubPage: React.FC = () => {
 
   const initialTabFromUrl = useMemo<HubTab>(() => {
     const t = (urlParams.get('tab') || '').toLowerCase();
-    const validTabs: HubTab[] = ['daily', 'boards', 'structure', 'languages', 'subjects', 'tutor', 'quizzes', 'marks', 'work', 'live', 'progress', 'tools'];
+    const validTabs: HubTab[] = ['daily', 'self_study', 'boards', 'structure', 'languages', 'subjects', 'tutor', 'quizzes', 'marks', 'work', 'live', 'progress', 'tools'];
     return validTabs.includes(t as HubTab) ? (t as HubTab) : 'daily';
   }, [urlParams]);
 
@@ -200,6 +205,18 @@ export const SchoolEducationHubPage: React.FC = () => {
   const [parentEmailInput, setParentEmailInput] = useState('');
   const [savingEnrollment, setSavingEnrollment] = useState(false);
   const [statusBanner, setStatusBanner] = useState('');
+  const [tokenWallet, setTokenWallet] = useState<StudentTokenWallet | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const uid = currentUser?.uid || 'guest_learner';
+    getOrCreateStudentTokenWallet(uid, currentUser?.email || undefined).then((w) => {
+      if (active) setTokenWallet(w);
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.uid, currentUser?.email]);
 
   // Learning Workspace states
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
@@ -712,8 +729,9 @@ export const SchoolEducationHubPage: React.FC = () => {
   const isStudentEnrolled = Boolean(currentUser && enrollment);
   const studentDisplayName = lmsUser?.displayName || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Student';
 
-  const navTabs: Array<{ id: HubTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  const navTabs: Array<{ id: HubTab; label: string; icon: React.ComponentType<{ className?: string }>; highlighted?: boolean }> = [
     { id: 'daily', label: 'Daily Classes', icon: Calendar },
+    { id: 'self_study', label: 'Study on Your Own Self', icon: Compass, highlighted: true },
     { id: 'boards', label: `All-India Boards (${ALL_INDIA_BOARDS.length})`, icon: Landmark },
     { id: 'structure', label: 'Grade Structure & Versions', icon: Layers },
     { id: 'languages', label: 'Languages & Voice (14)', icon: Languages },
@@ -935,6 +953,15 @@ export const SchoolEducationHubPage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveTab('self_study')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#123D32] hover:bg-[#195244] border border-emerald-500/40 text-emerald-100 text-xs font-bold cursor-pointer whitespace-nowrap tabular-nums"
+                title="Weekly Self-Study Tokens (Recharge ₹100/week)"
+              >
+                <Coins className="w-3.5 h-3.5 text-emerald-300" />
+                <span>{tokenWallet ? tokenWallet.balance : 50} Tokens</span>
+              </button>
               <select
                 aria-label="Switch learning language"
                 value={language}
@@ -998,13 +1025,32 @@ export const SchoolEducationHubPage: React.FC = () => {
           {navTabs.map((t) => {
             const Icon = t.icon;
             const active = activeTab === t.id;
+            const isHighlighted = Boolean(t.highlighted);
             return (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setActiveTab(t.id)}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  active
+                onClick={() => {
+                  setActiveTab(t.id);
+                  if (typeof window !== 'undefined') {
+                    const nextUrl = `${cleanPath}?tab=${t.id}`;
+                    window.history.replaceState({}, '', nextUrl);
+                    if (currentUser?.uid) {
+                      try {
+                        localStorage.setItem('openframe_student_active_uid', currentUser.uid);
+                        localStorage.setItem('openframe_student_active_route', nextUrl);
+                      } catch {
+                        // ignore
+                      }
+                    }
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                  isHighlighted
+                    ? active
+                      ? 'bg-[#123D32] text-white shadow-xs ring-2 ring-[#123D32]/25'
+                      : 'bg-emerald-50 text-[#123D32] border border-emerald-300 hover:bg-emerald-100'
+                    : active
                     ? 'bg-[#0B1930] text-white shadow-xs'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
@@ -1019,6 +1065,16 @@ export const SchoolEducationHubPage: React.FC = () => {
 
       {/* Main Content Container */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* ===================================================== */}
+        {/* TAB 1B: STUDY ON YOUR OWN SELF (UNIFIED LKG-TO-PG)    */}
+        {/* ===================================================== */}
+        {activeTab === 'self_study' && (
+          <StudyOnYourOwnSelfWorkspace
+            initialBoardId={selectedDirectoryBoard?.id || boardId}
+            initialLanguage={language}
+            onWalletUpdated={(w) => setTokenWallet(w)}
+          />
+        )}
         {/* ===================================================== */}
         {/* TAB 0: ALL-INDIA EDUCATION BOARD DIRECTORY (41+)      */}
         {/* ===================================================== */}

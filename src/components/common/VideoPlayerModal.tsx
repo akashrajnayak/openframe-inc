@@ -211,12 +211,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 </div>
               </div>
 
-              {/* 100% Free Learning & Quinn AI Notice */}
+              {/* 90%-Off OpenFrame Grant & Certification Notice */}
               <div className="p-3.5 rounded-xl bg-blue-950/50 border border-blue-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-blue-200">
                 <div className="space-y-0.5">
-                  <div className="font-semibold text-white text-xs">100% Free Enrollment · Zero Course Fee</div>
+                  <div className="font-semibold text-white text-xs">90% OpenFrame Grant · Verified Certificate Track (₹300–₹2,500)</div>
                   <div className="text-[11px] text-blue-300">
-                    Enroll free to watch with Quinn AI inside OpenFrame, answer 20–50 diagnostic questions, view 10 mastery graphs, and earn your certificate.
+                    Enroll to complete structured modules inside OpenFrame, pass the verification test (&ge;70%), verify your certificate address, and earn your QR-verified certificate.
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -228,14 +228,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     }}
                     className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] shrink-0 cursor-pointer whitespace-nowrap"
                   >
-                    Enroll &amp; Play Inside Site
+                    Open Modules &amp; Quiz
                   </button>
                   {onApplyForCourse && (
                     <button
                       onClick={() => onApplyForCourse(currentVideo.title, currentVideo.subjectCategory)}
                       className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shrink-0 cursor-pointer whitespace-nowrap"
                     >
-                      Register Free
+                      Enroll &amp; Certify
                     </button>
                   )}
                 </div>

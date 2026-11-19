@@ -692,37 +692,53 @@ export const StudentDashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* School Education (LKG - Class 12) Quick Workspace Card */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* School & University Education (LKG – PG) Quick Workspace Card */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="text-[11px] font-bold uppercase tracking-wider text-[#123D32]">
-              School Education Portal (LKG – 12th Standard)
+              All-India Education Hub (LKG – 12th – PUC – Degree – PG)
             </div>
             <h2 className="text-sm font-bold text-[#18221F]">
               {schoolEnrollment
                 ? `${SCHOOL_CLASSES.find((c) => c.id === schoolEnrollment.classId)?.label || `Class ${schoolEnrollment.classId}`} · ${SCHOOL_BOARDS.find((b) => b.id === schoolEnrollment.boardId)?.shortName || schoolEnrollment.boardId}`
-                : 'Select Your Board, Class (LKG–12) & Multilingual School Syllabus'}
+                : 'Daily Classes & Study on Your Own Self (All Boards, 14 Languages)'}
             </h2>
             <p className="text-xs text-[#64748B]">
               {schoolEnrollment
                 ? `${schoolEnrollment.medium} · ${schoolEnrollment.preferredLanguage} AI Tutor · ${schoolEnrollment.xpPoints || 0} XP · ${schoolEnrollment.streakDays || 1}-day streak`
-                : 'Access Karnataka State Board, CBSE & ICSE chapter concepts, multilingual voice learning, 8-format quizzes & virtual labs.'}
+                : 'Access Karnataka State Board, NCERT, CBSE, ICSE, NIOS & UG/PG chapter videos, auto-generated PDFs, 30-question exams, IQ/EQ/SQ tests & 20-graph reports.'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              navigate(
-                schoolEnrollment
-                  ? `/school/class/${schoolEnrollment.classId}?board=${schoolEnrollment.boardId}`
-                  : '/school'
-              )
-            }
-            className="px-4 py-2.5 bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors shrink-0 self-start sm:self-center whitespace-nowrap cursor-pointer"
-          >
-            <span>{schoolEnrollment ? 'Open School Portal' : 'Explore School (LKG–12)'}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0 self-start lg:self-center">
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  schoolEnrollment
+                    ? `/school/class/${schoolEnrollment.classId}?board=${schoolEnrollment.boardId}&tab=daily`
+                    : '/school?tab=daily'
+                )
+              }
+              className="px-4 py-2.5 bg-[#0B1930] hover:bg-slate-800 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <span>Daily Classes</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  schoolEnrollment
+                    ? `/school/class/${schoolEnrollment.classId}?board=${schoolEnrollment.boardId}&tab=self_study`
+                    : '/school?tab=self_study'
+                )
+              }
+              className="px-4 py-2.5 bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer ring-2 ring-[#123D32]/20"
+            >
+              <span>Study on Your Own Self</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Mobile / Compact Quick Module Selector */}

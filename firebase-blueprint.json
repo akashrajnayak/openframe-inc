@@ -516,7 +516,14 @@
         "registrationNumber": { "type": "string", "maxLength": 60 },
         "fullName": { "type": "string", "maxLength": 120 },
         "email": { "type": "string", "maxLength": 120 },
-        "assignedTeacherId": { "type": "string", "maxLength": 128 }
+        "assignedTeacherId": { "type": "string", "maxLength": 128 },
+        "homeAddress": { "type": "string", "maxLength": 300 },
+        "flatNumber": { "type": "string", "maxLength": 60 },
+        "streetAddress": { "type": "string", "maxLength": 240 },
+        "pincode": { "type": "string", "maxLength": 12 },
+        "mobileNumber": { "type": "string", "maxLength": 20 },
+        "alternativeMobileNumber": { "type": "string", "maxLength": 20 },
+        "state": { "type": "string", "maxLength": 80 }
       },
       "required": ["uid", "studentId", "registrationNumber", "fullName", "email"]
     },
@@ -560,6 +567,12 @@
         "country": { "type": "string", "maxLength": 80 },
         "state": { "type": "string", "maxLength": 80 },
         "city": { "type": "string", "maxLength": 80 },
+        "homeAddress": { "type": "string", "maxLength": 300 },
+        "flatNumber": { "type": "string", "maxLength": 60 },
+        "streetAddress": { "type": "string", "maxLength": 240 },
+        "pincode": { "type": "string", "maxLength": 12 },
+        "mobileNumber": { "type": "string", "maxLength": 20 },
+        "alternativeMobileNumber": { "type": "string", "maxLength": 20 },
         "educationLevel": { "type": "string", "maxLength": 80 },
         "degreeOrClass": { "type": "string", "maxLength": 120 },
         "institution": { "type": "string", "maxLength": 180 },
@@ -582,8 +595,10 @@
             "Suspended"
           ]
         },
-        "paymentStatus": { "type": "string", "enum": ["Free", "Paid", "Pending", "Scholarship", "Failed"] },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Pending", "Scholarship", "Failed"] },
         "feeAmount": { "type": "number" },
+        "marketBenchmarkPrice": { "type": "number" },
+        "discountPercent": { "type": "number" },
         "razorpayOrderId": { "type": "string", "maxLength": 120 },
         "razorpayPaymentId": { "type": "string", "maxLength": 120 },
         "verifiedServerSide": { "type": "boolean" },
@@ -683,7 +698,7 @@
     },
     "IssuedCertificate": {
       "title": "IssuedCertificate",
-      "description": "Publicly verifiable OpenFrame credential gated by 6 academic conditions.",
+      "description": "OpenFrame credential gated by module completion, verification assessment, and mandatory 7-field residential address verification (private contact PII isolated from public certificate_verification lookup).",
       "type": "object",
       "properties": {
         "certificateId": { "type": "string", "maxLength": 80 },
@@ -692,7 +707,15 @@
         "courseId": { "type": "string", "maxLength": 128 },
         "courseTitle": { "type": "string", "maxLength": 200 },
         "grade": { "type": "string", "maxLength": 60 },
-        "status": { "type": "string", "maxLength": 60 }
+        "status": { "type": "string", "maxLength": 60 },
+        "homeAddress": { "type": "string", "maxLength": 300 },
+        "flatNumber": { "type": "string", "maxLength": 60 },
+        "streetAddress": { "type": "string", "maxLength": 240 },
+        "pincode": { "type": "string", "maxLength": 12 },
+        "mobileNumber": { "type": "string", "maxLength": 20 },
+        "alternativeMobileNumber": { "type": "string", "maxLength": 20 },
+        "state": { "type": "string", "maxLength": 80 },
+        "addressVerifiedAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["certificateId", "studentId", "studentName", "courseId", "status"]
     },
@@ -1598,6 +1621,64 @@
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "eventType", "query", "createdAt"]
+    },
+    "StudentTokenWalletDoc": {
+      "title": "StudentTokenWalletDoc",
+      "description": "Weekly self-study token wallet with 50 starter tokens, 7-day cycle expiry, usage history, and ₹100/week recharge balance.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "studentEmail": { "type": "string", "maxLength": 120 },
+        "balance": { "type": "number" },
+        "weeklyStarterQuota": { "type": "number" },
+        "rechargedTokens": { "type": "number" },
+        "totalTokensUsed": { "type": "number" },
+        "cycleStartedAt": { "type": "string", "maxLength": 50 },
+        "cycleExpiresAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "balance", "weeklyStarterQuota", "cycleStartedAt", "cycleExpiresAt", "updatedAt"]
+    },
+    "TokenRechargeDoc": {
+      "title": "TokenRechargeDoc",
+      "description": "Student ₹100/week (+250 tokens) weekly self-study recharge ledger with server-side Razorpay verification flag.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "amountInr": { "type": "number" },
+        "tokensGranted": { "type": "number" },
+        "durationDays": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Razorpay", "Provisional Dev Activation"] },
+        "razorpayOrderId": { "type": "string", "maxLength": 120 },
+        "razorpayPaymentId": { "type": "string", "maxLength": 120 },
+        "verifiedServerSide": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["Paid", "Provisional", "Pending"] },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "uid", "amountInr", "tokensGranted", "durationDays", "status", "createdAt"]
+    },
+    "SelfStudyProgressReportDoc": {
+      "title": "SelfStudyProgressReportDoc",
+      "description": "Submitted Study on Your Own Self progress report with 30-question score, strong/weak topic diagnostics, and IQ/EQ/SQ evaluation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "boardName": { "type": "string", "maxLength": 140 },
+        "educationLevelNumber": { "type": "number" },
+        "classOrDepartment": { "type": "string", "maxLength": 120 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "chapterTitle": { "type": "string", "maxLength": 180 },
+        "sourceType": { "type": "string", "enum": ["youtube_video", "chapter_pdf"] },
+        "thirtyQuestionScore": { "type": "number" },
+        "iqScore": { "type": "number" },
+        "eqScore": { "type": "number" },
+        "sqScore": { "type": "number" },
+        "submittedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "studentId", "studentName", "boardName", "educationLevelNumber", "subject", "chapterTitle", "thirtyQuestionScore", "iqScore", "eqScore", "sqScore", "submittedAt"]
     }
   },
   "firestore": {
@@ -1734,6 +1815,9 @@
     "/education_taxonomy/{id}": { "schema": { "$ref": "#/entities/EducationTaxonomyItemDoc" }, "description": "Dynamic Levels 1-10 / Categories A-J qualifications, degrees, streams, subjects, and specializations" },
     "/course_requests/{id}": { "schema": { "$ref": "#/entities/CourseRequestDoc" }, "description": "Learner requests for unavailable courses in the OpenFrame catalogue" },
     "/qa_history/{id}": { "schema": { "$ref": "#/entities/QaSavedEntryDoc" }, "description": "Saved Quinn AI Q&A answers linked to student profiles" },
-    "/recommendation_analytics/{id}": { "schema": { "$ref": "#/entities/RecommendationAnalyticsEventDoc" }, "description": "Aggregated discovery search, degree, skill, enrollment, and YouTube telemetry" }
+    "/recommendation_analytics/{id}": { "schema": { "$ref": "#/entities/RecommendationAnalyticsEventDoc" }, "description": "Aggregated discovery search, degree, skill, enrollment, and YouTube telemetry" },
+    "/student_token_wallets/{uid}": { "schema": { "$ref": "#/entities/StudentTokenWalletDoc" }, "description": "Student weekly self-study token wallet balances, 7-day cycle expiry, and usage ledger" },
+    "/token_recharges/{id}": { "schema": { "$ref": "#/entities/TokenRechargeDoc" }, "description": "Student ₹100/week (+250 tokens) recharge receipts and verification status" },
+    "/self_study_reports/{id}": { "schema": { "$ref": "#/entities/SelfStudyProgressReportDoc" }, "description": "Submitted Study on Your Own Self 30-question exam, strong/weak topic diagnostics, and IQ/EQ/SQ progress reports" }
   }
 }

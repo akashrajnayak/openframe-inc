@@ -83,6 +83,23 @@ import {
   saveRecentSearch,
   clearRecentSearches
 } from '../utils/searchIntelligence';
+import { compute90PercentCoursePricing, formatInr } from '../utils/pricingEngine';
+
+const INDIAN_BOARD_FILTER_OPTIONS = [
+  'Karnataka State Board (KSEAB / DPUE)',
+  'NCERT',
+  'CBSE',
+  'CISCE (ICSE / ISC)',
+  'NIOS',
+  'Tamil Nadu State Board',
+  'Maharashtra State Board',
+  'Kerala SCERT',
+  'Andhra Pradesh & Telangana SCERT',
+  'Uttar Pradesh Madhyamik Shiksha Parishad',
+  'West Bengal Board',
+  'All 28 States & 8 UTs Boards',
+  'University / UG & PG',
+];
 
 export const CourseMarketplacePage: React.FC = () => {
   const router = useRouter();
@@ -140,10 +157,12 @@ export const CourseMarketplacePage: React.FC = () => {
   const [certificateOnly, setCertificateOnly] = useState(false);
   const [sortBy, setSortBy] = useState<'popular' | 'rating' | 'price_low' | 'price_high' | 'newest'>('popular');
 
-  // Education Classification (A–J), Degree, Access Type & Unified Discovery State
+  // Education Classification (A–J), Board, Degree, Grant Fee Band & Unified Discovery State
   const [selectedEducationLevel, setSelectedEducationLevel] = useState<'All' | EducationCategoryCode>('All');
+  const [selectedBoard, setSelectedBoard] = useState('All');
   const [selectedDegreeProgramme, setSelectedDegreeProgramme] = useState('All');
   const [selectedAccessType, setSelectedAccessType] = useState<'all' | 'free' | 'paid'>('all');
+  const [selectedPriceBand, setSelectedPriceBand] = useState<'all' | 'school_300_799' | 'degree_800_1499' | 'pg_1500_2500'>('all');
   const [unifiedViewTab, setUnifiedViewTab] = useState<
     'all_results' | 'openframe_courses' | 'youtube_videos' | 'learning_paths' | 'related_skills'
   >('all_results');
@@ -258,23 +277,35 @@ export const CourseMarketplacePage: React.FC = () => {
     const youtubeUrl = yt?.youtubeUrl || (plId
       ? `https://www.youtube.com/playlist?list=${plId}`
       : `https://www.youtube.com/watch?v=${vidId}`);
+    const resolvedCategory = selectedCategory !== 'All' ? selectedCategory : 'Applied Digital & Career Skills';
+    const resolvedTitle = yt?.title || `${topicFallback || 'OpenFrame'} Video Course`;
+    const resolvedLevel = yt?.level === 'Advanced' ? 'Advanced' : yt?.level === 'Intermediate' ? 'Intermediate' : 'Beginner';
+    const ytPricing = compute90PercentCoursePricing({
+      category: resolvedCategory,
+      title: resolvedTitle,
+      level: resolvedLevel,
+      educationCategory: selectedEducationLevel !== 'All' ? selectedEducationLevel : undefined,
+    });
     const courseObj: MarketplaceCourse = {
       id: ytCourseId,
-      title: yt?.title || `${topicFallback || 'OpenFrame'} Video Course`,
+      title: resolvedTitle,
       shortDesc: yt?.description || yt?.recommendedReason || `Structured YouTube course on ${topicFallback || yt?.title || 'Core Skills'}.`,
-      description: yt?.description || `Curated YouTube educational track by ${yt?.channelTitle || 'OpenFrame YouTube Faculty'} paired with OpenFrame syllabus tracking and assessments.`,
-      category: selectedCategory !== 'All' ? selectedCategory : 'Applied Digital & Career Skills',
+      description: yt?.description || `Curated YouTube educational track by ${yt?.channelTitle || 'OpenFrame YouTube Faculty'} paired with OpenFrame syllabus tracking, verification tests, and QR-verified certification.`,
+      category: resolvedCategory,
       subcategory: topicFallback || 'YouTube Tutorial',
       categoryGroup: 'Vocational, Professional & Open Skills',
       language: yt?.language || (selectedLanguage !== 'All' ? selectedLanguage : 'English'),
-      pricingTier: 'Academic Access',
-      price: 0,
-      isFree: true,
-      level: yt?.level === 'Advanced' ? 'Advanced' : yt?.level === 'Intermediate' ? 'Intermediate' : 'Beginner',
+      board: selectedBoard !== 'All' ? selectedBoard : undefined,
+      pricingTier: ytPricing.pricingTier,
+      price: ytPricing.finalPriceInr,
+      marketBenchmarkPrice: ytPricing.marketBenchmarkPriceInr,
+      discountPercent: ytPricing.discountPercent,
+      isFree: false,
+      level: resolvedLevel,
       duration: yt?.duration || 'Self-Paced',
       status: 'Published',
       certificateEligibility: true,
-      certificateNote: 'Eligible for OpenFrame Certificate upon completing video lessons and assessment.',
+      certificateNote: 'Eligible for OpenFrame QR-Verified Certificate upon completing modules, verification test (≥70%), and 7-field address verification.',
       imageUrl: thumb,
       thumbnailUrl: thumb,
       courseType: plId ? 'youtube_playlist' : 'youtube_video',
@@ -652,8 +683,10 @@ export const CourseMarketplacePage: React.FC = () => {
         subcategory: selectedSubcategory !== 'All' ? selectedSubcategory : undefined,
         categoryGroup: selectedGroup,
         educationLevel: selectedEducationLevel !== 'All' ? selectedEducationLevel : undefined,
+        board: selectedBoard !== 'All' ? selectedBoard : undefined,
         degree: selectedDegreeProgramme !== 'All' ? selectedDegreeProgramme : undefined,
         accessType: selectedAccessType,
+        priceBand: selectedPriceBand,
         courseType: courseTypeFilter,
         contentType: contentTypeFilter,
         libraryCollection: libraryCollectionFilter,
@@ -694,8 +727,10 @@ export const CourseMarketplacePage: React.FC = () => {
         subcategory: selectedSubcategory !== 'All' ? selectedSubcategory : undefined,
         categoryGroup: selectedGroup,
         educationLevel: selectedEducationLevel !== 'All' ? selectedEducationLevel : undefined,
+        board: selectedBoard !== 'All' ? selectedBoard : undefined,
         degree: selectedDegreeProgramme !== 'All' ? selectedDegreeProgramme : undefined,
         accessType: selectedAccessType,
+        priceBand: selectedPriceBand,
         courseType: courseTypeFilter,
         contentType: contentTypeFilter,
         libraryCollection: libraryCollectionFilter,
@@ -737,8 +772,10 @@ export const CourseMarketplacePage: React.FC = () => {
     selectedSubcategory,
     selectedGroup,
     selectedEducationLevel,
+    selectedBoard,
     selectedDegreeProgramme,
     selectedAccessType,
+    selectedPriceBand,
     courseTypeFilter,
     contentTypeFilter,
     libraryCollectionFilter,
@@ -867,8 +904,10 @@ export const CourseMarketplacePage: React.FC = () => {
     setSelectedSubcategory('All');
     setSelectedGroup('All');
     setSelectedEducationLevel('All');
+    setSelectedBoard('All');
     setSelectedDegreeProgramme('All');
     setSelectedAccessType('all');
+    setSelectedPriceBand('all');
     setUnifiedViewTab('all_results');
     setDiscoveryResult(null);
     setCourseTypeFilter('all');
@@ -898,8 +937,10 @@ export const CourseMarketplacePage: React.FC = () => {
     selectedSubcategory !== 'All' ||
     selectedGroup !== 'All' ||
     selectedEducationLevel !== 'All' ||
+    selectedBoard !== 'All' ||
     selectedDegreeProgramme !== 'All' ||
     selectedAccessType !== 'all' ||
+    selectedPriceBand !== 'all' ||
     courseTypeFilter !== 'all' ||
     contentTypeFilter !== 'all' ||
     libraryCollectionFilter !== 'all' ||
@@ -1635,25 +1676,50 @@ export const CourseMarketplacePage: React.FC = () => {
               </select>
             </div>
 
-            {/* Access Type Filter (Free vs Paid) */}
+            {/* Indian Board & University Filter */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">Course Access Type</label>
-              <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl text-[11px] font-semibold">
-                {(['all', 'free', 'paid'] as const).map((acc) => (
+              <label className="text-xs font-bold text-[#123D32] block">
+                Indian Board / University Curriculum
+              </label>
+              <select
+                value={selectedBoard}
+                onChange={(e) => setSelectedBoard(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-emerald-300 bg-emerald-50/40 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#123D32]"
+              >
+                <option value="All">All Indian Boards (Karnataka, NCERT, CBSE, ICSE, State &amp; Univ.)</option>
+                {INDIAN_BOARD_FILTER_OPTIONS.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 90% OpenFrame Grant Fee Bands (₹300–₹2,500) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                90% Off Grant Fee Band (₹300–₹2,500)
+              </label>
+              <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl text-[11px] font-semibold">
+                {(
+                  [
+                    { id: 'all', label: 'All (₹300–₹2.5k)' },
+                    { id: 'school_300_799', label: '₹300–₹799' },
+                    { id: 'degree_800_1499', label: '₹800–₹1,499' },
+                    { id: 'pg_1500_2500', label: '₹1,500–₹2,500' },
+                  ] as const
+                ).map((band) => (
                   <button
-                    key={acc}
+                    key={band.id}
                     type="button"
-                    onClick={() => {
-                      setSelectedAccessType(acc);
-                      runIntelligentDiscovery(searchQuery, { accessOverride: acc });
-                    }}
-                    className={`py-1.5 rounded-lg capitalize cursor-pointer transition-colors ${
-                      selectedAccessType === acc
-                        ? 'bg-white text-slate-900 shadow-xs'
+                    onClick={() => setSelectedPriceBand(band.id)}
+                    className={`py-1.5 px-1 rounded-lg cursor-pointer transition-colors tabular-nums ${
+                      selectedPriceBand === band.id
+                        ? 'bg-white text-[#123D32] shadow-xs font-bold'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    {acc === 'all' ? 'All' : acc === 'free' ? 'Free' : 'Paid'}
+                    {band.label}
                   </button>
                 ))}
               </div>
@@ -1873,7 +1939,7 @@ export const CourseMarketplacePage: React.FC = () => {
                 OpenFrame Education courses are conducted in association with HopeNest Global Foundation (Section 8 Non-Profit).
               </p>
               <p className="text-slate-400">
-                Free public YouTube educational videos play via official YouTube embed players with channel attribution. OpenFrame never charges for watching free public YouTube videos; fees apply solely to OpenFrame certification, mentorship &amp; assessments.
+                Public YouTube educational lectures play via official YouTube embed players with creator attribution. OpenFrame&apos;s 90%-off grant fee (₹300–₹2,500) covers structured Parts &amp; Modules, Quinn AI verification tests, mentorship, and QR-verified certification with mandatory address verification.
               </p>
             </div>
           </aside>
@@ -2000,9 +2066,23 @@ export const CourseMarketplacePage: React.FC = () => {
                                 <div className="space-y-1.5">
                                   <div className="flex items-center justify-between gap-2 text-[11px]">
                                     <span className="font-semibold text-blue-700 truncate">{rec.course.category}</span>
-                                    <span className="font-bold text-[#123D32] tabular-nums shrink-0">
-                                      {rec.course.price > 0 ? `₹${rec.course.price.toLocaleString()}` : 'Free'}
-                                    </span>
+                                    {(() => {
+                                      const rp = compute90PercentCoursePricing({
+                                        category: rec.course.category,
+                                        title: rec.course.title,
+                                        level: rec.course.level,
+                                        educationLevels: rec.course.educationLevels,
+                                        existingPrice: rec.course.price,
+                                      });
+                                      return (
+                                        <span className="font-bold text-[#123D32] tabular-nums shrink-0 flex items-center gap-1">
+                                          <span>{formatInr(rp.finalPriceInr)}</span>
+                                          <span className="text-[10px] text-slate-400 line-through font-normal">
+                                            {formatInr(rp.marketBenchmarkPriceInr)}
+                                          </span>
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                   <Link
                                     to={`/marketplace/${rec.course.id}`}
@@ -2362,9 +2442,23 @@ export const CourseMarketplacePage: React.FC = () => {
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
                           <span className="font-semibold text-blue-700 truncate">{rc.category}</span>
-                          <span className="font-bold text-slate-900 tabular-nums shrink-0">
-                            {rc.price > 0 ? `₹${rc.price.toLocaleString()}` : 'Free'}
-                          </span>
+                          {(() => {
+                            const rcp = compute90PercentCoursePricing({
+                              category: rc.category,
+                              title: rc.title,
+                              level: rc.level,
+                              educationLevels: rc.educationLevels,
+                              existingPrice: rc.price,
+                            });
+                            return (
+                              <span className="font-bold text-slate-900 tabular-nums shrink-0 flex items-center gap-1">
+                                <span>{formatInr(rcp.finalPriceInr)}</span>
+                                <span className="text-[10px] text-slate-400 line-through font-normal">
+                                  {formatInr(rcp.marketBenchmarkPriceInr)}
+                                </span>
+                              </span>
+                            );
+                          })()}
                         </div>
                         <Link
                           to={`/marketplace/${rc.id}`}
@@ -2596,9 +2690,22 @@ export const CourseMarketplacePage: React.FC = () => {
                                   <div className="space-y-1">
                                     <div className="flex items-center justify-between text-[10px] text-slate-500">
                                       <span className="font-bold text-blue-700 truncate">{mc.category}</span>
-                                      <span className="font-bold text-[#123D32] shrink-0">
-                                        {mc.price > 0 ? `₹${mc.price.toLocaleString()}` : 'Free'}
-                                      </span>
+                                      {(() => {
+                                        const mcp = compute90PercentCoursePricing({
+                                          category: mc.category,
+                                          title: mc.title,
+                                          level: mc.level,
+                                          existingPrice: mc.price,
+                                        });
+                                        return (
+                                          <span className="font-bold text-[#123D32] tabular-nums shrink-0 flex items-center gap-1">
+                                            <span>{formatInr(mcp.finalPriceInr)}</span>
+                                            <span className="text-[10px] text-slate-400 line-through font-normal">
+                                              {formatInr(mcp.marketBenchmarkPriceInr)}
+                                            </span>
+                                          </span>
+                                        );
+                                      })()}
                                     </div>
                                     <Link to={`/marketplace/${mc.id}`} className="text-xs font-bold text-slate-900 hover:text-blue-700 line-clamp-2 block">
                                       {mc.title}
@@ -3016,10 +3123,14 @@ export const CourseMarketplacePage: React.FC = () => {
                   const isFav = favoriteIds.has(course.id);
                   const isYt = course.courseType === 'youtube_video' || Boolean(course.youtubeVideoId);
                   const isPlaylist = course.courseType === 'youtube_playlist' || Boolean(course.youtubePlaylistId);
-                  const trackLabel =
-                    course.price > 0
-                      ? `₹${course.price.toLocaleString()}`
-                      : 'Free';
+                  const coursePricing = compute90PercentCoursePricing({
+                    category: course.category,
+                    title: course.title,
+                    level: course.level,
+                    educationLevels: course.educationLevels,
+                    existingPrice: course.price,
+                  });
+                  const trackLabel = formatInr(coursePricing.finalPriceInr);
 
                   return (
                     <div
@@ -3086,8 +3197,12 @@ export const CourseMarketplacePage: React.FC = () => {
                             <span className="text-blue-600 font-semibold uppercase tracking-wider truncate">
                               {course.subcategory}
                             </span>
-                            <span className="font-bold shrink-0 text-slate-700 tabular-nums">
-                              {trackLabel}
+                            <span className="font-bold shrink-0 text-[#123D32] tabular-nums flex items-center gap-1">
+                              <span>{trackLabel}</span>
+                              <span className="text-[10px] font-normal text-slate-400 line-through">
+                                {formatInr(coursePricing.marketBenchmarkPriceInr)}
+                              </span>
+                              <span className="text-[10px] font-bold text-emerald-700">90% Off</span>
                             </span>
                           </div>
 
@@ -3214,7 +3329,7 @@ export const CourseMarketplacePage: React.FC = () => {
                             className="py-1.5 px-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-bold transition-all flex items-center justify-center space-x-1 shadow-xs cursor-pointer"
                           >
                             <GraduationCap className="w-3 h-3 text-cyan-300" />
-                            <span>{course.price > 0 ? `Enroll (₹${course.price})` : 'Enroll Free'}</span>
+                            <span className="tabular-nums">Enroll ({trackLabel})</span>
                           </button>
 
                           <Link
@@ -3391,19 +3506,30 @@ export const CourseMarketplacePage: React.FC = () => {
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Course Access Type</label>
+                <label className="font-bold text-[#123D32] block mb-1">Indian Board / University Curriculum</label>
                 <select
-                  value={selectedAccessType}
-                  onChange={(e) => {
-                    const acc = e.target.value as 'all' | 'free' | 'paid';
-                    setSelectedAccessType(acc);
-                    runIntelligentDiscovery(searchQuery, { accessOverride: acc });
-                  }}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800"
+                  value={selectedBoard}
+                  onChange={(e) => setSelectedBoard(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50/40 text-slate-800"
                 >
-                  <option value="all">All (Free &amp; Paid)</option>
-                  <option value="free">Free Courses</option>
-                  <option value="paid">Paid Programmes</option>
+                  <option value="All">All Indian Boards (Karnataka, NCERT, CBSE, ICSE, State &amp; Univ.)</option>
+                  {INDIAN_BOARD_FILTER_OPTIONS.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">90% Off Grant Fee Band (₹300–₹2,500)</label>
+                <select
+                  value={selectedPriceBand}
+                  onChange={(e) => setSelectedPriceBand(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 tabular-nums"
+                >
+                  <option value="all">All Grant Fees (₹300–₹2,500 · 90% Off Market)</option>
+                  <option value="school_300_799">LKG to Class 10 / SSLC (₹300–₹799)</option>
+                  <option value="degree_800_1499">PUC / Class 11–12 / UG &amp; Diploma (₹800–₹1,499)</option>
+                  <option value="pg_1500_2500">PG / PhD / Executive Specialization (₹1,500–₹2,500)</option>
                 </select>
               </div>
 

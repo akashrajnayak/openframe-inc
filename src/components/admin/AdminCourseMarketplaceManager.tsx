@@ -30,6 +30,12 @@ import {
   Compass,
 } from 'lucide-react';
 import {
+  compute90PercentCoursePricing,
+  formatInr,
+  MIN_COURSE_FEE_INR,
+  MAX_COURSE_FEE_INR,
+} from '../../utils/pricingEngine';
+import {
   marketplaceService,
   ALL_MARKETPLACE_CATEGORIES,
   MARKETPLACE_STATUSES,
@@ -1033,16 +1039,28 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                         </td>
 
                         <td className="py-3 px-4 whitespace-nowrap">
-                          <div className="font-bold tabular-nums">
-                            {c.price > 0 ? (
-                              <span className="text-slate-900">₹{c.price.toLocaleString('en-IN')}</span>
-                            ) : (
-                              <span className="text-blue-700">
-                                {c.pricingTier && String(c.pricingTier) !== 'Free' ? c.pricingTier : 'Academic Access'}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-500">{c.duration}</div>
+                          {(() => {
+                            const p = compute90PercentCoursePricing({
+                              category: c.category,
+                              title: c.title,
+                              level: c.level,
+                              educationLevels: c.educationLevels,
+                              existingPrice: c.price,
+                            });
+                            return (
+                              <>
+                                <div className="font-bold tabular-nums flex items-center gap-1.5">
+                                  <span className="text-slate-900">{formatInr(p.finalPriceInr)}</span>
+                                  <span className="text-[10px] font-normal text-slate-400 line-through">
+                                    {formatInr(p.marketBenchmarkPriceInr)}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-emerald-700 font-semibold">
+                                  90% Off · {c.duration}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </td>
 
                         <td className="py-3 px-4 whitespace-nowrap">
@@ -2225,26 +2243,39 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Course Fee (INR · 0 = Free)</label>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Grant Fee (INR · ₹{MIN_COURSE_FEE_INR}–₹{MAX_COURSE_FEE_INR.toLocaleString('en-IN')} · 90% Off Market)
+                  </label>
                   <input
                     type="number"
-                    min="0"
-                    value={editingCourse.price ?? 0}
+                    min={MIN_COURSE_FEE_INR}
+                    max={MAX_COURSE_FEE_INR}
+                    value={Math.min(MAX_COURSE_FEE_INR, Math.max(MIN_COURSE_FEE_INR, Number(editingCourse.price || MIN_COURSE_FEE_INR)))}
                     onChange={(e) => {
-                      const val = Math.max(0, Number(e.target.value));
+                      const raw = Number(e.target.value);
+                      const clamped = Math.min(
+                        MAX_COURSE_FEE_INR,
+                        Math.max(MIN_COURSE_FEE_INR, Number.isFinite(raw) ? Math.round(raw) : MIN_COURSE_FEE_INR)
+                      );
                       setEditingCourse({
                         ...editingCourse,
-                        price: val,
-                        isFree: val === 0,
+                        price: clamped,
+                        marketBenchmarkPrice: clamped * 10,
+                        discountPercent: 90,
+                        isFree: false,
                         pricingTier:
-                          val === 0
-                            ? 'Academic Access'
-                            : String(editingCourse.pricingTier) === 'Free' || editingCourse.pricingTier === 'Academic Access'
+                          clamped >= 2000
+                            ? 'Specialised'
+                            : clamped >= 1400
+                            ? 'Advanced'
+                            : clamped >= 900
+                            ? 'Professional'
+                            : clamped >= 500
                             ? 'Basic'
-                            : editingCourse.pricingTier,
+                            : 'Starter',
                       });
                     }}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl tabular-nums"
                   />
                 </div>
 
@@ -2269,24 +2300,18 @@ export const AdminCourseMarketplaceManager: React.FC<AdminCourseMarketplaceManag
                     checked={editingCourse.certificateEligibility ?? true}
                     onChange={(e) => setEditingCourse({ ...editingCourse, certificateEligibility: e.target.checked })}
                   />
-                  <span>Certificate Available</span>
+                  <span>Certificate Available (Requires 7-Field Address Verification)</span>
                 </label>
-                <label className="flex items-center gap-2 font-semibold text-emerald-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={(editingCourse.price ?? 0) === 0}
-                    onChange={(e) => {
-                      const makeFree = e.target.checked;
-                      setEditingCourse({
-                        ...editingCourse,
-                        price: makeFree ? 0 : (editingCourse.price && editingCourse.price > 0 ? editingCourse.price : 499),
-                        isFree: makeFree,
-                        pricingTier: makeFree ? 'Academic Access' : 'Basic',
-                      });
-                    }}
-                  />
-                  <span>Free Access Course (Price = ₹0)</span>
-                </label>
+                <span className="text-xs font-semibold text-[#123D32] tabular-nums">
+                  Market Benchmark:{' '}
+                  {formatInr(
+                    Math.min(
+                      MAX_COURSE_FEE_INR,
+                      Math.max(MIN_COURSE_FEE_INR, Number(editingCourse.price || MIN_COURSE_FEE_INR))
+                    ) * 10
+                  )}{' '}
+                  · 90% OpenFrame Grant Applied
+                </span>
               </div>
 
               <div>

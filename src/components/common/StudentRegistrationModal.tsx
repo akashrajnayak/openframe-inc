@@ -22,6 +22,12 @@ import { lmsService } from '../../services/lmsService';
 import { quinnAiService } from '../../services/quinnAiService';
 import { marketplaceService } from '../../services/marketplaceService';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../../utils/searchIntelligence';
+import {
+  ALL_INDIAN_STATES_AND_UTS,
+  compute90PercentCoursePricing,
+  formatInr,
+  validateCertificateAddressDetails,
+} from '../../utils/pricingEngine';
 
 interface StudentRegistrationModalProps {
   isOpen: boolean;
@@ -46,6 +52,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   // Form fields
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
+  const [alternativeMobileNumber, setAlternativeMobileNumber] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [emailAddress, setEmailAddress] = useState('');
   const [dob, setDob] = useState('');
@@ -53,6 +60,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   const [state, setState] = useState('Karnataka');
   const [district, setDistrict] = useState('');
   const [city, setCity] = useState('');
+  const [homeAddress, setHomeAddress] = useState('');
   const [houseNumber, setHouseNumber] = useState('');
   const [streetAddress, setStreetAddress] = useState('');
   const [pincode, setPincode] = useState('');
@@ -107,6 +115,11 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
 
   if (!isOpen) return null;
 
+  const grantPricing = compute90PercentCoursePricing({
+    category: courseCategory,
+    title: courseTitle,
+  });
+
   const targetLearnPath = videoId
     ? `/learn/video/${encodeURIComponent(videoId)}`
     : courseId && courseId !== 'VIDEO-SELECT'
@@ -117,13 +130,22 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
     e.preventDefault();
     setErrorMsg('');
 
-    if (!fullName.trim() || !mobileNumber.trim() || !emailAddress.trim()) {
-      setErrorMsg('Please complete all required fields (Full Name, Mobile, Email).');
+    if (!fullName.trim() || !emailAddress.trim()) {
+      setErrorMsg('Please complete Full Name and Email Address.');
       return;
     }
 
-    if (mobileNumber.trim().length < 10) {
-      setErrorMsg('Please enter a valid 10-digit mobile number.');
+    const addressCheck = validateCertificateAddressDetails({
+      homeAddress,
+      flatNumber: houseNumber,
+      streetAddress,
+      pincode,
+      mobileNumber,
+      alternativeMobileNumber,
+      state,
+    });
+    if (!addressCheck.valid) {
+      setErrorMsg(addressCheck.error || 'Please complete all 7 mandatory certificate address and mobile fields.');
       return;
     }
 
@@ -141,21 +163,24 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
       const payload = {
         fullName: fullName.trim(),
         mobileNumber: mobileNumber.trim(),
+        alternativeMobileNumber: alternativeMobileNumber.trim(),
         whatsappNumber: whatsappNumber.trim() || mobileNumber.trim(),
         emailAddress: emailAddress.trim().toLowerCase(),
         dob: dob || '',
         gender: gender || undefined,
         country: 'India',
-        state: state.trim() || 'Karnataka',
+        state: state.trim(),
         district: district.trim() || city.trim() || 'Bengaluru Urban',
         city: city.trim() || 'Bengaluru',
-        houseNumber: houseNumber.trim() || undefined,
-        streetAddress: streetAddress.trim() || undefined,
-        pincode: pincode.trim() || undefined,
+        homeAddress: homeAddress.trim(),
+        flatNumber: houseNumber.trim(),
+        houseNumber: houseNumber.trim(),
+        streetAddress: streetAddress.trim(),
+        pincode: pincode.trim(),
         preferredLanguage,
         schoolCollegeName: schoolCollegeName.trim() || 'Independent / Self-Paced',
         currentClassQualification: currentQualification,
-        interestedCourse: courseTitle ? `${courseTitle} (${courseId || 'OpenFrame'})` : 'Free OpenFrame Learning Programme',
+        interestedCourse: courseTitle ? `${courseTitle} (${courseId || 'OpenFrame'})` : 'OpenFrame Certified Learning Programme',
         parentName: parentName.trim() || undefined,
         parentMobile: parentMobile.trim() || undefined,
         isMinor,
@@ -166,7 +191,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         consentAccepted,
         registeredAt: new Date().toISOString(),
         status: 'Registered' as const,
-        internalNotes: `100% Free Course Enrollment. Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
+        internalNotes: `90%-Off Grant Course Enrollment (${formatInr(grantPricing.finalPriceInr)} vs ${formatInr(grantPricing.marketBenchmarkPrice)} market value). Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
       };
 
       try {
@@ -197,20 +222,36 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               categoryGroup: 'Technology',
               level: 'Beginner',
               duration: 'Self-Paced',
-              price: 0,
-              isFree: true,
+              price: grantPricing.finalPriceInr,
+              marketBenchmarkPrice: grantPricing.marketBenchmarkPrice,
+              discountPercent: 90,
+              isFree: false,
               courseType: videoId ? 'youtube_video' : 'standard',
               youtubeVideoId: videoId || undefined,
               language: preferredLanguage,
-              description: `100% Free OpenFrame learning workspace for ${courseTitle}.`,
+              description: `OpenFrame certified learning workspace for ${courseTitle}.`,
               skillsAcquired: [courseCategory],
               status: 'Published',
             } as any);
-            await lmsService.enrollStudentInCourse(targetCourse, {
-              uid: currentUser.uid,
-              fullName: payload.fullName,
-              email: payload.emailAddress,
-            });
+            await lmsService.enrollStudentInCourse(
+              targetCourse,
+              {
+                uid: currentUser.uid,
+                fullName: payload.fullName,
+                email: payload.emailAddress,
+                addressDetails: {
+                  homeAddress: payload.homeAddress,
+                  flatNumber: payload.flatNumber,
+                  streetAddress: payload.streetAddress,
+                  pincode: payload.pincode,
+                  mobileNumber: payload.mobileNumber,
+                  alternativeMobileNumber: payload.alternativeMobileNumber,
+                  state: payload.state,
+                },
+              },
+              'Pending',
+              grantPricing.finalPriceInr
+            );
           }
         }
       } catch (firestoreErr) {
@@ -260,7 +301,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
             </div>
             <div>
               <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 font-semibold">
-                100% Free Enrollment · Zero Course Fee
+                90% OpenFrame Grant · Verified Certificate Enrollment
               </div>
               <h2 className="text-lg font-bold tracking-tight text-white leading-tight">
                 Student Programme Enrollment
@@ -288,8 +329,9 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               </span>
             )}
           </div>
-          <span className="hidden sm:inline text-[11px] text-emerald-700 font-bold shrink-0 ml-2">
-            100% Free
+          <span className="hidden sm:inline text-[11px] text-emerald-700 font-bold shrink-0 ml-2 tabular-nums">
+            <span className="line-through text-slate-400 mr-1">{formatInr(grantPricing.marketBenchmarkPrice)}</span>
+            {formatInr(grantPricing.finalPriceInr)} · 90% Off
           </span>
         </div>
 
@@ -302,9 +344,9 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               </div>
 
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Free Enrollment Confirmed!</h3>
+                <h3 className="text-xl font-bold text-slate-900">Enrollment Confirmed!</h3>
                 <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
-                  Thank you, <strong className="text-slate-800">{fullName}</strong>. Your 100% free enrollment for <strong className="text-blue-700">{courseTitle}</strong> has been logged in OpenFrame Education.
+                  Thank you, <strong className="text-slate-800">{fullName}</strong>. Your 90%-off grant enrollment for <strong className="text-blue-700">{courseTitle}</strong> has been logged with your verified certificate address details.
                 </p>
               </div>
 
@@ -319,12 +361,14 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   <span className="font-semibold text-slate-800 text-right truncate max-w-[220px]">{courseTitle}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Course Fee:</span>
-                  <span className="font-bold text-emerald-700">₹0 · 100% Free</span>
+                  <span className="text-slate-500">90%-Off Grant Fee:</span>
+                  <span className="font-bold text-emerald-700 tabular-nums">
+                    {formatInr(grantPricing.finalPriceInr)} (90% off {formatInr(grantPricing.marketBenchmarkPrice)})
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Registered Contact:</span>
-                  <span className="font-medium text-slate-700">{mobileNumber}</span>
+                  <span className="font-medium text-slate-700 tabular-nums">{mobileNumber} / {alternativeMobileNumber}</span>
                 </div>
               </div>
 
@@ -334,7 +378,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   <span>Instant Access Ready</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-emerald-900">
-                  Click &ldquo;Start Learning Now&rdquo; to launch your Quinn AI structured workspace, watch curated YouTube lectures, complete the 7-format assessment, and earn a QR-verified OpenFrame certificate.
+                  Click &ldquo;Start Learning Now&rdquo; to launch your structured modules, watch curated YouTube lectures, pass the verification test (&ge;70%), and download your QR-verified OpenFrame certificate.
                 </p>
               </div>
 
@@ -361,11 +405,11 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* 100% Free Enrollment Notice */}
+              {/* 90%-Off Grant Pricing Notice */}
               <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-200 text-xs text-emerald-950 flex items-start space-x-3">
                 <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                 <div className="text-[11px] leading-relaxed">
-                  <strong className="text-emerald-950">100% Free Enrollment · Zero Course Fee:</strong> All Quinn AI video learning paths, assessments, and certificates on OpenFrame Education are completely free. No payment or card is ever required.
+                  <strong className="text-emerald-950">90% OpenFrame Grant ({formatInr(grantPricing.finalPriceInr)} vs {formatInr(grantPricing.marketBenchmarkPrice)} Market Value):</strong> Structured LKG–Post-Graduation curriculum, verification quiz &amp; QR-verified certificate. Complete all 7 mandatory address &amp; mobile fields below for certificate issuance.
                 </div>
               </div>
 
@@ -441,22 +485,36 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 </div>
               </div>
 
-              {/* Row 2b: House No, Street Address, State, District */}
+              {/* Row 2b: Mandatory Certificate Issuance Address Details */}
+              <div className="space-y-1 text-left">
+                <label className="text-xs font-semibold text-slate-700">Home Address (Building / House Name) *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sri Lakshmi Residency, Ground Floor"
+                  value={homeAddress}
+                  onChange={(e) => setHomeAddress(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
+                />
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700">House / Flat No.</label>
+                  <label className="text-xs font-semibold text-slate-700">Flat Number *</label>
                   <input
                     type="text"
-                    placeholder="e.g. #42, 2nd Floor"
+                    required
+                    placeholder="e.g. Flat 204 / #42"
                     value={houseNumber}
                     onChange={(e) => setHouseNumber(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
                   />
                 </div>
                 <div className="space-y-1 text-left sm:col-span-2">
-                  <label className="text-xs font-semibold text-slate-700">Street / Road / Locality</label>
+                  <label className="text-xs font-semibold text-slate-700">Street Address *</label>
                   <input
                     type="text"
+                    required
                     placeholder="e.g. 100 Feet Road, Indiranagar"
                     value={streetAddress}
                     onChange={(e) => setStreetAddress(e.target.value)}
@@ -464,19 +522,34 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   />
                 </div>
                 <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700">District</label>
+                  <label className="text-xs font-semibold text-slate-700">Pin Code *</label>
                   <input
                     type="text"
-                    placeholder="e.g. Bengaluru Urban"
-                    value={district}
-                    onChange={(e) => setDistrict(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
+                    required
+                    maxLength={6}
+                    placeholder="560001"
+                    value={pincode}
+                    onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800 tabular-nums"
                   />
                 </div>
               </div>
 
-              {/* Row 2c: DOB, WhatsApp, PIN, Language */}
+              {/* Row 2c: Alternative Mobile, DOB, District, Language */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="space-y-1 text-left">
+                  <label className="text-xs font-semibold text-slate-700">Alternative Mobile *</label>
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    placeholder="Alternate 10-digit"
+                    value={alternativeMobileNumber}
+                    onChange={(e) => setAlternativeMobileNumber(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800 tabular-nums"
+                  />
+                </div>
+
                 <div className="space-y-1 text-left">
                   <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
                     <Calendar className="w-3.5 h-3.5 text-blue-600" />
@@ -491,25 +564,12 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 </div>
 
                 <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700">WhatsApp (Optional)</label>
-                  <input
-                    type="tel"
-                    maxLength={10}
-                    placeholder="9876543210"
-                    value={whatsappNumber}
-                    onChange={(e) => setWhatsappNumber(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
-                  />
-                </div>
-
-                <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700">PIN Code</label>
+                  <label className="text-xs font-semibold text-slate-700">District</label>
                   <input
                     type="text"
-                    maxLength={6}
-                    placeholder="560001"
-                    value={pincode}
-                    onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="e.g. Bengaluru Urban"
+                    value={district}
+                    onChange={(e) => setDistrict(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-800"
                   />
                 </div>
@@ -621,13 +681,19 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 </div>
 
                 <div className="space-y-1 text-left">
-                  <label className="text-xs font-semibold text-slate-700">State / UT</label>
-                  <input
-                    type="text"
+                  <label className="text-xs font-semibold text-slate-700">State / UT *</label>
+                  <select
+                    required
                     value={state}
                     onChange={(e) => setState(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-800"
-                  />
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-xs text-slate-800"
+                  >
+                    {ALL_INDIAN_STATES_AND_UTS.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="space-y-1 text-left">
@@ -685,7 +751,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span>
-                  I accept the DPDP Act 2023 privacy terms and agree to enroll in this 100% free OpenFrame Education programme.
+                  I accept the DPDP Act 2023 privacy terms and agree to enroll under the 90%-off OpenFrame Education Grant ({formatInr(grantPricing.finalPriceInr)}).
                 </span>
               </label>
 
@@ -711,7 +777,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Complete Free Enrollment</span>
+                      <span>Enroll ({formatInr(grantPricing.finalPriceInr)} · 90% Off)</span>
                     </>
                   )}
                 </button>

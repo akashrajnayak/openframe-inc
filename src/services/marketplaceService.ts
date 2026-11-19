@@ -817,7 +817,9 @@ class MarketplaceService {
       if ((course.libraryCollection || 'standard') !== params.libraryCollection) return false;
     }
     if (params.language && params.language !== 'All') {
-      if ((course.language || 'English').toLowerCase() !== params.language.toLowerCase()) return false;
+      const targetLang = params.language.toLowerCase();
+      const langs = [course.language || 'English', ...(course.supportedLanguages || [])].map((l) => l.toLowerCase());
+      if (!langs.includes(targetLang)) return false;
     }
     if (params.level && params.level !== 'All') {
       if (course.level !== params.level && course.level !== 'All Levels') return false;
@@ -856,8 +858,13 @@ class MarketplaceService {
     }
     if (params.accessType === 'free' && course.price > 799) return false;
     if (params.accessType === 'paid' && course.price <= 0) return false;
-    if ((params as any).board && (params as any).board !== 'All') {
-      const targetBoard = String((params as any).board).toLowerCase();
+    if (params.priceBand && params.priceBand !== 'all') {
+      if (params.priceBand === 'school_300_799' && (course.price < 300 || course.price > 799)) return false;
+      if (params.priceBand === 'degree_800_1499' && (course.price < 800 || course.price > 1499)) return false;
+      if (params.priceBand === 'pg_1500_2500' && (course.price < 1500 || course.price > 2500)) return false;
+    }
+    if (params.board && params.board !== 'All') {
+      const targetBoard = String(params.board).toLowerCase();
       const boards = [course.board, ...(course.boards || [])].filter(Boolean).map((b) => String(b).toLowerCase());
       const tokens = `${course.title} ${course.category} ${course.shortDesc}`.toLowerCase();
       if (!boards.some((b) => b.includes(targetBoard)) && !tokens.includes(targetBoard)) return false;

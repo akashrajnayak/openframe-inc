@@ -33,6 +33,7 @@ import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVi
 import { marketplaceService } from '../services/marketplaceService';
 import { initialBlogPosts } from '../data/initialData';
 import { MarketplaceAutocompleteSuggestion, MarketplaceCourse } from '../types';
+import { compute90PercentCoursePricing, formatInr } from '../utils/pricingEngine';
 import {
   PDF_HERO_EXAMPLE_QUERIES,
   POPULAR_SEARCH_TOPICS,
@@ -914,10 +915,25 @@ export const HomePage: React.FC = () => {
                   </div>
 
                   <div className="px-6 py-4 bg-[#FAF7F2]/60 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <div className="font-semibold text-[#18221F] tabular-nums">
-                      {course.isFree || course.price === 0 ? 'Free Access' : `₹${course.price.toLocaleString('en-IN')}`}
-                      <span className="text-[#64748B] font-normal ml-2">· {course.duration}</span>
-                    </div>
+                    {(() => {
+                      const p = compute90PercentCoursePricing({
+                        category: course.category,
+                        title: course.title,
+                        level: course.level,
+                        educationLevels: course.educationLevels,
+                        existingPrice: course.price,
+                      });
+                      return (
+                        <div className="font-semibold text-[#18221F] tabular-nums flex flex-wrap items-center gap-x-1.5">
+                          <span>{formatInr(p.finalPriceInr)}</span>
+                          <span className="text-[11px] text-slate-400 line-through font-normal">
+                            {formatInr(p.marketBenchmarkPriceInr)}
+                          </span>
+                          <span className="text-[10px] font-bold text-[#123D32]">90% Off</span>
+                          <span className="text-[#64748B] font-normal">· {course.duration}</span>
+                        </div>
+                      );
+                    })()}
                     <Link
                       to={`/marketplace/${course.id}`}
                       className="font-semibold text-[#2563EB] hover:text-blue-800 flex items-center gap-1 whitespace-nowrap"

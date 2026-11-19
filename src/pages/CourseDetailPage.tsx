@@ -48,6 +48,7 @@ import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { useAuth } from '../context/AuthContext';
+import { compute90PercentCoursePricing, formatInr } from '../utils/pricingEngine';
 
 export const CourseDetailPage: React.FC = () => {
   const router = useRouter();
@@ -898,20 +899,45 @@ export const CourseDetailPage: React.FC = () => {
               </div>
 
               {/* Fee & Enrollment Policy Card */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50/80 border border-blue-200 space-y-1.5">
-                <div className="flex items-center space-x-1.5 text-[11px] font-mono uppercase tracking-wider text-blue-700 font-bold">
-                  <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                  <span>{course.price > 0 ? 'Paid Course Checkout' : 'Free Access Programme'}</span>
-                </div>
-                <div className="text-xl font-extrabold text-slate-900 leading-tight tabular-nums">
-                  {course.price > 0 ? `₹${course.price.toLocaleString()}` : 'Free'}
-                </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed pt-0.5">
-                  {course.price === 0
-                    ? 'Complimentary instant enrollment. Watch curated lectures, complete Quinn AI verification quizzes, and earn certificate eligibility.'
-                    : 'Secure one-time checkout via Razorpay. Unlocks all curriculum modules, practical project review, presentation evaluation, and verified certification.'}
-                </p>
-              </div>
+              {(() => {
+                const pricing = compute90PercentCoursePricing({
+                  category: course.category,
+                  title: course.title,
+                  level: course.level,
+                  educationLevels: course.educationLevels,
+                  existingPrice: course.price,
+                });
+                return (
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50/80 to-blue-50/70 border border-emerald-200/80 space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-[11px] font-mono uppercase tracking-wider text-[#123D32] font-bold">
+                      <span className="inline-flex items-center space-x-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#123D32]" />
+                        <span>90% OpenFrame Grant · Verified Track</span>
+                      </span>
+                      <span className="text-emerald-800">{pricing.bandLabel}</span>
+                    </div>
+                    <div className="flex items-baseline gap-2.5 tabular-nums">
+                      <span className="text-2xl font-extrabold text-slate-900 leading-tight">
+                        {formatInr(pricing.finalPriceInr)}
+                      </span>
+                      <span className="text-sm font-medium text-slate-400 line-through">
+                        {formatInr(pricing.marketBenchmarkPriceInr)}
+                      </span>
+                      <span className="text-xs font-bold text-[#123D32]">
+                        {pricing.discountPercent}% Off Market
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed pt-0.5">
+                      One-time subsidized certification fee (₹300–₹2,500 range). Includes structured Parts &amp; Modules, YouTube lecture integration, Quinn AI verification test (≥70%), and QR-verified official certificate upon completing all 7 mandatory address &amp; contact verification fields.
+                    </p>
+                    {(course.board || course.gradeLevel) && (
+                      <div className="pt-1 text-[11px] font-medium text-[#14213D]">
+                        {[course.board, course.gradeLevel, course.language].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* 7 Structured Course Action Buttons */}
               <div className="space-y-2.5 pt-1">
@@ -951,10 +977,21 @@ export const CourseDetailPage: React.FC = () => {
 
                 <button
                   onClick={() => setIsRegModalOpen(true)}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md shadow-blue-500/25 cursor-pointer"
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md shadow-blue-500/25 cursor-pointer tabular-nums"
                 >
                   <GraduationCap className="w-4 h-4 text-cyan-200" />
-                  <span>{course.price > 0 ? `4. Enroll & Pay ₹${course.price.toLocaleString()}` : '4. Enroll Now (Free)'}</span>
+                  <span>
+                    4. Enroll &amp; Pay{' '}
+                    {formatInr(
+                      compute90PercentCoursePricing({
+                        category: course.category,
+                        title: course.title,
+                        level: course.level,
+                        educationLevels: course.educationLevels,
+                        existingPrice: course.price,
+                      }).finalPriceInr
+                    )}
+                  </span>
                 </button>
 
                 <Link
