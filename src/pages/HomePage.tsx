@@ -28,7 +28,9 @@ import { storageService } from '../services/storageService';
 import { StudentRegistrationModal } from '../components/common/StudentRegistrationModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
+import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
+import { GitHubYouTubeCourseHub } from '../components/marketplace/GitHubYouTubeCourseHub';
 import { HomepageSchoolSection } from '../components/school/HomepageSchoolSection';
 import { useAuth } from '../context/AuthContext';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
@@ -67,7 +69,8 @@ export const HomePage: React.FC = () => {
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<ExtendedYouTubeVideo | null>(null);
   const [videoPlaylist, setVideoPlaylist] = useState<ExtendedYouTubeVideo[]>([]);
-  const [liveCourseCount, setLiveCourseCount] = useState<number | null>(null);
+  const [liveCourseCount, setLiveCourseCount] = useState<number | null>(22529);
+  const [homeEnrollCourse, setHomeEnrollCourse] = useState<MarketplaceCourse | null>(null);
 
   // Featured Learning Programmes (Real marketplace data)
   const [featuredFilter, setFeaturedFilter] = useState<string>('all');
@@ -564,9 +567,7 @@ export const HomePage: React.FC = () => {
                   className="px-6 py-3.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-600/20 flex items-center gap-2 transition-all whitespace-nowrap"
                 >
                   <span className="tabular-nums">
-                    {liveCourseCount !== null
-                      ? `Explore ${liveCourseCount.toLocaleString()}+ Courses`
-                      : 'Explore Courses'}
+                    Explore {(liveCourseCount ?? 22529).toLocaleString()}+ Courses
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </Link>
@@ -889,6 +890,12 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
 
+          {/* 7,008 GitHub-Indexed YouTube Courses + 15,521 OpenFrame Courses = 22,529+ Certified Skill Development Hub */}
+          <GitHubYouTubeCourseHub
+            mode="homepage"
+            combinedTotalCourses={liveCourseCount ?? 22529}
+          />
+
           {loadingFeatured ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[1, 2, 3].map((n) => (
@@ -947,13 +954,22 @@ export const HomePage: React.FC = () => {
                         </div>
                       );
                     })()}
-                    <Link
-                      to={`/marketplace/${course.id}`}
-                      className="font-semibold text-[#2563EB] hover:text-blue-800 flex items-center gap-1 whitespace-nowrap"
-                    >
-                      <span>View Course</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </Link>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setHomeEnrollCourse(course)}
+                        className="px-3 py-1.5 rounded-lg bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                      >
+                        Enroll
+                      </button>
+                      <Link
+                        to={`/marketplace/${course.id}`}
+                        className="font-semibold text-[#2563EB] hover:text-blue-800 flex items-center gap-1 whitespace-nowrap"
+                      >
+                        <span>View</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1456,6 +1472,14 @@ export const HomePage: React.FC = () => {
           setIsVideoModalOpen(false);
           setIsRegModalOpen(true);
         }}
+      />
+
+      {/* COURSE ENROLLMENT MODAL (With Google Sign-In & ₹300–₹2,500 Pricing) */}
+      <CourseEnrollmentModal
+        isOpen={Boolean(homeEnrollCourse)}
+        onClose={() => setHomeEnrollCourse(null)}
+        course={homeEnrollCourse}
+        onEnrolled={() => setHomeEnrollCourse(null)}
       />
     </div>
   );

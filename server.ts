@@ -35,6 +35,10 @@ import {
   LKG_TO_PG_CURRICULUM_COURSES,
   LKG_TO_PG_YOUTUBE_SEEDS,
 } from './src/data/lkgToPgCurriculumData';
+import {
+  getAll7008GitHubYouTubeCourses,
+  resolveGitHubYouTubeCourseById,
+} from './src/data/githubYoutubeCoursesCatalog';
 import type {
   MarketplaceCourse,
   MarketplaceAutocompleteSuggestion,
@@ -820,116 +824,19 @@ function getBaseCatalogIndex(): BaseCatalogIndex {
     console.warn('Could not read corporate_training_courses catalog:', err);
   }
 
-  // Inject Featured Ramotion Swift UI Animations, Graphs & Charts Course Pack (with downloadable ZIPs)
-  const animationMasterCourses: any[] = [
-    {
-      id: 'OF-CRS-ANIM-001',
-      aliasId: 'swift-ui-animation-components-and-libraries',
-      title: 'Swift UI Animation Components, Graphs & Charts Masterclass (ZIP + Interactive Lab)',
-      category: 'Animation',
-      categories: ['Animation', 'iOS Development', 'UI/UX Design', 'Data Analytics'],
-      categoryGroup: 'Creative',
-      subcategory: 'UI Motion, Charts & Swift Components',
-      level: 'All Levels',
-      duration: '14h 30m',
-      estimatedHours: 14.5,
-      pricingTier: 'Academic Access',
-      price: 0,
-      status: 'Published',
-      courseType: 'standard',
-      contentType: 'Full course',
-      topic: 'Swift UI Animation Components, Interactive Graphs & Charts',
-      instructorName: 'Ramotion Open-Source & OpenFrame Design Faculty',
-      language: 'English',
-      rating: 4.9,
-      enrolledCount: 98500,
-      isPopular: true,
-      isTrending: true,
-      isNew: true,
-      isRecommended: true,
-      certificateEligibility: true,
-      thumbnailUrl: '/assets/images/swift_animation_course_hero.jpg',
-      imageUrl: '/assets/images/swift_animation_course_hero.jpg',
-      shortDesc: 'Complete downloadable ZIP course pack from Ramotion/swift-ui-animation-components-and-libraries plus 12 animated graphs & charts and all 17 interactive Swift UI animation components.',
-      description: 'Includes the full source ZIP archives (AppDelegate.swift, README.md, LICENSE, 17 Swift UI animation libraries, 12 interactive animated graphs & charts, and Spring Physics solvers).',
-      learningObjectives: [
-        'Download and integrate all 17 Ramotion Swift UI animation components (Folding Cell, Circle Menu, Fluid Slider, Paper Switch, Garland View, and more)',
-        'Build 12 interactive animated graphs & charts (Line, Area, Bar, Stacked Bar, Donut/Pie, Radial Rings, Radar, Scatter, Candlestick, Heatmap, Funnel, Treemap, Oscilloscope)',
-        'Master damped harmonic spring physics, cubic-bezier easing curves, and 60fps compositor transitions',
-        'Install UI animation modules via CocoaPods, Carthage, and Swift Package Manager'
-      ],
-      skillsAcquired: ['Swift UI Animation', 'Animated Graphs & Charts', 'CoreAnimation', 'Spring Physics', 'iOS UIKit', 'Interactive Data Visualization'],
-      practicalProjects: [
-        'Interactive 12-Chart Telemetry & Financial Analytics Dashboard',
-        'Ramotion Folding Cell & Circle Menu iOS Prototype (from Course ZIP)',
-        'Harmonic Spring Motion & Fluid Slider Control Component'
-      ],
-      modules: [
-        { moduleNumber: 1, title: 'Course ZIP Setup, AppDelegate & Package Managers', duration: '1h 45m', lessons: ['Repository Structure & MIT License', 'CocoaPods, Carthage & SPM Setup', 'AppDelegate.swift & Project Scaffolding'] },
-        { moduleNumber: 2, title: 'All 12 Animated Graphs & Charts Masterclass', duration: '4h 30m', lessons: ['Line, Gradient Area & Grouped/Stacked Bars', 'Donut, Pie & Radial Activity Rings', 'Radar Web, Scatter Bubble & Candlestick OHLC', 'Heatmap Matrix, Funnel, Treemap & Live Waveform'] },
-        { moduleNumber: 3, title: '17 Ramotion Swift UI Animation Components', duration: '6h 15m', lessons: ['Circular Carousel, CardSlider, Gliding Collection & Garland View', 'Folding Cell, Expanding Collection & Elongation Preview', 'Animated Tab Bar, Adaptive Tab Bar, Navigation Toolbar & Stack', 'Circle Menu, Paper Switch, Paper Onboarding, Reel Search & Fluid Slider'] },
-        { moduleNumber: 4, title: 'Spring Physics & 60fps Compositor Optimization', duration: '2h 00m', lessons: ['Harmonic Damped Spring Solver', 'Cubic-Bezier Timing Curves & GPU Transforms'] }
-      ],
-      assessmentMethod: 'Interactive Studio Simulation + Quinn AI Quiz + Capstone Submission',
-      certificateNote: 'Verified OpenFrame Education Certificate eligible upon completing quiz and practical capstone.',
-      keywords: ['swift', 'animation', 'zip', 'ramotion', 'graphs', 'charts', 'folding cell', 'fluid slider', 'circle menu', 'ios', 'ui'],
-      publishedDate: '2026-11-15',
-    },
-    {
-      id: 'OF-CRS-ANIM-002',
-      title: 'Interactive Data Visualization: All 12 Graphs & Charts Animation Studio',
-      category: 'Data Analytics',
-      categories: ['Data Analytics', 'Animation', 'UI/UX Design'],
-      categoryGroup: 'Technology',
-      subcategory: 'Animated Charts & Graphs',
-      level: 'Intermediate',
-      duration: '8h 20m',
-      estimatedHours: 8.3,
-      pricingTier: 'Academic Access',
-      price: 0,
-      status: 'Published',
-      courseType: 'standard',
-      contentType: 'Workshop',
-      topic: 'Animated Charts & Graphs',
-      instructorName: 'OpenFrame Visualization Faculty',
-      language: 'English',
-      rating: 4.9,
-      enrolledCount: 84200,
-      isPopular: true,
-      isTrending: true,
-      isNew: true,
-      certificateEligibility: true,
-      thumbnailUrl: '/assets/images/charts_graphs_showcase.jpg',
-      imageUrl: '/assets/images/charts_graphs_showcase.jpg',
-      shortDesc: 'Hands-on workshop covering Line, Area, Bar, Pie/Donut, Radial Rings, Radar, Scatter, Candlestick, Heatmap, Funnel, Treemap, and Live Waveform animations with downloadable ZIP pack.',
-      learningObjectives: [
-        'Animate SVG & Swift Charts paths using spring, elastic, and cubic-out easing curves',
-        'Build interactive tooltips, stacked/grouped toggles, and real-time 60fps waveform streams'
-      ],
-      skillsAcquired: ['Line & Area Charts', 'Candlestick OHLC', 'Radar Plots', 'Heatmaps & Treemaps', 'SVG Motion'],
-      practicalProjects: ['Live Multi-Dataset Animated Analytics Studio'],
-      modules: [
-        { moduleNumber: 1, title: 'Time Series, Bars & Proportional Charts', duration: '4h 10m', lessons: ['Multi-Series Line & Area Reveal', 'Grouped vs Stacked Bars & Donut Arcs'] },
-        { moduleNumber: 2, title: 'Financial, Spatial & Streaming Charts', duration: '4h 10m', lessons: ['OHLC Candlestick, Heatmap & Treemap', '60fps Oscilloscope & Funnel Transitions'] }
-      ],
-      assessmentMethod: 'Practical Chart Lab + Quiz',
-      certificateNote: 'Verified OpenFrame Education Certificate eligible.',
-      keywords: ['graphs', 'charts', 'animation', 'candlestick', 'radar', 'heatmap', 'treemap', 'zip'],
-      publishedDate: '2026-11-15',
-    },
-  ];
-  for (const animCourse of animationMasterCourses) {
-    if (!normalizedList.some((c) => c.id === animCourse.id)) {
-      normalizedList.unshift(normalizeLoadedCourse(animCourse));
-    }
-  }
-
   // Inject LKG to Post-Graduation & All-India Boards (Karnataka KSEAB/DPUE, NCERT, CBSE, ICSE, NIOS, State Boards, UG/PG/PhD)
   for (let i = LKG_TO_PG_CURRICULUM_COURSES.length - 1; i >= 0; i--) {
     const lkgCourse = LKG_TO_PG_CURRICULUM_COURSES[i];
     if (!normalizedList.some((c) => c.id === lkgCourse.id)) {
       normalizedList.unshift(normalizeLoadedCourse(lkgCourse));
     }
+  }
+
+  // Append 7,008 GitHub-Indexed YouTube Certified Skill Development Courses (wpacademy/educational-youtube-channels)
+  // Combined catalog: 15,521 OpenFrame + 7,008 GitHub YouTube = 22,529 total indexed courses
+  const githubYtCourses = getAll7008GitHubYouTubeCourses();
+  for (let i = 0; i < githubYtCourses.length; i++) {
+    normalizedList.push(githubYtCourses[i]);
   }
 
   const byId = new Map<string, MarketplaceCourse>();
@@ -1929,6 +1836,9 @@ async function startServer() {
     const index = getBaseCatalogIndex();
     const direct = index.byId.get(id);
     if (direct) return res.json({ course: direct });
+
+    const githubYtDirect = resolveGitHubYouTubeCourseById(rawId);
+    if (githubYtDirect) return res.json({ course: githubYtDirect });
 
     const match = id.match(/^of-crs-0*(\d+)$/);
     if (match && match[1]) {

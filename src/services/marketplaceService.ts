@@ -55,6 +55,11 @@ import {
 } from '../utils/searchIntelligence';
 import { compute90PercentCoursePricing } from '../utils/pricingEngine';
 import { LKG_TO_PG_CURRICULUM_COURSES } from '../data/lkgToPgCurriculumData';
+import {
+  GITHUB_YOUTUBE_COURSE_COUNT,
+  queryGitHubYouTubeCourses,
+  resolveGitHubYouTubeCourseById,
+} from '../data/githubYoutubeCoursesCatalog';
 
 export {
   ALL_90_CATEGORIES,
@@ -611,11 +616,11 @@ class MarketplaceService {
       baseStats = await this.fetchBaseStatsFromServer(excludeIds);
     } catch {
       baseStats = {
-        totalBase: 15500 - excludeIds.length,
-        published: 13798,
-        paidCourses: 12528,
-        youtubeCourses: 15500,
-        videoPlaylists: 0,
+        totalBase: 15521 + GITHUB_YOUTUBE_COURSE_COUNT - excludeIds.length,
+        published: 13819 + GITHUB_YOUTUBE_COURSE_COUNT,
+        paidCourses: 15521 + GITHUB_YOUTUBE_COURSE_COUNT,
+        youtubeCourses: 15519 + GITHUB_YOUTUBE_COURSE_COUNT,
+        videoPlaylists: 2749,
         categoryCounts: {},
       };
     }
@@ -1067,13 +1072,30 @@ class MarketplaceService {
       }
     } catch (err) {
       console.warn('Server base search unreachable, using local fallback slice:', err);
-      const fallbackTotal = 15500;
-      serverTotal = fallbackTotal;
-      if (remainingSlots > 0) {
-        const baseIdxStart = Math.max(1, startGlobal - fsTotal + 1);
-        for (let i = 0; i < remainingSlots; i++) {
-          if (baseIdxStart + i <= fallbackTotal) {
-            serverCourses.push(synthesizeBaseCourse(baseIdxStart + i));
+      if (params.libraryCollection === 'github_youtube_7008') {
+        const localYt = queryGitHubYouTubeCourses({
+          category: params.category,
+          language: params.language,
+          channel: params.channel,
+          query: params.query,
+          page,
+          pageSize,
+        });
+        serverTotal = localYt.total;
+        serverCourses = localYt.courses.slice(0, remainingSlots);
+      } else {
+        const fallbackTotal = 15521 + GITHUB_YOUTUBE_COURSE_COUNT;
+        serverTotal = fallbackTotal;
+        if (remainingSlots > 0) {
+          const baseIdxStart = Math.max(1, startGlobal - fsTotal + 1);
+          for (let i = 0; i < remainingSlots; i++) {
+            const idx = baseIdxStart + i;
+            if (idx <= GITHUB_YOUTUBE_COURSE_COUNT) {
+              const ytCourse = resolveGitHubYouTubeCourseById(`OF-YT-${String(idx).padStart(4, '0')}`);
+              if (ytCourse) serverCourses.push(ytCourse);
+            } else if (idx <= fallbackTotal) {
+              serverCourses.push(synthesizeBaseCourse(idx - GITHUB_YOUTUBE_COURSE_COUNT));
+            }
           }
         }
       }
@@ -1173,17 +1195,31 @@ class MarketplaceService {
    * Resolves single course by ID from local modeled/YT cache, Firestore, AI paths, server base index, YouTube resolver, or fallback synthesis.
    */
   async getCourseById(id: string): Promise<MarketplaceCourse | null> {
-    const cleanId = id.trim();
+    const rawTrimmed = String(id || '').trim();
+    const decodedId = (() => {
+      try {
+        return decodeURIComponent(rawTrimmed).trim();
+      } catch {
+        return rawTrimmed;
+      }
+    })();
+    const cleanId = decodedId.replace(/^video\//i, '').trim();
     if (!cleanId) return null;
     const lowerId = cleanId.toLowerCase();
 
     // 0. Check local modeled/YouTube caches & LKG-to-PG static curriculum first
-    const modeledLocal = readLocalCourseMap(MODELED_COURSES_CACHE_KEY)[lowerId];
-    if (modeledLocal) return modeledLocal;
-    const ytLocal = readLocalCourseMap(YT_COURSE_CACHE_KEY)[lowerId];
-    if (ytLocal) return ytLocal;
+    const modeledMap = readLocalCourseMap(MODELED_COURSES_CACHE_KEY);
+    if (modeledMap[lowerId]) return modeledMap[lowerId];
+    const ytMap = readLocalCourseMap(YT_COURSE_CACHE_KEY);
+    if (ytMap[lowerId]) return ytMap[lowerId];
+    if (ytMap[`yt-${lowerId}`]) return ytMap[`yt-${lowerId}`];
+    const strippedYtKey = lowerId.replace(/^yt-/, '');
+    if (ytMap[strippedYtKey]) return ytMap[strippedYtKey];
+
     const lkgMatch = LKG_TO_PG_CURRICULUM_COURSES.find((c) => c.id.toLowerCase() === lowerId);
     if (lkgMatch) return lkgMatch;
+    const githubYtMatch = resolveGitHubYouTubeCourseById(cleanId);
+    if (githubYtMatch) return githubYtMatch;
 
     // 1. Check Firestore directly
     try {
@@ -1211,7 +1247,7 @@ class MarketplaceService {
       }
     }
 
-    // 2. Check server indexed base catalog (handles OF-AI-*, OF-CRS-ANIM-*, OF-CRS-00001..16000, yt-*, disc-vid-*, disc-pl-*)
+    // 2. Check server indexed base catalog (handles OF-AI-*, OF-YT-*, OF-CRS-00001..16000, yt-*, disc-vid-*, disc-pl-*)
     try {
       const res = await fetch(`/api/marketplace/base-course/${encodeURIComponent(cleanId)}`);
       if (res.ok) {
@@ -1230,27 +1266,29 @@ class MarketplaceService {
       }
     }
 
-    // 3. Client-side YouTube ID fallback so bookmarked/modeled YouTube lessons never show Course Not Found
-    const ytMatch = cleanId.match(/^(?:yt-|disc-vid-)([A-Za-z0-9_-]{6,20})$/i);
+    // 3. Client-side YouTube ID fallback (supports yt-<vid>, disc-vid-<vid>, or bare 11-char YouTube ID)
+    const ytMatch =
+      cleanId.match(/^(?:yt-|disc-vid-|video-)([A-Za-z0-9_-]{6,20})$/i) ||
+      cleanId.match(/^([A-Za-z0-9_-]{11})$/);
     if (ytMatch?.[1]) {
       const vid = ytMatch[1];
       const thumb = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
       const ytPriced = compute90PercentCoursePricing({
         category: 'Digital Skills & Productivity',
-        title: `OpenFrame YouTube Lesson (${vid})`,
+        title: `OpenFrame YouTube Certified Course (${vid})`,
         level: 'Beginner',
         pricingTier: 'Starter',
       });
       return {
-        id: cleanId,
-        title: `OpenFrame YouTube Lesson (${vid})`,
+        id: cleanId.startsWith('yt-') || cleanId.startsWith('disc-vid-') ? cleanId : `yt-${vid}`,
+        title: `OpenFrame YouTube Certified Course (${vid})`,
         category: 'Digital Skills & Productivity',
         categories: ['Digital Skills & Productivity'],
         categoryGroup: 'Technology',
         subcategory: 'Video Tutorial',
         level: 'Beginner',
         duration: 'Self-Paced',
-        estimatedHours: 1,
+        estimatedHours: 2,
         pricingTier: ytPriced.pricingTier,
         price: ytPriced.finalPriceInr,
         marketBenchmarkPrice: ytPriced.marketBenchmarkPrice,
@@ -1269,21 +1307,21 @@ class MarketplaceService {
         certificateEligibility: true,
         thumbnailUrl: thumb,
         imageUrl: thumb,
-        shortDesc: 'Self-paced OpenFrame video tutorial with verification quiz and capstone tracking.',
-        description: 'Self-paced OpenFrame YouTube tutorial structured with guided objectives, practice checks, and certificate assessment.',
-        learningObjectives: ['Watch the full guided walkthrough', 'Verify understanding with the quiz'],
+        shortDesc: 'Self-paced OpenFrame video course with verification quiz, practical project, score, and certificate tracking.',
+        description: 'Self-paced OpenFrame YouTube course structured with guided objectives, practice checks, project submission, and official certification.',
+        learningObjectives: ['Watch the full guided walkthrough', 'Verify understanding with the quiz', 'Submit practical project for certification'],
         targetAudience: 'Students, professionals, and self-paced learners',
-        skillsAcquired: ['Practical Mastery'],
-        practicalProjects: ['Guided Concept Practice & Quiz'],
-        assessmentMethod: 'Verification Quiz & Guided Review',
-        certificateNote: 'Eligible for OpenFrame Certificate upon completing the video lesson and verification quiz.',
+        skillsAcquired: ['Practical Mastery', 'Applied Problem Solving'],
+        practicalProjects: ['Guided Concept Practice & Capstone Submission'],
+        assessmentMethod: 'Verification Quiz + Project Submission + Score Evaluation',
+        certificateNote: 'Eligible for OpenFrame Certificate upon completing the video lesson, quiz, and project.',
         updatedAt: new Date().toISOString(),
         modules: [
           {
             moduleNumber: 1,
             title: 'Video Lesson & Practical Review',
-            duration: '1h',
-            lessons: ['Core Video Lecture', 'Practice Application'],
+            duration: '2 Hours',
+            lessons: ['Core Video Lecture', 'Practice Application', 'Verification Quiz Prep'],
             videoIds: [vid],
           },
         ],
@@ -1293,7 +1331,7 @@ class MarketplaceService {
             videoId: vid,
             youtubeId: vid,
             youtubeUrl: `https://www.youtube.com/watch?v=${vid}`,
-            title: `OpenFrame YouTube Lesson (${vid})`,
+            title: `OpenFrame YouTube Certified Course (${vid})`,
             channelTitle: 'YouTube Educator',
             thumbnail: thumb,
             thumbnailUrl: thumb,

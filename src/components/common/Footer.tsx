@@ -156,7 +156,6 @@ export const Footer: React.FC = () => {
               <li><Link to="/education" className="hover:text-white transition-colors">Learning Programmes</Link></li>
               <li><Link to="/school" className="hover:text-white transition-colors">School Education (LKG–12)</Link></li>
               <li><Link to="/chatbot" className="hover:text-white transition-colors">Quinn AI Tutor</Link></li>
-              <li><Link to="/animation-course" className="hover:text-white transition-colors">Swift UI &amp; Charts Lab</Link></li>
             </ul>
           </div>
 

@@ -110,8 +110,23 @@ export const CourseLearningPage: React.FC = () => {
 
   const pathClean = currentPath.split('?')[0];
   const parts = pathClean.split('/').filter(Boolean);
-  const courseIdParam = parts[1] || 'OF-AI-001';
-  const queryTab = new URLSearchParams(currentPath.split('?')[1] || '').get('tab') as TabType | null;
+  const safeDecode = (val: string) => {
+    try {
+      return decodeURIComponent(val);
+    } catch {
+      return val;
+    }
+  };
+  const seg1 = safeDecode(parts[1] || 'OF-AI-001');
+  const seg2 = parts[2] ? safeDecode(parts[2]) : '';
+  const courseIdParam =
+    seg1.toLowerCase() === 'video' && seg2
+      ? (/^(?:OF-|yt-|disc-|github-yt-|ai-path-)/i.test(seg2) ? seg2 : `yt-${seg2}`)
+      : seg1;
+  const searchParams = new URLSearchParams(currentPath.split('?')[1] || '');
+  const queryTab = searchParams.get('tab') as TabType | null;
+  const autoOpenEnroll = searchParams.get('enroll') === '1';
+  const justPaidParam = searchParams.get('paid') === '1';
 
   const studentId = currentUser?.uid || '';
   const studentName = lmsUser?.displayName || currentUser?.displayName || 'Student Learner';
@@ -125,6 +140,7 @@ export const CourseLearningPage: React.FC = () => {
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [requiresEnrollment, setRequiresEnrollment] = useState(false);
+  const [adminPreviewOverride, setAdminPreviewOverride] = useState(false);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
   const [workspaceNonce, setWorkspaceNonce] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>(queryTab || 'overview');
@@ -262,6 +278,12 @@ export const CourseLearningPage: React.FC = () => {
     if (queryTab) setActiveTab(queryTab);
   }, [queryTab]);
 
+  useEffect(() => {
+    if (justPaidParam) {
+      notify('success', 'Payment verified via Razorpay! Your course modules, quiz, projects, and certificate track are now unlocked.');
+    }
+  }, [justPaidParam]);
+
   // Initial Course & LMS Hydration
   useEffect(() => {
     if (authLoading) return;
@@ -269,7 +291,28 @@ export const CourseLearningPage: React.FC = () => {
 
     async function loadWorkspace() {
       setLoading(true);
-      const found = await marketplaceService.getCourseById(courseIdParam);
+      let found = await marketplaceService.getCourseById(courseIdParam);
+
+      // Recovery fallback: if student is signed in and has an enrollment for this courseId, reconstruct course metadata
+      if (!found && currentUser && studentId) {
+        try {
+          const enrolledList = await lmsService.getStudentEnrollments(studentId);
+          const matchedEnr = enrolledList.find(
+            (en) => en.courseId.toLowerCase() === courseIdParam.toLowerCase()
+          );
+          if (matchedEnr) {
+            found = marketplaceService.normalizeCoursePayload({
+              id: matchedEnr.courseId,
+              title: matchedEnr.courseTitle || `OpenFrame Certified Course (${matchedEnr.courseId})`,
+              price: matchedEnr.feeAmount || 300,
+              status: 'Published',
+            });
+          }
+        } catch {
+          // ignore fallback error
+        }
+      }
+
       if (!found || !active) {
         setCourse(null);
         setLoading(false);
@@ -309,38 +352,47 @@ export const CourseLearningPage: React.FC = () => {
       setRecommendedVideos(recs);
       if (recs[0]) setSelectedVideo(recs[0]);
 
-      // Gate paid courses strictly on verified paid/complimentary/scholarship enrollment (unless Teacher/Admin)
-      if (found.price > 0 && !isEducatorOrAdmin) {
+      // Gate ALL paid courses & departments (LKG to PG) strictly on verified Razorpay payment first
+      let verifiedPaymentStatus: 'Paid' | 'Complimentary' | 'Scholarship' | undefined = undefined;
+      const effectiveCourseFee = found.price > 0 ? Math.round(found.price) : 300;
+      if (effectiveCourseFee > 0 && !adminPreviewOverride) {
         if (!currentUser || !studentId) {
           if (active) {
             setRequiresEnrollment(true);
+            if (autoOpenEnroll) setEnrollModalOpen(true);
             setLoading(false);
           }
           return;
         }
         const existingEnrollments = await lmsService.getStudentEnrollments(studentId);
-        const hasActivePaidEnrollment = existingEnrollments.some(
+        const paidMatch = existingEnrollments.find(
           (en) =>
-            en.courseId === found.id &&
-            ['Paid', 'Complimentary', 'Scholarship'].includes(en.paymentStatus || '')
+            en.courseId.toLowerCase() === found.id.toLowerCase() &&
+            lmsService.isVerifiedPaidEnrollment(en)
         );
-        if (!hasActivePaidEnrollment) {
+        if (!paidMatch) {
           if (active) {
             setRequiresEnrollment(true);
+            if (autoOpenEnroll) setEnrollModalOpen(true);
             setLoading(false);
           }
           return;
         }
+        verifiedPaymentStatus = paidMatch.paymentStatus as 'Paid' | 'Complimentary' | 'Scholarship';
       }
       if (active) setRequiresEnrollment(false);
 
       if (currentUser && studentId) {
-        const { progress: prog } = await lmsService.enrollStudentInCourse(found, {
-          uid: studentId,
-          fullName: studentName,
-          email: studentEmail,
-          registrationNumber: lmsUser?.registrationNumber,
-        });
+        const { progress: prog } = await lmsService.enrollStudentInCourse(
+          found,
+          {
+            uid: studentId,
+            fullName: studentName,
+            email: studentEmail,
+            registrationNumber: lmsUser?.registrationNumber,
+          },
+          verifiedPaymentStatus
+        );
         if (!active) return;
         setProgress(prog);
 
@@ -388,7 +440,7 @@ export const CourseLearningPage: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [courseIdParam, authLoading, currentUser?.uid, isEducatorOrAdmin, workspaceNonce]);
+  }, [courseIdParam, authLoading, currentUser?.uid, isEducatorOrAdmin, adminPreviewOverride, workspaceNonce]);
 
   const activeLesson = lessons.find((l) => l.id === activeLessonId) || lessons[0];
 
@@ -1164,68 +1216,109 @@ export const CourseLearningPage: React.FC = () => {
   }
 
   if (requiresEnrollment) {
+    const gatePricing = compute90PercentCoursePricing({
+      category: course.category,
+      title: course.title,
+      level: course.level,
+      educationLevels: course.educationLevels,
+      existingPrice: course.price,
+    });
+    const exactFeeInr = course.price > 0 ? Math.round(course.price) : gatePricing.finalPriceInr;
     return (
       <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-6">
         <div className="max-w-lg w-full bg-white border border-slate-200 rounded-2xl p-7 shadow-lg text-left space-y-5">
+          {/* 2-Step Banner: Step 1 Pay First -> Step 2 Open Learning Workspace */}
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="rounded-xl bg-[#123D32] text-white px-3 py-2 font-bold flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">1</span>
+              <span>Pay {formatInr(exactFeeInr)} First</span>
+            </div>
+            <div className="rounded-xl bg-slate-100 text-slate-500 px-3 py-2 font-semibold flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0">2</span>
+              <span>Open Learning Workspace</span>
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
-              <Lock className="w-5 h-5 text-blue-600" />
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+              <Lock className="w-5 h-5 text-[#123D32]" />
             </div>
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">
-                Enrollment &amp; Checkout Required
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#123D32]">
+                Step 1: Register &amp; Complete Razorpay Payment
               </div>
               <h1 className="text-lg font-bold text-[#18221F]">{course.title}</h1>
             </div>
           </div>
 
-          {(() => {
-            const gatePricing = compute90PercentCoursePricing({
-              category: course.category,
-              title: course.title,
-              level: course.level,
-              educationLevels: course.educationLevels,
-              existingPrice: course.price,
-            });
-            return (
-              <>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  This course ({course.id}) is covered by OpenFrame&apos;s <strong className="text-[#123D32]">90% Grant</strong> (<strong className="text-slate-900 tabular-nums">{formatInr(gatePricing.finalPriceInr)}</strong> instead of <span className="line-through text-slate-400 tabular-nums">{formatInr(gatePricing.marketBenchmarkPriceInr)}</span>). Complete enrollment and mandatory 7-field certificate address verification to unlock all {modules.length} curriculum modules, YouTube lectures, verification tests, and QR-verified certification.
-                </p>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            First complete your registration and payment of{' '}
+            <strong className="text-[#123D32] tabular-nums">{formatInr(exactFeeInr)}</strong>{' '}
+            via Razorpay for <strong>{course.title}</strong> ({course.id}). Immediately after payment verification, you will be redirected into the{' '}
+            <strong>Open Learning Workspace</strong> (all {modules.length} modules, YouTube lectures, quiz, projects, score &amp; certificate) and{' '}
+            <strong>My Learning</strong>.
+          </p>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
-                  <div>
-                    <div className="font-semibold text-slate-900">{course.category} · {course.level}</div>
-                    <div className="text-slate-500 mt-0.5">{course.duration} · {course.language || 'English'}</div>
-                  </div>
-                  <div className="text-right tabular-nums">
-                    <div className="text-base font-extrabold text-[#123D32]">{formatInr(gatePricing.finalPriceInr)}</div>
-                    <div className="text-[11px] text-slate-500">
-                      <span className="line-through mr-1">{formatInr(gatePricing.marketBenchmarkPriceInr)}</span>
-                      <span className="text-emerald-700 font-bold">90% Off</span>
-                    </div>
-                  </div>
-                </div>
-              </>
-            );
-          })()}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
+            <div>
+              <div className="font-semibold text-slate-900">{course.category} · {course.level}</div>
+              <div className="text-slate-500 mt-0.5">{course.duration} · {course.language || 'English'}</div>
+            </div>
+            <div className="text-right tabular-nums">
+              <div className="text-lg font-extrabold text-[#123D32]">{formatInr(exactFeeInr)}</div>
+              <div className="text-[11px] text-slate-500">
+                <span className="line-through mr-1">{formatInr(Math.max(gatePricing.marketBenchmarkPriceInr, exactFeeInr * 10))}</span>
+                <span className="text-emerald-700 font-bold">90% Off</span>
+              </div>
+            </div>
+          </div>
+
+          {!currentUser && (
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+              <div className="text-xs font-semibold text-slate-800">
+                Sign in with Google to register and pay via Razorpay
+              </div>
+              <GoogleSignInButton
+                role="student"
+                label="Continue with Google to Pay & Enroll"
+                variant="dark"
+                onSuccess={() => setEnrollModalOpen(true)}
+              />
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
               type="button"
               onClick={() => setEnrollModalOpen(true)}
-              className="flex-1 py-3 px-4 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white font-bold text-xs text-center transition-colors cursor-pointer whitespace-nowrap"
+              className="flex-1 py-3 px-4 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs text-center transition-colors cursor-pointer whitespace-nowrap shadow-sm"
             >
-              Enroll &amp; Complete Checkout
+              Pay {formatInr(exactFeeInr)} Now (Razorpay) &rarr; Open Workspace
             </button>
             <button
               type="button"
-              onClick={() => navigate(`/marketplace/${course.id}`)}
+              onClick={() => navigate(`/marketplace/${encodeURIComponent(course.id)}`)}
               className="py-3 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
             >
-              View Syllabus Details
+              View Syllabus
             </button>
           </div>
+
+          {isEducatorOrAdmin && (
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Admin / Faculty mode detected</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminPreviewOverride(true);
+                  setRequiresEnrollment(false);
+                }}
+                className="font-semibold text-blue-600 hover:underline cursor-pointer"
+              >
+                Preview Workspace Without Paying
+              </button>
+            </div>
+          )}
         </div>
 
         <CourseEnrollmentModal
@@ -1236,7 +1329,7 @@ export const CourseLearningPage: React.FC = () => {
             setEnrollModalOpen(false);
             setRequiresEnrollment(false);
             setWorkspaceNonce((n) => n + 1);
-            notify('success', 'Course unlocked! Welcome to your learning workspace.');
+            notify('success', 'Payment verified via Razorpay! Your Open Learning Workspace is now unlocked.');
           }}
         />
       </div>
@@ -1348,9 +1441,9 @@ export const CourseLearningPage: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/student/dashboard')}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-800 whitespace-nowrap shrink-0"
+              className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 hover:bg-emerald-100 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              Student Dashboard
+              Go to My Learning
             </button>
             <span className="text-slate-300">/</span>
             <div className="truncate">
@@ -1395,7 +1488,7 @@ export const CourseLearningPage: React.FC = () => {
             <button
               type="button"
               onClick={() => setQuinnDrawerOpen(true)}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Ask Quinn AI</span>

@@ -18,6 +18,8 @@ import {
 import { ExtendedYouTubeVideo, MASTER_YOUTUBE_LIBRARY } from '../../services/youtubeVideoService';
 import { CourseThumbnail } from './CourseThumbnail';
 import { useRouter } from '../../router/RouterContext';
+import { cacheYouTubeCourse } from '../../services/marketplaceService';
+import { compute90PercentCoursePricing } from '../../utils/pricingEngine';
 
 interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -63,6 +65,87 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     navigator.clipboard?.writeText(window.location.href);
     setCopyFeedback(true);
     setTimeout(() => setCopyFeedback(false), 2000);
+  };
+
+  const navigateToCourseWorkspace = (withEnroll: boolean) => {
+    const knownCatalogId =
+      currentVideo.id && /^(?:OF-|github-yt-|ai-path-|disc-|yt-)/i.test(currentVideo.id)
+        ? currentVideo.id
+        : `yt-${currentYoutubeId}`;
+    const priced = compute90PercentCoursePricing({
+      category: currentVideo.subjectCategory || 'Digital Skills & Productivity',
+      title: currentVideo.title,
+      level: currentVideo.level || 'Beginner',
+    });
+    const thumb =
+      currentVideo.thumbnailUrl ||
+      currentVideo.thumbnail ||
+      `https://i.ytimg.com/vi/${currentYoutubeId}/hqdefault.jpg`;
+    cacheYouTubeCourse({
+      id: knownCatalogId,
+      title: currentVideo.title,
+      category: currentVideo.subjectCategory || 'Digital Skills & Productivity',
+      categories: [currentVideo.subjectCategory || 'Digital Skills & Productivity'],
+      categoryGroup: 'Technology',
+      subcategory: currentVideo.subjectCategory || 'Video Course',
+      level: (currentVideo.level as any) || 'Beginner',
+      duration: currentVideo.duration || 'Self-Paced',
+      estimatedHours: 4,
+      pricingTier: priced.pricingTier,
+      price: priced.finalPriceInr,
+      marketBenchmarkPrice: priced.marketBenchmarkPrice,
+      discountPercent: priced.discountPercent,
+      isFree: false,
+      status: 'Published',
+      courseType: 'youtube_video',
+      contentType: 'Full course',
+      instructorName: currentVideo.channelTitle || 'YouTube Educator',
+      youtubeChannelName: currentVideo.channelTitle || 'YouTube Educator',
+      youtubeVideoId: currentYoutubeId,
+      youtubeUrl: `https://www.youtube.com/watch?v=${currentYoutubeId}`,
+      language: 'English',
+      rating: 4.8,
+      enrolledCount: 1200,
+      certificateEligibility: true,
+      thumbnailUrl: thumb,
+      imageUrl: thumb,
+      shortDesc: currentVideo.recommendedReason || currentVideo.rationale || `Structured certified course for ${currentVideo.title}.`,
+      description: currentVideo.recommendedReason || currentVideo.rationale || `Structured certified course for ${currentVideo.title}.`,
+      learningObjectives: currentVideo.keyTopicsCovered || ['Watch guided video lessons', 'Complete verification quiz', 'Submit practical project'],
+      targetAudience: 'Students, professionals, and self-paced learners',
+      skillsAcquired: currentVideo.keyTopicsCovered || ['Applied Mastery'],
+      practicalProjects: [`Capstone Project: ${currentVideo.title}`],
+      assessmentMethod: 'Verification Quiz + Project Submission + Score & Certification',
+      certificateNote: 'Eligible for OpenFrame QR-verified certificate upon completion.',
+      updatedAt: new Date().toISOString(),
+      modules: [
+        {
+          moduleNumber: 1,
+          title: currentVideo.title,
+          duration: currentVideo.duration || '2 Hours',
+          lessons: currentVideo.keyTopicsCovered || ['Core Video Lecture', 'Practical Application', 'Verification Assessment'],
+          videoIds: [currentYoutubeId],
+        },
+      ],
+      recommendedVideos: [
+        {
+          id: knownCatalogId,
+          videoId: currentYoutubeId,
+          youtubeId: currentYoutubeId,
+          youtubeUrl: `https://www.youtube.com/watch?v=${currentYoutubeId}`,
+          title: currentVideo.title,
+          channelTitle: currentVideo.channelTitle || 'YouTube Educator',
+          thumbnail: thumb,
+          thumbnailUrl: thumb,
+          duration: currentVideo.duration || 'Tutorial',
+          level: (currentVideo.level as any) || 'Beginner',
+          recommendedReason: currentVideo.recommendedReason || currentVideo.rationale || 'Primary course video lesson.',
+          embedUrl: `https://www.youtube-nocookie.com/embed/${currentYoutubeId}`,
+        },
+      ],
+    });
+    onClose();
+    navigate(`/learn/${encodeURIComponent(knownCatalogId)}${withEnroll ? '?enroll=1&autoplay=1' : '?autoplay=1'}`);
   };
 
   return (
@@ -161,10 +244,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => {
-                      onClose();
-                      navigate(`/learn/video/${encodeURIComponent(currentYoutubeId)}?autoplay=1`);
-                    }}
+                    onClick={() => navigateToCourseWorkspace(false)}
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
@@ -173,13 +253,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      onClose();
-                      navigate(`/learn/video/${encodeURIComponent(currentYoutubeId)}?enroll=1&autoplay=1`);
+                      if (onApplyForCourse) {
+                        onApplyForCourse(currentVideo.title, currentVideo.subjectCategory);
+                      } else {
+                        navigateToCourseWorkspace(true);
+                      }
                     }}
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
                   >
                     <GraduationCap className="w-3.5 h-3.5" />
-                    <span>Enroll Now · Get Certified</span>
+                    <span>Enroll Now · Pay via Razorpay</span>
                   </button>
                 </div>
               </div>
@@ -222,10 +305,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => {
-                      onClose();
-                      navigate(`/learn/video/${encodeURIComponent(currentYoutubeId)}?enroll=1&autoplay=1`);
-                    }}
+                    onClick={() => navigateToCourseWorkspace(true)}
                     className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] shrink-0 cursor-pointer whitespace-nowrap"
                   >
                     Open Modules &amp; Quiz

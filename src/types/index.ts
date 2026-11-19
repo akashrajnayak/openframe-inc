@@ -650,7 +650,7 @@ export interface MarketplaceCourse {
   courseType?: MarketplaceCourseType;
   contentType?: CourseContentType;
   topic?: string;
-  libraryCollection?: 'standard' | 'corporate_training';
+  libraryCollection?: 'standard' | 'corporate_training' | 'github_youtube_7008';
   youtubeUrl?: string;
   youtubeVideoId?: string;
   youtubePlaylistUrl?: string;
@@ -1545,7 +1545,7 @@ export interface MarketplaceFilterParams {
   pricingTier?: string;
   courseType?: 'all' | MarketplaceCourseType;
   contentType?: 'all' | CourseContentType;
-  libraryCollection?: 'all' | 'standard' | 'corporate_training';
+  libraryCollection?: 'all' | 'standard' | 'corporate_training' | 'github_youtube_7008';
   language?: string;
   level?: string;
   duration?: string;
@@ -1613,7 +1613,7 @@ export interface DiscoveredCourse {
   courseType: MarketplaceCourseType;
   contentType?: CourseContentType;
   topic?: string;
-  libraryCollection?: 'standard' | 'corporate_training';
+  libraryCollection?: 'standard' | 'corporate_training' | 'github_youtube_7008';
   certificateEligibility: boolean;
   sourceVerificationStatus: 'Verified YouTube Resource' | 'Unverified' | 'Unavailable';
   reviewStatus: DiscoveredCourseReviewStatus;

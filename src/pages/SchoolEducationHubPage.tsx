@@ -120,6 +120,9 @@ import { BoardGradeStructurePanel } from '../components/school/BoardGradeStructu
 import { MultilingualLanguagePanel } from '../components/school/MultilingualLanguagePanel';
 import { StudyOnYourOwnSelfWorkspace } from '../components/school/StudyOnYourOwnSelfWorkspace';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
+import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
+import { lmsService } from '../services/lmsService';
+import { formatInr } from '../utils/pricingEngine';
 import { getOrCreateStudentTokenWallet } from '../services/selfStudyService';
 
 type HubTab =
@@ -207,6 +210,40 @@ export const SchoolEducationHubPage: React.FC = () => {
   const [savingEnrollment, setSavingEnrollment] = useState(false);
   const [statusBanner, setStatusBanner] = useState('');
   const [tokenWallet, setTokenWallet] = useState<StudentTokenWallet | null>(null);
+  const [schoolPayModalOpen, setSchoolPayModalOpen] = useState(false);
+  const [hasPaidSchoolClass, setHasPaidSchoolClass] = useState(false);
+
+  const schoolClassFeeInr = useMemo(() => {
+    if (['LKG', 'UKG', '1', '2', '3', '4', '5'].includes(classId)) return 300;
+    if (['6', '7', '8'].includes(classId)) return 400;
+    if (['9', '10'].includes(classId)) return 500;
+    return 1000;
+  }, [classId]);
+
+  const schoolCourseId = `OF-SCHOOL-${boardId}-${classId}`;
+
+  useEffect(() => {
+    let active = true;
+    if (!currentUser?.uid) {
+      setHasPaidSchoolClass(false);
+      return;
+    }
+    lmsService
+      .getStudentEnrollments(currentUser.uid)
+      .then((enrs) => {
+        if (!active) return;
+        const paid = enrs.some(
+          (e) =>
+            e.courseId.toLowerCase() === schoolCourseId.toLowerCase() &&
+            lmsService.isVerifiedPaidEnrollment(e)
+        );
+        setHasPaidSchoolClass(paid);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.uid, schoolCourseId]);
 
   useEffect(() => {
     let active = true;
@@ -933,12 +970,22 @@ export const SchoolEducationHubPage: React.FC = () => {
               )}
               <button
                 type="button"
-                onClick={handleSaveEnrollment}
+                onClick={() => {
+                  if (hasPaidSchoolClass) {
+                    void handleSaveEnrollment();
+                  } else {
+                    setSchoolPayModalOpen(true);
+                  }
+                }}
                 disabled={savingEnrollment}
-                className="flex-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm whitespace-nowrap"
+                className="flex-1 px-3 py-2 rounded-lg bg-[#123D32] hover:bg-[#0D2E25] border border-emerald-500/40 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm whitespace-nowrap tabular-nums"
               >
                 {savingEnrollment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                <span>{currentUser ? 'Save & Open Daily Classes' : 'Sign In to Save'}</span>
+                <span>
+                  {hasPaidSchoolClass
+                    ? 'Open Learning Workspace'
+                    : `Pay ${formatInr(schoolClassFeeInr)} First & Open Workspace`}
+                </span>
               </button>
             </div>
           </div>
@@ -2646,6 +2693,54 @@ export const SchoolEducationHubPage: React.FC = () => {
           })}
         </nav>
       )}
+      {/* LKG–Class 12 Department Payment-First Modal (Razorpay First -> Open Learning Workspace) */}
+      <CourseEnrollmentModal
+        isOpen={schoolPayModalOpen}
+        onClose={() => setSchoolPayModalOpen(false)}
+        skipAutoRedirect={true}
+        course={{
+          id: schoolCourseId,
+          title: `${activeClass.label} (${selectedDirectoryBoard?.shortName || activeBoard.shortName} · ${medium})`,
+          category: 'School Education (LKG - Class 12)',
+          categories: ['School Education (LKG - Class 12)'],
+          categoryGroup: 'Academic',
+          subcategory: activeClass.label,
+          level: 'Beginner',
+          duration: academicYear,
+          estimatedHours: 120,
+          pricingTier: schoolClassFeeInr >= 1000 ? 'Professional' : 'Starter',
+          price: schoolClassFeeInr,
+          marketBenchmarkPrice: schoolClassFeeInr * 10,
+          discountPercent: 90,
+          isFree: false,
+          board: selectedDirectoryBoard?.shortName || activeBoard.shortName,
+          gradeLevel: activeClass.label,
+          status: 'Published',
+          courseType: 'standard',
+          instructorName: 'OpenFrame School Academic Faculty',
+          language,
+          rating: 4.9,
+          enrolledCount: 2500,
+          certificateEligibility: true,
+          thumbnailUrl: '/assets/images/academic_education.jpg',
+          imageUrl: '/assets/images/academic_education.jpg',
+          shortDesc: `Complete ${activeClass.label} (${selectedDirectoryBoard?.shortName || activeBoard.shortName}) Learning Workspace with Daily Classes, Self-Study, Quizzes, Marks & Certification.`,
+          description: `Complete ${activeClass.label} department access for ${academicYear}.`,
+          learningObjectives: ['Daily Board-Aligned Classes', 'Interactive Quizzes & Chapter Tests', 'Progress & Certificate Tracking'],
+          targetAudience: `${activeClass.label} Students`,
+          skillsAcquired: ['Core Academic Mastery'],
+          practicalProjects: ['Chapter Worksheets & Practicals'],
+          assessmentMethod: 'Chapter Tests + Term Marks + Certification',
+          certificateNote: 'Official OpenFrame School Milestone Certificate included.',
+          updatedAt: new Date().toISOString(),
+          modules: [{ moduleNumber: 1, title: `${activeClass.label} Core Syllabus`, duration: academicYear, lessons: ['Daily Lessons', 'Chapter Practice', 'Assessment'] }],
+        }}
+        onEnrolled={() => {
+          setHasPaidSchoolClass(true);
+          setSchoolPayModalOpen(false);
+          void handleSaveEnrollment();
+        }}
+      />
     </div>
   );
 };

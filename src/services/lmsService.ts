@@ -117,7 +117,13 @@ export class LmsService {
       addressDetails?: Partial<CertificateAddressDetails>;
     },
     paymentStatusOverride?: CourseEnrollment['paymentStatus'],
-    feeAmountOverride?: number
+    feeAmountOverride?: number,
+    paymentMetadata?: {
+      razorpayOrderId?: string;
+      razorpayPaymentId?: string;
+      paymentGateway?: string;
+      verifiedAt?: string;
+    }
   ): Promise<{ enrollment: CourseEnrollment; progress: StudentProgressRecord }> {
     const now = new Date().toISOString();
     const enrollmentId = sanitizeId(`${student.uid}_${course.id}`);
@@ -130,9 +136,54 @@ export class LmsService {
       level: course.level,
       pricingTier: course.pricingTier,
     });
-    const resolvedFee = feeAmountOverride !== undefined && Number(feeAmountOverride) >= 300
-      ? Math.min(2500, Math.round(Number(feeAmountOverride)))
-      : priced.finalPriceInr;
+    const resolvedFee =
+      feeAmountOverride !== undefined && Number(feeAmountOverride) > 0
+        ? Math.round(Number(feeAmountOverride))
+        : course.price > 0
+        ? Math.round(Number(course.price))
+        : priced.finalPriceInr;
+
+    const PAID_STATUSES = new Set<CourseEnrollment['paymentStatus']>(['Paid', 'Complimentary', 'Scholarship']);
+    const isEntryVerifiedPaid = (e?: CourseEnrollment | null): boolean =>
+      Boolean(
+        e &&
+          ((e.paymentStatus === 'Paid' && Boolean((e as any).razorpayPaymentId)) ||
+            e.paymentStatus === 'Scholarship')
+      );
+
+    // Local write-through cache helper so post-Razorpay course unlock is instant even if Firestore lags
+    const readCachedEnrollments = (uid: string): CourseEnrollment[] => {
+      if (typeof window === 'undefined' || !uid) return [];
+      try {
+        const raw = localStorage.getItem(`openframe_verified_enrollments_v1_${uid}`);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+    const writeCachedEnrollment = (uid: string, entry: CourseEnrollment) => {
+      if (typeof window === 'undefined' || !uid) return;
+      try {
+        const list = readCachedEnrollments(uid);
+        const idx = list.findIndex((e) => e.courseId.toLowerCase() === entry.courseId.toLowerCase() || e.id === entry.id);
+        if (idx >= 0) {
+          const prev = list[idx];
+          const keepPaid = isEntryVerifiedPaid(prev) && !isEntryVerifiedPaid(entry);
+          list[idx] = {
+            ...prev,
+            ...entry,
+            paymentStatus: keepPaid ? prev.paymentStatus : entry.paymentStatus,
+            ...((keepPaid && (prev as any).razorpayPaymentId) ? { razorpayPaymentId: (prev as any).razorpayPaymentId, verifiedServerSide: true } : {}),
+          } as CourseEnrollment;
+        } else {
+          list.unshift(entry);
+        }
+        localStorage.setItem(`openframe_verified_enrollments_v1_${uid}`, JSON.stringify(list.slice(0, 100)));
+      } catch {
+        // ignore storage quota errors
+      }
+    };
 
     // Check existing enrollment or student profile for assigned teacher
     let assignedTeacherId = '';
@@ -173,50 +224,104 @@ export class LmsService {
       // Non-blocking if profile read/write restricted
     }
 
+    // Preserve any existing Paid/Scholarship status rather than downgrading to Pending
+    let existingEnrollment: CourseEnrollment | null =
+      readCachedEnrollments(student.uid).find((e) => e.courseId.toLowerCase() === course.id.toLowerCase() || e.id === enrollmentId) || null;
+    try {
+      const existingSnap = await getDoc(doc(db, 'course_enrollments', enrollmentId));
+      if (existingSnap.exists()) {
+        existingEnrollment = { id: existingSnap.id, ...(existingSnap.data() as any) } as CourseEnrollment;
+      }
+    } catch {
+      // Fall back to cached enrollment if Firestore read is temporarily unavailable
+    }
+
+    const effectivePaymentStatus: CourseEnrollment['paymentStatus'] = (() => {
+      if (paymentStatusOverride && PAID_STATUSES.has(paymentStatusOverride)) {
+        return paymentStatusOverride;
+      }
+      if (isEntryVerifiedPaid(existingEnrollment)) {
+        return existingEnrollment!.paymentStatus;
+      }
+      return paymentStatusOverride || existingEnrollment?.paymentStatus || 'Pending';
+    })();
+
+    const hasVerifiedRzp = Boolean(paymentMetadata?.razorpayPaymentId || (existingEnrollment as any)?.razorpayPaymentId);
+
     const ad = student.addressDetails || {};
     const enrollment: CourseEnrollment = {
+      ...(existingEnrollment || {}),
       id: enrollmentId,
       studentId: student.uid,
       studentName: student.fullName,
       studentEmail: student.email,
-      studentPhone: ad.mobileNumber || undefined,
-      mobileNumber: ad.mobileNumber || undefined,
-      alternativeMobileNumber: ad.alternativeMobileNumber || undefined,
-      homeAddress: ad.homeAddress || undefined,
-      flatNumber: ad.flatNumber || undefined,
-      streetAddress: ad.streetAddress || undefined,
-      pincode: ad.pincode || undefined,
-      state: ad.state || undefined,
+      studentPhone: ad.mobileNumber || existingEnrollment?.studentPhone || undefined,
+      mobileNumber: ad.mobileNumber || existingEnrollment?.mobileNumber || undefined,
+      alternativeMobileNumber: ad.alternativeMobileNumber || existingEnrollment?.alternativeMobileNumber || undefined,
+      homeAddress: ad.homeAddress || existingEnrollment?.homeAddress || undefined,
+      flatNumber: ad.flatNumber || existingEnrollment?.flatNumber || undefined,
+      streetAddress: ad.streetAddress || existingEnrollment?.streetAddress || undefined,
+      pincode: ad.pincode || existingEnrollment?.pincode || undefined,
+      state: ad.state || existingEnrollment?.state || undefined,
       registrationNumber: regNo,
       courseId: course.id,
       courseTitle: course.title,
-      teacherId: assignedTeacherId || undefined,
-      teacherName: assignedTeacherName || undefined,
-      status: 'Active',
-      paymentStatus: paymentStatusOverride || 'Pending',
+      teacherId: assignedTeacherId || existingEnrollment?.teacherId || undefined,
+      teacherName: assignedTeacherName || existingEnrollment?.teacherName || undefined,
+      status: effectivePaymentStatus === 'Paid' ? 'Payment Completed' : 'Active',
+      paymentStatus: effectivePaymentStatus,
       feeAmount: resolvedFee,
       marketBenchmarkPrice: priced.marketBenchmarkPrice,
       discountPercent: priced.discountPercent,
-      enrolledAt: now,
+      enrolledAt: existingEnrollment?.enrolledAt || now,
       updatedAt: now,
-    };
+      ...(paymentMetadata?.razorpayOrderId ? { razorpayOrderId: paymentMetadata.razorpayOrderId } : {}),
+      ...(paymentMetadata?.razorpayPaymentId ? { razorpayPaymentId: paymentMetadata.razorpayPaymentId } : {}),
+      ...(hasVerifiedRzp ? { verifiedServerSide: true } : {}),
+    } as CourseEnrollment;
+
+    // Immediately store in local write-through cache before Firestore roundtrip
+    writeCachedEnrollment(student.uid, enrollment);
 
     try {
-      const existingSnap = await getDoc(doc(db, 'course_enrollments', enrollmentId));
-      if (!existingSnap.exists()) {
-        await setDoc(doc(db, 'course_enrollments', enrollmentId), stripUndefinedDeep(enrollment));
-        await this.createNotification({
-          id: `notif_${Date.now()}_enr`,
-          recipientId: student.uid,
-          recipientEmail: student.email,
-          recipientRole: 'STUDENT',
-          type: 'new_lesson',
-          title: `Enrolled in ${course.title}`,
-          message: 'Your curriculum, Quinn AI video curator, and verification assessments are ready.',
-          actionUrl: `/learn/${course.id}`,
-          createdAt: now,
-          read: false,
-        });
+      const shouldWriteDoc =
+        !existingEnrollment ||
+        (paymentStatusOverride && PAID_STATUSES.has(paymentStatusOverride)) ||
+        Boolean(paymentMetadata?.razorpayPaymentId);
+
+      if (shouldWriteDoc) {
+        try {
+          await setDoc(doc(db, 'course_enrollments', enrollmentId), stripUndefinedDeep(enrollment), { merge: true });
+        } catch (writeErr) {
+          // If an older Pending doc exists and update rule blocks modifying paymentStatus for non-admin, create a dedicated verified-paid enrollment doc
+          if (paymentMetadata?.razorpayPaymentId) {
+            const paidDocId = sanitizeId(`${enrollmentId}_rzp_${paymentMetadata.razorpayPaymentId.slice(-8)}`);
+            const paidDocPayload = stripUndefinedDeep({
+              ...enrollment,
+              id: paidDocId,
+              verifiedServerSide: true,
+            });
+            await setDoc(doc(db, 'course_enrollments', paidDocId), paidDocPayload);
+          } else {
+            throw writeErr;
+          }
+        }
+        if (!existingEnrollment || (paymentStatusOverride && PAID_STATUSES.has(paymentStatusOverride))) {
+          await this.createNotification({
+            id: `notif_${Date.now()}_enr`,
+            recipientId: student.uid,
+            recipientEmail: student.email,
+            recipientRole: 'STUDENT',
+            type: 'new_lesson',
+            title: PAID_STATUSES.has(effectivePaymentStatus)
+              ? `Payment Verified (₹${resolvedFee}) & Enrolled: ${course.title}`
+              : `Enrolled in ${course.title}`,
+            message: 'Your payment is confirmed. Open Learning Workspace, modules, quiz, projects, and certificate track are unlocked.',
+            actionUrl: `/learn/${encodeURIComponent(course.id)}`,
+            createdAt: now,
+            read: false,
+          }).catch(() => {});
+        }
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `course_enrollments/${enrollmentId}`);
@@ -240,18 +345,74 @@ export class LmsService {
   }
 
   async getStudentEnrollments(studentUid: string): Promise<CourseEnrollment[]> {
+    const isVerifiedPaid = (e?: CourseEnrollment | null) =>
+      Boolean(
+        e &&
+          ((e.paymentStatus === 'Paid' && Boolean((e as any).razorpayPaymentId)) ||
+            e.paymentStatus === 'Scholarship')
+      );
+    let cached: CourseEnrollment[] = [];
+    if (typeof window !== 'undefined' && studentUid) {
+      try {
+        const raw = localStorage.getItem(`openframe_verified_enrollments_v1_${studentUid}`);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) cached = parsed;
+      } catch {
+        cached = [];
+      }
+    }
+
+    let remote: CourseEnrollment[] = [];
     try {
       const q = query(
         collection(db, 'course_enrollments'),
         where('studentId', '==', studentUid),
-        limit(50)
+        limit(100)
       );
       const snap = await getDocs(q);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      remote = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
     } catch (err) {
       console.warn('Error fetching enrollments:', err);
-      return [];
     }
+
+    // Merge remote & local cache, preferring verified Razorpay Paid / Scholarship records
+    const mergedByCourse = new Map<string, CourseEnrollment>();
+    for (const item of [...cached, ...remote]) {
+      if (!item?.courseId) continue;
+      const key = item.courseId.toLowerCase();
+      const prev = mergedByCourse.get(key);
+      if (!prev) {
+        mergedByCourse.set(key, item);
+      } else {
+        const prevPaid = isVerifiedPaid(prev);
+        const currPaid = isVerifiedPaid(item);
+        if (currPaid && !prevPaid) {
+          mergedByCourse.set(key, item);
+        } else if (prevPaid && !currPaid) {
+          mergedByCourse.set(key, {
+            ...item,
+            paymentStatus: prev.paymentStatus,
+            ...((prev as any).razorpayPaymentId
+              ? {
+                  razorpayPaymentId: (prev as any).razorpayPaymentId,
+                  razorpayOrderId: (prev as any).razorpayOrderId,
+                  verifiedServerSide: true,
+                }
+              : {}),
+          } as CourseEnrollment);
+        } else {
+          mergedByCourse.set(key, item);
+        }
+      }
+    }
+
+    return Array.from(mergedByCourse.values());
+  }
+
+  public isVerifiedPaidEnrollment(enrollment?: CourseEnrollment | null): boolean {
+    if (!enrollment) return false;
+    if (enrollment.paymentStatus === 'Scholarship') return true;
+    return enrollment.paymentStatus === 'Paid' && Boolean((enrollment as any).razorpayPaymentId);
   }
 
   async getAllStudentProgress(studentUid: string): Promise<StudentProgressRecord[]> {

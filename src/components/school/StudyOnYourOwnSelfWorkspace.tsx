@@ -1251,7 +1251,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
                       >
                         <GraduationCap className="w-3.5 h-3.5" />
                         <span>
-                          Enroll ({formatInr(computedEnrollmentPricing.finalPriceInr)} · 90% Off)
+                          Pay {formatInr(computedEnrollmentPricing.finalPriceInr)} First &amp; Enroll
                         </span>
                       </button>
                       <button
@@ -1414,7 +1414,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
                         className="px-3.5 py-2 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer tabular-nums"
                       >
                         <GraduationCap className="w-3.5 h-3.5" />
-                        <span>Enroll ({formatInr(computedEnrollmentPricing.finalPriceInr)})</span>
+                        <span>Pay {formatInr(computedEnrollmentPricing.finalPriceInr)} First &amp; Enroll</span>
                       </button>
                       <button
                         type="button"

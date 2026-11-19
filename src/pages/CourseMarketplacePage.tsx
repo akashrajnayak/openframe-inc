@@ -70,6 +70,8 @@ import { LearningRoadmapPanel } from '../components/discovery/LearningRoadmapPan
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
+import { GitHubYouTubeCourseHub } from '../components/marketplace/GitHubYouTubeCourseHub';
+import { EDUCATIONAL_YOUTUBE_CHANNELS } from '../data/educationalYouTubeChannelsData';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { useAuth } from '../context/AuthContext';
 import { lmsService } from '../services/lmsService';
@@ -146,7 +148,7 @@ export const CourseMarketplacePage: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState('All');
   const [courseTypeFilter, setCourseTypeFilter] = useState<'all' | MarketplaceCourseType>('all');
   const [contentTypeFilter, setContentTypeFilter] = useState<'all' | CourseContentType>('all');
-  const [libraryCollectionFilter, setLibraryCollectionFilter] = useState<'all' | 'corporate_training'>('all');
+  const [libraryCollectionFilter, setLibraryCollectionFilter] = useState<'all' | 'corporate_training' | 'github_youtube_7008'>('all');
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [selectedPricingTier, setSelectedPricingTier] = useState('All');
   const [selectedLevel, setSelectedLevel] = useState('All');
@@ -190,6 +192,7 @@ export const CourseMarketplacePage: React.FC = () => {
   const [savingAiPath, setSavingAiPath] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const [paidCourseIds, setPaidCourseIds] = useState<Set<string>>(new Set());
 
   const runIntelligentDiscovery = async (
     rawQuery: string,
@@ -579,6 +582,10 @@ export const CourseMarketplacePage: React.FC = () => {
     if (catParam) setSelectedCategory(catParam);
     if (groupParam) setSelectedGroup(groupParam);
     if (cleanLang) setSelectedLanguage(cleanLang);
+    const collectionParam = sp.get('collection');
+    if (collectionParam === 'github_youtube_7008' || collectionParam === 'corporate_training') {
+      setLibraryCollectionFilter(collectionParam);
+    }
   }, [router.currentPath]);
 
   // Mobile filters drawer
@@ -621,8 +628,22 @@ export const CourseMarketplacePage: React.FC = () => {
           setFavoriteIds(new Set(favs.map((f) => f.courseId)));
         })
         .catch(() => {});
+      lmsService
+        .getStudentEnrollments(currentUser.uid)
+        .then((enrs) => {
+          if (!active) return;
+          setPaidCourseIds(
+            new Set(
+              enrs
+                .filter((e) => lmsService.isVerifiedPaidEnrollment(e))
+                .map((e) => e.courseId.toLowerCase())
+            )
+          );
+        })
+        .catch(() => {});
     } else {
       setFavoriteIds(new Set());
+      setPaidCourseIds(new Set());
     }
     lmsService
       .getStudentBookmarks(targetUid)
@@ -1194,14 +1215,6 @@ export const CourseMarketplacePage: React.FC = () => {
                   <span>Apply for Admissions</span>
                 </button>
 
-                <Link
-                  to="/animation-course"
-                  className="px-4 py-2.5 rounded-xl bg-slate-800/95 hover:bg-slate-800 text-cyan-300 font-bold text-xs border border-cyan-500/40 flex items-center space-x-1.5 transition-colors"
-                >
-                  <Layers className="w-4 h-4 text-cyan-400" />
-                  <span>Swift UI Animations &amp; Charts (ZIP Lab)</span>
-                </Link>
-
                 {currentUser && (
                   <Link
                     to="/student/dashboard"
@@ -1561,15 +1574,16 @@ export const CourseMarketplacePage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto py-3 no-scrollbar text-xs font-semibold">
             {[
-              { id: 'all', label: 'All Courses' },
+              { id: 'all', label: `All Courses (${(counters?.totalCoursesAvailable ?? 22529).toLocaleString()}+)` },
+              { id: 'github_youtube_7008', label: 'GitHub YouTube (7,008)', icon: Tv },
               { id: 'corporate_library', label: 'Corporate Library (500)', icon: Briefcase },
-              { id: 'youtube', label: 'YouTube Courses', icon: Tv },
+              { id: 'youtube', label: 'YouTube Courses', icon: Play },
               { id: 'playlists', label: 'Video Playlists', icon: ListVideo },
               { id: 'popular', label: 'Popular', icon: Flame },
               { id: 'trending', label: 'Trending', icon: TrendingUp },
               { id: 'new', label: 'Newly Added', icon: Sparkles },
-              { id: 'beginner', label: 'Beginner' },
-              { id: 'professional', label: 'Professional', icon: Briefcase },
+              { id: 'beginner', label: 'Basics (₹300)' },
+              { id: 'professional', label: 'Advanced (₹2,500)', icon: Briefcase },
               { id: 'recommended', label: 'Recommended' },
               { id: 'career', label: 'Career Track' }
             ].map((tab) => {
@@ -1577,6 +1591,8 @@ export const CourseMarketplacePage: React.FC = () => {
               const isSelected =
                 tab.id === 'corporate_library'
                   ? libraryCollectionFilter === 'corporate_training'
+                  : tab.id === 'github_youtube_7008'
+                  ? libraryCollectionFilter === 'github_youtube_7008'
                   : activeTab === tab.id && libraryCollectionFilter === 'all';
               return (
                 <button
@@ -1584,6 +1600,9 @@ export const CourseMarketplacePage: React.FC = () => {
                   onClick={() => {
                     if (tab.id === 'corporate_library') {
                       setLibraryCollectionFilter('corporate_training');
+                      setActiveTab('all');
+                    } else if (tab.id === 'github_youtube_7008') {
+                      setLibraryCollectionFilter('github_youtube_7008');
                       setActiveTab('all');
                     } else {
                       setLibraryCollectionFilter('all');
@@ -1783,14 +1802,22 @@ export const CourseMarketplacePage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">YouTube Channel</label>
+              <label className="text-xs font-bold text-slate-700 block">YouTube Channel (190+ Curated)</label>
               <input
                 type="text"
+                list="github-youtube-channels-list"
                 value={selectedChannel}
                 onChange={(e) => setSelectedChannel(e.target.value)}
-                placeholder="e.g. MIT, freeCodeCamp..."
+                placeholder="e.g. freeCodeCamp, 3Blue1Brown, Kurzgesagt..."
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <datalist id="github-youtube-channels-list">
+                {EDUCATIONAL_YOUTUBE_CHANNELS.map((ch) => (
+                  <option key={ch.id} value={ch.name}>
+                    {ch.category} · {ch.subscribers}
+                  </option>
+                ))}
+              </datalist>
             </div>
 
             {/* Course Format Filter */}
@@ -3067,6 +3094,19 @@ export const CourseMarketplacePage: React.FC = () => {
               </div>
             )}
 
+            {/* 7,008 GitHub-Indexed YouTube Certified Skill Development Hub (Categorized by Interest) */}
+            {(libraryCollectionFilter === 'github_youtube_7008' ||
+              (libraryCollectionFilter === 'all' && activeTab === 'all' && unifiedViewTab !== 'openframe_courses')) && (
+              <GitHubYouTubeCourseHub
+                mode="marketplace"
+                combinedTotalCourses={counters?.totalCoursesAvailable ?? 22529}
+                initialQuery={searchQuery}
+                onSelectChannelForMarketplace={(channelName) => {
+                  setSelectedChannel(channelName);
+                }}
+              />
+            )}
+
             {/* Top Results Bar */}
             <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center space-x-3 flex-wrap gap-y-2">
@@ -3341,21 +3381,45 @@ export const CourseMarketplacePage: React.FC = () => {
                         </div>
 
                         <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            onClick={() => setEnrollModalCourse(course)}
-                            className="py-1.5 px-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-bold transition-all flex items-center justify-center space-x-1 shadow-xs cursor-pointer"
-                          >
-                            <GraduationCap className="w-3 h-3 text-cyan-300" />
-                            <span className="tabular-nums">Enroll ({trackLabel})</span>
-                          </button>
+                          {paidCourseIds.has(course.id.toLowerCase()) ? (
+                            <>
+                              <Link
+                                to={`/learn/${encodeURIComponent(course.id)}`}
+                                className="py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold transition-all flex items-center justify-center space-x-1 shadow-xs"
+                              >
+                                <BookOpen className="w-3 h-3" />
+                                <span>Open Workspace</span>
+                              </Link>
+                              <Link
+                                to="/student/dashboard"
+                                className="py-1.5 px-2 rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 text-[11px] font-semibold transition-colors flex items-center justify-center space-x-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>My Learning</span>
+                              </Link>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setEnrollModalCourse(course)}
+                                className="py-1.5 px-2 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white text-[11px] font-bold transition-all flex items-center justify-center space-x-1 shadow-xs cursor-pointer"
+                              >
+                                <GraduationCap className="w-3 h-3 text-emerald-300" />
+                                <span className="tabular-nums">Pay {trackLabel}</span>
+                              </button>
 
-                          <Link
-                            to={`/learn/${course.id}`}
-                            className="py-1.5 px-2 rounded-xl bg-amber-50 border border-amber-300/80 hover:bg-amber-100 text-amber-900 text-[11px] font-semibold transition-colors flex items-center justify-center space-x-1"
-                          >
-                            <Sparkles className="w-3 h-3 text-amber-600" />
-                            <span>Quinn AI</span>
-                          </Link>
+                              <button
+                                type="button"
+                                onClick={() => setEnrollModalCourse(course)}
+                                className="py-1.5 px-2 rounded-xl bg-amber-50 border border-amber-300/80 hover:bg-amber-100 text-amber-900 text-[11px] font-semibold transition-colors flex items-center justify-center space-x-1 cursor-pointer"
+                                title="Pay first to open Learning Workspace"
+                              >
+                                <Sparkles className="w-3 h-3 text-amber-600" />
+                                <span>Open Workspace</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -3768,8 +3832,13 @@ export const CourseMarketplacePage: React.FC = () => {
         isOpen={Boolean(enrollModalCourse)}
         onClose={() => setEnrollModalCourse(null)}
         course={enrollModalCourse}
-        onEnrolled={() => {
-          showToast('Course enrollment confirmed! Click "Start Course Workspace" to begin.');
+        onEnrolled={(enrollment) => {
+          if (enrollment?.courseId) {
+            setPaidCourseIds((prev) => new Set([...prev, enrollment.courseId.toLowerCase()]));
+          } else if (enrollModalCourse?.id) {
+            setPaidCourseIds((prev) => new Set([...prev, enrollModalCourse.id.toLowerCase()]));
+          }
+          showToast('Payment verified! Redirecting to Open Learning Workspace...');
         }}
       />
 

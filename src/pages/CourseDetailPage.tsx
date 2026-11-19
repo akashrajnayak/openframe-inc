@@ -31,7 +31,6 @@ import {
   Globe,
   ListVideo,
   Download,
-  FileArchive,
   Bookmark,
   Bot,
   Send,
@@ -62,6 +61,7 @@ export const CourseDetailPage: React.FC = () => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [isFavUpdating, setIsFavUpdating] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
+  const [hasPaidEnrollment, setHasPaidEnrollment] = useState(false);
   const [earnedCert, setEarnedCert] = useState<IssuedCertificate | null>(null);
   const [relatedCourses, setRelatedCourses] = useState<MarketplaceCourse[]>([]);
 
@@ -210,6 +210,17 @@ export const CourseDetailPage: React.FC = () => {
       marketplaceService.getStudentFavorites(currentUser.uid).then((favs) => {
         if (active) setIsFavorite(favs.some((f) => f.courseId === courseId));
       }).catch(() => {});
+      lmsService.getStudentEnrollments(currentUser.uid).then((enrs) => {
+        if (active) {
+          setHasPaidEnrollment(
+            enrs.some(
+              (e) =>
+                e.courseId.toLowerCase() === courseId.toLowerCase() &&
+                lmsService.isVerifiedPaidEnrollment(e)
+            )
+          );
+        }
+      }).catch(() => {});
       lmsService.getCertificatesForStudent(currentUser.uid).then((certs) => {
         if (active) {
           const match = certs.find((c) => c.courseId === courseId && c.status === 'Issued') || null;
@@ -218,6 +229,7 @@ export const CourseDetailPage: React.FC = () => {
       }).catch(() => {});
     } else {
       setIsFavorite(false);
+      setHasPaidEnrollment(false);
       setEarnedCert(null);
     }
     return () => {
@@ -514,58 +526,6 @@ export const CourseDetailPage: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* LEFT CONTENT COLUMN (lg:col-span-8) */}
           <div className="lg:col-span-8 space-y-8 text-left">
-            {/* Animation Course ZIP Packs & Live Interactive Studio Callout */}
-            {course.id.startsWith('OF-CRS-ANIM') && (
-              <div className="bg-slate-900 text-white rounded-2xl p-6 sm:p-7 border border-slate-800 shadow-lg space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold text-cyan-300 uppercase tracking-wider">
-                      Included Source Files &amp; Interactive Sandbox
-                    </div>
-                    <h3 className="text-lg font-bold mt-0.5">
-                      Course ZIP Archives, 12 Animated Charts &amp; 17 Swift UI Components
-                    </h3>
-                  </div>
-                  <Link
-                    to="/animation-course"
-                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-2 shrink-0 self-start sm:self-auto"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Open Interactive Studio</span>
-                  </Link>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Download the complete Ramotion Swift UI animation repository archive, Swift Charts code, and spring physics solvers, or test every graph, chart, and animation live in your browser.
-                </p>
-                <div className="flex flex-wrap gap-2.5">
-                  <a
-                    href="/downloads/animation-course/swift-ui-animation-components-master-pack.zip"
-                    download
-                    className="px-4 py-2 rounded-xl bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold flex items-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Download Master ZIP (31 KB)</span>
-                  </a>
-                  <a
-                    href="/downloads/animation-course/03-animated-graphs-and-charts-pack.zip"
-                    download
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    <FileArchive className="w-3.5 h-3.5" />
-                    <span>Graphs &amp; Charts ZIP</span>
-                  </a>
-                  <a
-                    href="/downloads/animation-course/02-swift-ui-17-components-kit.zip"
-                    download
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    <FileArchive className="w-3.5 h-3.5" />
-                    <span>17 Swift Components ZIP</span>
-                  </a>
-                </div>
-              </div>
-            )}
-
             {/* What you will learn */}
             <div className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-200 shadow-xs space-y-4">
               <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center space-x-2">
@@ -940,96 +900,139 @@ export const CourseDetailPage: React.FC = () => {
                 );
               })()}
 
-              {/* 7 Structured Course Action Buttons */}
-              <div className="space-y-2.5 pt-1">
-                {courseVideos.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setSelectedVideo(courseVideos[0]);
-                      setIsVideoModalOpen(true);
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-sky-400 text-sky-400" />
-                    <span>1. Play Lesson ({courseVideos.length} Videos)</span>
-                  </button>
-                )}
+              {/* Payment-First -> Open Learning Workspace Action Buttons */}
+              {(() => {
+                const detailPricing = compute90PercentCoursePricing({
+                  category: course.category,
+                  title: course.title,
+                  level: course.level,
+                  educationLevels: course.educationLevels,
+                  existingPrice: course.price,
+                });
+                const exactCourseFee = course.price > 0 ? Math.round(course.price) : detailPricing.finalPriceInr;
+                return (
+                  <div className="space-y-2.5 pt-1">
+                    {!hasPaidEnrollment ? (
+                      <>
+                        {/* Step 1: Pay First via Razorpay */}
+                        <button
+                          type="button"
+                          onClick={() => setIsRegModalOpen(true)}
+                          className="w-full py-3.5 px-4 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md cursor-pointer tabular-nums"
+                        >
+                          <GraduationCap className="w-4 h-4 text-emerald-300" />
+                          <span>1. Pay {formatInr(exactCourseFee)} First (Razorpay) &amp; Register</span>
+                        </button>
 
-                <Link
-                  to={`/learn/${course.id}`}
-                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors"
-                >
-                  <BookOpen className="w-3.5 h-3.5" />
-                  <span>2. Start Learning Workspace</span>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={handleToggleMyLearning}
-                  className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer border ${
-                    isBookmarked
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
-                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-800'
-                  }`}
-                >
-                  <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-indigo-600 text-indigo-600' : ''}`} />
-                  <span>{isBookmarked ? '3. Saved in My Learning' : '3. Add to My Learning'}</span>
-                </button>
-
-                <button
-                  onClick={() => setIsRegModalOpen(true)}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md shadow-blue-500/25 cursor-pointer tabular-nums"
-                >
-                  <GraduationCap className="w-4 h-4 text-cyan-200" />
-                  <span>
-                    4. Enroll &amp; Pay{' '}
-                    {formatInr(
-                      compute90PercentCoursePricing({
-                        category: course.category,
-                        title: course.title,
-                        level: course.level,
-                        educationLevels: course.educationLevels,
-                        existingPrice: course.price,
-                      }).finalPriceInr
+                        {/* Step 2: Open Learning Workspace (triggers payment first if unpaid) */}
+                        <button
+                          type="button"
+                          onClick={() => setIsRegModalOpen(true)}
+                          className="w-full py-2.5 px-4 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                        >
+                          <Lock className="w-3.5 h-3.5 text-blue-700" />
+                          <span>2. Open Learning Workspace (After Payment)</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {/* Paid & Unlocked -> Direct Redirect to Open Learning Workspace & Go to My Learning */}
+                        <Link
+                          to={`/learn/${encodeURIComponent(course.id)}`}
+                          className="w-full py-3.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors shadow-md"
+                        >
+                          <BookOpen className="w-4 h-4" />
+                          <span>Open Learning Workspace</span>
+                        </Link>
+                        <Link
+                          to="/student/dashboard"
+                          className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Go to My Learning</span>
+                        </Link>
+                      </>
                     )}
-                  </span>
-                </button>
 
-                <Link
-                  to={`/learn/${course.id}?tab=quiz`}
-                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>5. Take Assessment Quiz</span>
-                </Link>
+                    {courseVideos.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setSelectedVideo(courseVideos[0]);
+                          setIsVideoModalOpen(true);
+                        }}
+                        className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-sky-400 text-sky-400" />
+                        <span>Preview Lesson ({courseVideos.length} Videos)</span>
+                      </button>
+                    )}
 
-                <button
-                  type="button"
-                  onClick={() => setAiDrawerOpen(true)}
-                  className="w-full py-2.5 px-4 rounded-xl bg-amber-50 border border-amber-300/80 hover:bg-amber-100 text-amber-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  <span>6. Ask AI Tutor (Quinn AI)</span>
-                </button>
+                    <button
+                      type="button"
+                      onClick={handleToggleMyLearning}
+                      className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer border ${
+                        isBookmarked
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-indigo-600 text-indigo-600' : ''}`} />
+                      <span>{isBookmarked ? 'Saved in My Learning' : 'Add to My Learning'}</span>
+                    </button>
 
-                {earnedCert ? (
-                  <button
-                    type="button"
-                    onClick={() => lmsService.downloadCertificatePdf(earnedCert)}
-                    className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-300 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>7. Download Certificate ({earnedCert.certificateId})</span>
-                  </button>
-                ) : (
-                  <Link
-                    to={`/learn/${course.id}?tab=certificate`}
-                    className="w-full py-2 px-4 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 font-semibold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>7. Certificate Status (Check Eligibility)</span>
-                  </Link>
-                )}
+                    {hasPaidEnrollment ? (
+                      <Link
+                        to={`/learn/${encodeURIComponent(course.id)}?tab=quiz`}
+                        className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Take Assessment Quiz</span>
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsRegModalOpen(true)}
+                        className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Assessment Quiz (Pay First to Unlock)</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setAiDrawerOpen(true)}
+                      className="w-full py-2.5 px-4 rounded-xl bg-amber-50 border border-amber-300/80 hover:bg-amber-100 text-amber-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Ask AI Tutor (Quinn AI)</span>
+                    </button>
+
+                    {earnedCert ? (
+                      <button
+                        type="button"
+                        onClick={() => lmsService.downloadCertificatePdf(earnedCert)}
+                        className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-300 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Certificate ({earnedCert.certificateId})</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (hasPaidEnrollment) {
+                            router.navigate(`/learn/${encodeURIComponent(course.id)}?tab=certificate`);
+                          } else {
+                            setIsRegModalOpen(true);
+                          }
+                        }}
+                        className="w-full py-2 px-4 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 font-semibold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Certificate Status ({hasPaidEnrollment ? 'Check Eligibility' : 'Unlocks After Payment'})</span>
+                      </button>
+                    )}
 
                 {(course.youtubePlaylistUrl || course.youtubeUrl) && (
                   <a
@@ -1075,7 +1078,9 @@ export const CourseDetailPage: React.FC = () => {
                     onSuccess={() => showToast('Signed in with Google! You can now enroll or save this course.')}
                   />
                 )}
-              </div>
+                  </div>
+                );
+              })()}
 
               <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
                 Free public YouTube educational videos play via official YouTube embed players. OpenFrame never charges to watch free public YouTube videos; fees apply strictly to structured assessments, mentorship &amp; OpenFrame certification.
@@ -1171,8 +1176,9 @@ export const CourseDetailPage: React.FC = () => {
         onClose={() => setIsRegModalOpen(false)}
         course={course}
         onEnrolled={() => {
+          setHasPaidEnrollment(true);
           setIsRegModalOpen(false);
-          setToastMessage('Enrollment confirmed! You can now start the learning workspace.');
+          setToastMessage('Payment verified! Redirecting to your Open Learning Workspace...');
           setTimeout(() => setToastMessage(null), 5000);
         }}
       />
