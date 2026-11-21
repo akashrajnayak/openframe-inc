@@ -73,7 +73,8 @@ import {
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with long-polling transport (prevents 10s WebChannel timeout in iframes/proxies)
+// Initialize Firestore with auto-detect long-polling (uses fast native WebChannel
+// when available and falls back to long-polling only when proxies block streams)
 // and ignoreUndefinedProperties so optional fields never crash writes
 let dbInstance: Firestore;
 const hasNamedFirestoreDb =
@@ -81,7 +82,7 @@ const hasNamedFirestoreDb =
   firebaseConfig.firestoreDatabaseId !== '(default)';
 const firestoreInitSettings = {
   ignoreUndefinedProperties: true,
-  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: true,
 };
 try {
   dbInstance = hasNamedFirestoreDb

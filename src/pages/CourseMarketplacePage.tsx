@@ -46,6 +46,7 @@ import {
   cacheModeledCourse,
   cacheYouTubeCourse
 } from '../services/marketplaceService';
+import { standaloneApiFetch } from '../services/standaloneMockService';
 import {
   MarketplaceCourse,
   MarketplaceCourseStatus,
@@ -71,6 +72,11 @@ import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { GitHubYouTubeCourseHub } from '../components/marketplace/GitHubYouTubeCourseHub';
+import {
+  CourseCatalogExplorerModal,
+  type CatalogApplyPayload,
+} from '../components/marketplace/CourseCatalogExplorerModal';
+import type { CatalogSegment } from '../services/catalogDirectoryService';
 import { EDUCATIONAL_YOUTUBE_CHANNELS } from '../data/educationalYouTubeChannelsData';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { useAuth } from '../context/AuthContext';
@@ -141,6 +147,43 @@ export const CourseMarketplacePage: React.FC = () => {
   const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<MarketplaceAutocompleteSuggestion[]>([]);
   const [isAutocompleting, setIsAutocompleting] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Full 22,529-Course Catalog Explorer Modal State
+  const [isCatalogExplorerOpen, setIsCatalogExplorerOpen] = useState(false);
+  const [catalogInitialSegment, setCatalogInitialSegment] = useState<CatalogSegment>('all');
+
+  const openCatalogExplorer = (segment: CatalogSegment = 'all') => {
+    setIsSearchFocused(false);
+    setCatalogInitialSegment(segment);
+    setIsCatalogExplorerOpen(true);
+  };
+
+  const handleApplyCatalogFilters = (payload: CatalogApplyPayload) => {
+    setSearchQuery(payload.query || '');
+    setSelectedGroup(payload.domainGroup || 'All');
+    setSelectedCategory(payload.category || 'All');
+    setSelectedLevel(payload.level || 'All');
+    setLibraryCollectionFilter('all');
+
+    if (payload.segment === 'professional') {
+      setActiveTab('professional');
+      setCourseTypeFilter('all');
+      setContentTypeFilter('all');
+    } else if (payload.segment === 'youtube') {
+      setActiveTab('youtube');
+      setCourseTypeFilter('youtube_video');
+      setContentTypeFilter('all');
+    } else if (payload.segment === 'youtube_playlist') {
+      setActiveTab('playlists');
+      setCourseTypeFilter('youtube_playlist');
+      setContentTypeFilter('Playlist');
+    } else {
+      setActiveTab('all');
+      setCourseTypeFilter('all');
+      setContentTypeFilter('all');
+    }
+    setCurrentPage(1);
+  };
 
   const [activeTab, setActiveTab] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -406,7 +449,7 @@ export const CourseMarketplacePage: React.FC = () => {
           ? `${q} ${selectedExcelTopic}`
           : q;
 
-      const res = await fetch('/api/youtube/search', {
+      const res = await standaloneApiFetch('/api/youtube/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1240,15 +1283,15 @@ export const CourseMarketplacePage: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Input Container */}
+                {/* Input Container + Catalog Explorer Button */}
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     executeUnifiedDiscoverySearch(searchQuery);
                   }}
-                  className="relative flex gap-2"
+                  className="relative flex flex-wrap sm:flex-nowrap gap-2"
                 >
-                  <div className="relative flex-1">
+                  <div className="relative flex-1 min-w-[180px]">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cyan-400" />
                     <input
                       type="text"
@@ -1281,9 +1324,21 @@ export const CourseMarketplacePage: React.FC = () => {
                   </div>
                   <button
                     type="submit"
-                    className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                    className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
                   >
                     Search
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openCatalogExplorer('all')}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-200 hover:text-white border border-cyan-400/50 hover:border-cyan-300 text-xs font-bold whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-cyan-400"
+                    title="Browse full 22,529 course catalog (All, Professional, YouTube & Playlists)"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span>Catalog</span>
+                    <span className="hidden xl:inline tabular-nums text-[11px] text-cyan-300 font-semibold">
+                      ({(counters?.totalCoursesAvailable ?? 22529).toLocaleString()})
+                    </span>
                   </button>
 
                   {/* AUTOCOMPLETE DROPDOWN */}
@@ -1517,29 +1572,27 @@ export const CourseMarketplacePage: React.FC = () => {
             {[
               {
                 label: 'Total Courses Available',
-                value: counters ? counters.totalCoursesAvailable.toLocaleString() : '—',
+                value: counters ? counters.totalCoursesAvailable.toLocaleString() : '22,529',
                 accent: 'text-cyan-300',
-                onClick: () => clearAllFilters()
+                onClick: () => openCatalogExplorer('all')
               },
               {
                 label: 'Professional Programmes',
                 value: counters ? counters.paidCourses.toLocaleString() : '—',
                 accent: 'text-blue-300',
-                onClick: () => {
-                  setActiveTab('professional');
-                }
+                onClick: () => openCatalogExplorer('professional')
               },
               {
                 label: 'YouTube Courses',
                 value: counters ? counters.youtubeCourses.toLocaleString() : '—',
                 accent: 'text-rose-300',
-                onClick: () => setActiveTab('youtube')
+                onClick: () => openCatalogExplorer('youtube')
               },
               {
                 label: 'Video Playlists',
-                value: counters ? counters.videoPlaylists.toLocaleString() : '—',
+                value: counters ? counters.videoPlaylists.toLocaleString() : '2,749',
                 accent: 'text-indigo-300',
-                onClick: () => setActiveTab('playlists')
+                onClick: () => openCatalogExplorer('youtube_playlist')
               },
               {
                 label: 'Newly Added Courses',
@@ -2079,10 +2132,10 @@ export const CourseMarketplacePage: React.FC = () => {
                 </div>
 
                 {/* 7 OpenFrame Recommendation Categories when viewing All Results */}
-                {unifiedViewTab === 'all_results' && discoveryResult.recommendationGroups.length > 0 && (
+                {unifiedViewTab === 'all_results' && (discoveryResult.recommendationGroups?.length || 0) > 0 && (
                   <div className="space-y-4 pt-2">
-                    {discoveryResult.recommendationGroups
-                      .filter((grp) => grp.courses.length > 0)
+                    {(discoveryResult.recommendationGroups || [])
+                      .filter((grp) => (grp.courses?.length || 0) > 0)
                       .map((grp) => (
                         <div key={grp.id} className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-2.5">
@@ -2157,8 +2210,8 @@ export const CourseMarketplacePage: React.FC = () => {
                 {/* Unified View Tab: 8-Stage Learning Path */}
                 {unifiedViewTab === 'learning_paths' && (
                   <LearningRoadmapPanel
-                    roadmap={discoveryResult.roadmap}
-                    availableCourses={discoveryResult.recommendationGroups.flatMap((g) => g.courses.map((c) => c.course))}
+                    roadmap={discoveryResult.roadmap || null}
+                    availableCourses={(discoveryResult.recommendationGroups || []).flatMap((g) => (g.courses || []).map((c) => c.course))}
                     onEnrollCourse={(courseObj) => setEnrollModalCourse(courseObj)}
                     onWatchVideo={(vid) => {
                       const vidId = vid.videoId || vid.youtubeId || 'JMUxmLyrhSk';
@@ -2190,7 +2243,7 @@ export const CourseMarketplacePage: React.FC = () => {
                   <div className="bg-white rounded-2xl p-5 border border-slate-200 space-y-3">
                     <h3 className="text-sm font-bold text-[#18221F]">Complementary &amp; Career-Boosting Skills</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {discoveryResult.relatedSkills.map((sk) => (
+                      {(discoveryResult.relatedSkills || []).map((sk) => (
                         <div key={sk} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 flex flex-col justify-between gap-2.5">
                           <div>
                             <div className="text-xs font-bold text-slate-900">{sk}</div>
@@ -2225,7 +2278,7 @@ export const CourseMarketplacePage: React.FC = () => {
 
                 {/* Section 8: Matched YouTube Resources inside Discovery */}
                 {(unifiedViewTab === 'all_results' || unifiedViewTab === 'youtube_videos') &&
-                  discoveryResult.youtubeResources.length > 0 && (
+                  (discoveryResult.youtubeResources?.length || 0) > 0 && (
                     <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
@@ -2238,7 +2291,7 @@ export const CourseMarketplacePage: React.FC = () => {
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {discoveryResult.youtubeResources.slice(0, 6).map((yt) => {
+                        {(discoveryResult.youtubeResources || []).slice(0, 6).map((yt) => {
                           const vidId = yt.videoId || yt.youtubeId || 'JMUxmLyrhSk';
                           const ytThumb = yt.thumbnail || yt.thumbnailUrl || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
                           return (
@@ -3862,6 +3915,30 @@ export const CourseMarketplacePage: React.FC = () => {
           setIsVideoModalOpen(false);
           handleOpenApply(title, 'VIDEO-SELECT', cat);
         }}
+      />
+
+      {/* FULL 22,529-COURSE CATALOG EXPLORER MODAL */}
+      <CourseCatalogExplorerModal
+        isOpen={isCatalogExplorerOpen}
+        onClose={() => setIsCatalogExplorerOpen(false)}
+        initialSegment={catalogInitialSegment}
+        initialQuery={searchQuery}
+        paidCourseIds={paidCourseIds}
+        onEnrollCourse={(course) => {
+          setIsCatalogExplorerOpen(false);
+          setEnrollModalCourse(course);
+        }}
+        onNavigateCourse={(courseId) => {
+          setIsCatalogExplorerOpen(false);
+          router.navigate(`/marketplace/${courseId}`);
+        }}
+        onWatchCourseVideo={(video, playlist) => {
+          setIsCatalogExplorerOpen(false);
+          setSelectedVideo(video);
+          setVideoPlaylist(playlist);
+          setIsVideoModalOpen(true);
+        }}
+        onApplyFiltersToPage={handleApplyCatalogFilters}
       />
     </div>
   );

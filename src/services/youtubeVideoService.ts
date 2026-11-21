@@ -1,5 +1,6 @@
 import { YouTubeVideoRecommendation } from '../types';
 import { scoreSearchMatch } from '../utils/searchIntelligence';
+import { standaloneApiFetch } from './standaloneMockService';
 
 export interface ExtendedYouTubeVideo extends YouTubeVideoRecommendation {
   subjectCategory: string;
@@ -431,7 +432,7 @@ export class YouTubeVideoService {
         : categoryOrOptions;
 
     try {
-      const res = await fetch('/api/youtube/search', {
+      const res = await standaloneApiFetch('/api/youtube/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -487,7 +488,7 @@ export class YouTubeVideoService {
     error?: string;
   }> {
     try {
-      const res = await fetch(`/api/youtube/video-details/${encodeURIComponent(videoId)}`);
+      const res = await standaloneApiFetch(`/api/youtube/video-details/${encodeURIComponent(videoId)}`);
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.video) {
         return { ok: true, source: data.source, video: data.video, warning: data.warning };
@@ -505,7 +506,7 @@ export class YouTubeVideoService {
     maxResults?: number;
   }): Promise<{ ok: boolean; videos: YouTubeVideoRecommendation[]; error?: string }> {
     try {
-      const res = await fetch('/api/youtube/related-resources', {
+      const res = await standaloneApiFetch('/api/youtube/related-resources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -522,7 +523,7 @@ export class YouTubeVideoService {
 
   async getYouTubeApiStatus(): Promise<{ apiKeyConfigured: boolean; mode: string }> {
     try {
-      const res = await fetch('/api/youtube/status');
+      const res = await standaloneApiFetch('/api/youtube/status');
       if (res.ok) return await res.json();
     } catch {
       // ignore

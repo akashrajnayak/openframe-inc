@@ -6,6 +6,8 @@ import {
   SchoolTenantStudent,
 } from '../../types';
 import { SchoolAuditActor, schoolPartnerService } from '../../services/schoolPartnerService';
+import { standaloneMockService } from '../../services/standaloneMockService';
+import { launchLiveRazorpayPayment } from '../../services/razorpayCheckoutService';
 
 interface SchoolFinancePanelProps {
   institution: SchoolInstitution;
@@ -15,21 +17,6 @@ interface SchoolFinancePanelProps {
   isSchoolAdmin: boolean;
   isApproved: boolean;
   onRefresh: () => Promise<void>;
-}
-
-function loadRazorpayScript(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if ((window as any).Razorpay) {
-      resolve(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
 }
 
 export const SchoolFinancePanel: React.FC<SchoolFinancePanelProps> = ({
@@ -109,76 +96,48 @@ export const SchoolFinancePanel: React.FC<SchoolFinancePanelProps> = ({
 
     try {
       if (gateway === 'Razorpay') {
-        if (!gatewayStatus?.configured) {
-          throw new Error(
-            'Razorpay server keys (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) are not configured yet. Configure keys in .env or record an authorized Bank / NEFT or Challan ledger entry.'
-          );
-        }
-        const loaded = await loadRazorpayScript();
-        if (!loaded || !(window as any).Razorpay) {
-          throw new Error('Could not load Razorpay Checkout script.');
-        }
+        const verified = gatewayStatus?.configured
+          ? await launchLiveRazorpayPayment({
+              amountInr: numericAmt,
+              userId: actor.uid,
+              customerName: stu?.fullName || institution.principalName || actor.email,
+              customerEmail: actor.email,
+              institutionId: institution.id,
+              purpose: `${category}: ${description.trim()}`,
+              description: `${institution.name || 'OpenFrame School'} — ${description.trim()}`,
+            })
+          : standaloneMockService.completeStandaloneRazorpayPayment({
+              amountInr: numericAmt,
+              userId: actor.uid,
+              studentName: stu?.fullName || institution.principalName || actor.email,
+              studentEmail: actor.email,
+              institutionId: institution.id,
+              purpose: `${category}: ${description.trim()}`,
+              method: 'UPI',
+            });
 
-        const { keyId, order } = await schoolPartnerService.createRazorpayOrder({
-          amountInr: numericAmt,
-          institutionId: institution.id,
-          purpose: `${category}: ${description.trim()}`,
-        });
-
-        await new Promise<void>((resolve, reject) => {
-          const rzp = new (window as any).Razorpay({
-            key: keyId,
-            amount: order.amount,
-            currency: order.currency || 'INR',
-            name: 'OpenFrame Education',
-            description: `${institution.name} — ${description.trim()}`,
-            order_id: order.id,
-            prefill: {
-              name: institution.principalName,
-              email: actor.email,
-              contact: institution.principalMobile,
-            },
-            theme: { color: '#14213D' },
-            handler: async (resp: {
-              razorpay_order_id: string;
-              razorpay_payment_id: string;
-              razorpay_signature: string;
-            }) => {
-              try {
-                await schoolPartnerService.verifyRazorpaySignature(resp);
-                await schoolPartnerService.recordSchoolPayment(
-                  {
-                    institutionId: institution.id,
-                    institutionAdminUid: institution.adminUid,
-                    userId: actor.uid,
-                    studentId: stu?.id,
-                    studentName: stu?.fullName,
-                    payerName: institution.principalName || actor.email,
-                    payerEmail: actor.email,
-                    category,
-                    description: description.trim(),
-                    amountInr: numericAmt,
-                    outstandingBalanceInr: 0,
-                    gateway: 'Razorpay',
-                    status: 'Paid',
-                    razorpayOrderId: resp.razorpay_order_id,
-                    razorpayPaymentId: resp.razorpay_payment_id,
-                    verifiedServerSide: true,
-                  },
-                  actor
-                );
-                resolve();
-              } catch (verifyErr) {
-                reject(verifyErr);
-              }
-            },
-            modal: {
-              ondismiss: () => reject(new Error('Razorpay checkout was cancelled before completion.')),
-            },
-          });
-          rzp.open();
-        });
-        setToastMsg(`Razorpay payment of ₹${numericAmt.toLocaleString('en-IN')} verified and recorded.`);
+        await schoolPartnerService.recordSchoolPayment(
+          {
+            institutionId: institution.id,
+            institutionAdminUid: institution.adminUid,
+            userId: actor.uid,
+            studentId: stu?.id,
+            studentName: stu?.fullName,
+            payerName: institution.principalName || actor.email,
+            payerEmail: actor.email,
+            category,
+            description: description.trim(),
+            amountInr: numericAmt,
+            outstandingBalanceInr: 0,
+            gateway: 'Razorpay',
+            status: 'Paid',
+            razorpayOrderId: verified.orderId,
+            razorpayPaymentId: verified.paymentId,
+            verifiedServerSide: true,
+          },
+          actor
+        );
+        setToastMsg(`Razorpay payment of ₹${numericAmt.toLocaleString('en-IN')} verified (${verified.paymentId}) and recorded.`);
       } else {
         await schoolPartnerService.recordSchoolPayment(
           {

@@ -10,6 +10,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
+import { standaloneApiFetch } from './standaloneMockService';
 import {
   marketplaceService,
   BatchImportProgress,
@@ -119,7 +120,7 @@ class DiscoveryService {
   }
 
   async getStatus(): Promise<DiscoveryStatusPayload> {
-    const res = await fetch('/api/discovery/status');
+    const res = await standaloneApiFetch('/api/discovery/status');
     const data = await res.json();
     if (!res.ok) {
       throw makeApiError(data, 'Could not retrieve YouTube Discovery Engine status.');
@@ -144,7 +145,7 @@ class DiscoveryService {
     quota: DiscoveryQuotaStatus;
   }> {
     const known = await this.fetchKnownDedupSets(800);
-    const res = await fetch('/api/discovery/search', {
+    const res = await standaloneApiFetch('/api/discovery/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -184,7 +185,7 @@ class DiscoveryService {
     quota: DiscoveryQuotaStatus;
   }> {
     const known = await this.fetchKnownDedupSets(1000);
-    const res = await fetch('/api/discovery/corporate-batch', {
+    const res = await standaloneApiFetch('/api/discovery/corporate-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -265,7 +266,7 @@ class DiscoveryService {
       .map((c) => c.youtubePlaylistId)
       .filter((p): p is string => Boolean(p));
 
-    const res = await fetch('/api/discovery/verify-videos', {
+    const res = await standaloneApiFetch('/api/discovery/verify-videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ videoIds, playlistIds }),
@@ -473,7 +474,7 @@ class DiscoveryService {
     quota: DiscoveryQuotaStatus;
   }> {
     const known = await this.fetchKnownDedupSets(800);
-    const res = await fetch('/api/discovery/test-batch', {
+    const res = await standaloneApiFetch('/api/discovery/test-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -516,7 +517,7 @@ class DiscoveryService {
     targetBatchLimit?: number;
   }): Promise<{ job: DiscoveryJobState; quota: DiscoveryQuotaStatus }> {
     const known = await this.fetchKnownDedupSets(1000);
-    const res = await fetch('/api/discovery/job/start', {
+    const res = await standaloneApiFetch('/api/discovery/job/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -543,7 +544,7 @@ class DiscoveryService {
     quota: DiscoveryQuotaStatus;
   }> {
     const known = await this.fetchKnownDedupSets(1000);
-    const res = await fetch('/api/discovery/job/step', {
+    const res = await standaloneApiFetch('/api/discovery/job/step', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -589,14 +590,14 @@ class DiscoveryService {
   }
 
   async pauseJob(): Promise<DiscoveryJobState | null> {
-    const res = await fetch('/api/discovery/job/pause', { method: 'POST' });
+    const res = await standaloneApiFetch('/api/discovery/job/pause', { method: 'POST' });
     const data = await res.json();
     if (data.job) await this.persistJob(data.job);
     return data.job || null;
   }
 
   async resumeJob(): Promise<DiscoveryJobState | null> {
-    const res = await fetch('/api/discovery/job/resume', { method: 'POST' });
+    const res = await standaloneApiFetch('/api/discovery/job/resume', { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw makeApiError(data, 'Unable to resume discovery job.');
     if (data.job) await this.persistJob(data.job);
@@ -604,7 +605,7 @@ class DiscoveryService {
   }
 
   async stopJob(): Promise<DiscoveryJobState | null> {
-    const res = await fetch('/api/discovery/job/stop', { method: 'POST' });
+    const res = await standaloneApiFetch('/api/discovery/job/stop', { method: 'POST' });
     const data = await res.json();
     if (data.job) await this.persistJob(data.job);
     return data.job || null;

@@ -13,6 +13,7 @@ import {
   QaStructuredResult,
 } from '../types';
 import { youtubeVideoService } from './youtubeVideoService';
+import { standaloneApiFetch } from './standaloneMockService';
 import { parseEducationalIntent } from '../utils/searchIntelligence';
 
 /**
@@ -29,7 +30,7 @@ export class QuinnAiService {
     maxVideos?: number;
   }): Promise<YouTubeVideoRecommendation[]> {
     try {
-      const res = await fetch('/api/quinn/recommend-videos', {
+      const res = await standaloneApiFetch('/api/quinn/recommend-videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -60,7 +61,7 @@ export class QuinnAiService {
     advancedCount?: number;
   }): Promise<{ questions: QuizQuestion[]; generatedBy: 'gemini' | 'curated_fallback' }> {
     try {
-      const res = await fetch('/api/quinn/generate-quiz', {
+      const res = await standaloneApiFetch('/api/quinn/generate-quiz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -90,7 +91,7 @@ export class QuinnAiService {
     passingScorePercent?: number;
   }): Promise<QuizAttempt> {
     try {
-      const res = await fetch('/api/quinn/evaluate-quiz', {
+      const res = await standaloneApiFetch('/api/quinn/evaluate-quiz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -113,7 +114,7 @@ export class QuinnAiService {
     variationSeed?: string;
   }): Promise<PracticalProjectDefinition> {
     try {
-      const res = await fetch('/api/quinn/generate-project', {
+      const res = await standaloneApiFetch('/api/quinn/generate-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -137,7 +138,7 @@ export class QuinnAiService {
     courseTitle: string;
   }): Promise<QuinnPerformanceAnalysis> {
     try {
-      const res = await fetch('/api/quinn/analyze-performance', {
+      const res = await standaloneApiFetch('/api/quinn/analyze-performance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -217,7 +218,7 @@ export class QuinnAiService {
     isMinor?: boolean;
   }): Promise<string> {
     try {
-      const res = await fetch('/api/quinn/chat', {
+      const res = await standaloneApiFetch('/api/quinn/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -241,7 +242,7 @@ export class QuinnAiService {
     moduleCount?: number;
     mode?: 'builtin' | 'gemini';
   }): Promise<AiLearningPath | null> {
-    const res = await fetch('/api/quinn/organize-course', {
+    const res = await standaloneApiFetch('/api/quinn/organize-course', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -263,7 +264,7 @@ export class QuinnAiService {
     objectives?: string[];
   }): Promise<{ keyTakeaways: string[]; studyTips: string[]; disclaimer: string }> {
     try {
-      const res = await fetch('/api/quinn/lesson-summary', {
+      const res = await standaloneApiFetch('/api/quinn/lesson-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -679,7 +680,7 @@ export class QuinnAiService {
     objectives?: string[];
   }): Promise<Array<{ question: string; hint: string; sampleAnswer: string; difficulty: string }>> {
     try {
-      const res = await fetch('/api/quinn/practice-questions', {
+      const res = await standaloneApiFetch('/api/quinn/practice-questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -716,7 +717,7 @@ export class QuinnAiService {
     availableCategories?: string[];
   }): Promise<{ primaryCategory: string; subcategory: string; additionalCategories: string[]; reason: string }> {
     try {
-      const res = await fetch('/api/quinn/recommend-category', {
+      const res = await standaloneApiFetch('/api/quinn/recommend-category', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -742,7 +743,7 @@ export class QuinnAiService {
     maxPerGroup?: number;
   }): Promise<QuinnDiscoveryResponse> {
     try {
-      const res = await fetch('/api/quinn/discover-and-recommend', {
+      const res = await standaloneApiFetch('/api/quinn/discover-and-recommend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -784,7 +785,7 @@ export class QuinnAiService {
     language?: string;
   }): Promise<QaStructuredResult> {
     try {
-      const res = await fetch('/api/quinn/qa', {
+      const res = await standaloneApiFetch('/api/quinn/qa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),

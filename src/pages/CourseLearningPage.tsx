@@ -43,6 +43,7 @@ import { marketplaceService } from '../services/marketplaceService';
 import { quinnAiService } from '../services/quinnAiService';
 import { youtubeVideoService } from '../services/youtubeVideoService';
 import { lmsService } from '../services/lmsService';
+import { standaloneMockService } from '../services/standaloneMockService';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
@@ -352,19 +353,12 @@ export const CourseLearningPage: React.FC = () => {
       setRecommendedVideos(recs);
       if (recs[0]) setSelectedVideo(recs[0]);
 
-      // Gate ALL paid courses & departments (LKG to PG) strictly on verified Razorpay payment first
+      // Gate ALL paid courses & departments (LKG to PG) strictly on verified payment first
       let verifiedPaymentStatus: 'Paid' | 'Complimentary' | 'Scholarship' | undefined = undefined;
       const effectiveCourseFee = found.price > 0 ? Math.round(found.price) : 300;
+      const effectiveStudentUid = studentId || standaloneMockService.getActiveLearner().uid;
       if (effectiveCourseFee > 0 && !adminPreviewOverride) {
-        if (!currentUser || !studentId) {
-          if (active) {
-            setRequiresEnrollment(true);
-            if (autoOpenEnroll) setEnrollModalOpen(true);
-            setLoading(false);
-          }
-          return;
-        }
-        const existingEnrollments = await lmsService.getStudentEnrollments(studentId);
+        const existingEnrollments = await lmsService.getStudentEnrollments(effectiveStudentUid);
         const paidMatch = existingEnrollments.find(
           (en) =>
             en.courseId.toLowerCase() === found.id.toLowerCase() &&

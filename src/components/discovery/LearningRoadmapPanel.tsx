@@ -57,8 +57,9 @@ export const LearningRoadmapPanel: React.FC<LearningRoadmapPanelProps> = ({
     }));
   };
 
-  const completedCount = roadmap.stages.filter((s) => completedStages[s.stageNumber]).length;
-  const progressPct = roadmap.stages.length > 0 ? Math.round((completedCount / roadmap.stages.length) * 100) : 0;
+  const stages = Array.isArray(roadmap.stages) ? roadmap.stages : [];
+  const completedCount = stages.filter((s) => completedStages[s.stageNumber]).length;
+  const progressPct = stages.length > 0 ? Math.round((completedCount / stages.length) * 100) : 0;
 
   const handleSaveRoadmap = async () => {
     setSaving(true);

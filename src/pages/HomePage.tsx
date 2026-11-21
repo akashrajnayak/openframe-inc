@@ -31,6 +31,7 @@ import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { GitHubYouTubeCourseHub } from '../components/marketplace/GitHubYouTubeCourseHub';
+import { CourseCatalogExplorerModal } from '../components/marketplace/CourseCatalogExplorerModal';
 import { HomepageSchoolSection } from '../components/school/HomepageSchoolSection';
 import { useAuth } from '../context/AuthContext';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
@@ -71,6 +72,7 @@ export const HomePage: React.FC = () => {
   const [videoPlaylist, setVideoPlaylist] = useState<ExtendedYouTubeVideo[]>([]);
   const [liveCourseCount, setLiveCourseCount] = useState<number | null>(22529);
   const [homeEnrollCourse, setHomeEnrollCourse] = useState<MarketplaceCourse | null>(null);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
 
   // Featured Learning Programmes (Real marketplace data)
   const [featuredFilter, setFeaturedFilter] = useState<string>('all');
@@ -186,7 +188,7 @@ export const HomePage: React.FC = () => {
     let active = true;
     const refreshCounter = () => {
       marketplaceService
-        .getLiveMarketplaceCounters(true)
+        .getLiveMarketplaceCounters(false)
         .then((stats) => {
           if (active && typeof stats?.totalCoursesAvailable === 'number') {
             setLiveCourseCount(stats.totalCoursesAvailable);
@@ -196,6 +198,12 @@ export const HomePage: React.FC = () => {
     };
 
     refreshCounter();
+
+    if (!currentUser) {
+      return () => {
+        active = false;
+      };
+    }
 
     const unsubStats = onSnapshot(
       doc(db, 'marketplace_stats', 'global'),
@@ -207,7 +215,7 @@ export const HomePage: React.FC = () => {
       active = false;
       unsubStats();
     };
-  }, []);
+  }, [currentUser]);
 
   const [selectedEduCode, setSelectedEduCode] = useState<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'>('G');
 
@@ -412,50 +420,72 @@ export const HomePage: React.FC = () => {
                 Discover structured video courses, guided skill tracks, AI tutoring, and institutional learning — thoughtfully crafted for students, teachers, parents, schools, and lifelong learners.
               </p>
 
-              {/* Smart AI Course Search Bar (Preserved & Styled in Light Editorial Craft) */}
+              {/* Smart AI Course Search Bar + Companion Catalog Box */}
               <div className="relative pt-1">
-                <form
-                  onSubmit={handleHeroSearchSubmit}
-                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white border border-slate-200 rounded-2xl p-2 shadow-lg shadow-slate-900/5"
-                >
-                  <div className="flex items-center gap-2.5 flex-1 px-3 py-1.5">
-                    <Search className="w-4 h-4 text-[#123D32] shrink-0" />
-                    <input
-                      type="text"
-                      value={heroSearchQuery}
-                      onChange={(e) => setHeroSearchQuery(e.target.value)}
-                      onFocus={() => setHeroSearchFocused(true)}
-                      onBlur={() => setTimeout(() => setHeroSearchFocused(false), 180)}
-                      placeholder="What do you want to learn today?"
-                      aria-label="Universal AI Course Search"
-                      className="w-full bg-transparent text-sm text-[#18221F] placeholder-slate-400 focus:outline-none"
-                    />
-                  </div>
+                <div className="flex flex-col sm:flex-row items-stretch gap-2.5">
+                  <form
+                    onSubmit={handleHeroSearchSubmit}
+                    className="flex-1 min-w-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white border border-slate-200 rounded-2xl p-2 shadow-lg shadow-slate-900/5"
+                  >
+                    <div className="flex items-center gap-2.5 flex-1 min-w-0 px-3 py-1.5">
+                      <Search className="w-4 h-4 text-[#123D32] shrink-0" />
+                      <input
+                        type="text"
+                        value={heroSearchQuery}
+                        onChange={(e) => setHeroSearchQuery(e.target.value)}
+                        onFocus={() => setHeroSearchFocused(true)}
+                        onBlur={() => setTimeout(() => setHeroSearchFocused(false), 180)}
+                        placeholder="What do you want to learn today?"
+                        aria-label="Universal AI Course Search"
+                        className="w-full bg-transparent text-sm text-[#18221F] placeholder-slate-400 focus:outline-none"
+                      />
+                    </div>
 
-                  <div className="flex items-center gap-1.5 px-3 py-2 bg-[#F5F5F2] rounded-xl sm:w-44">
-                    <Globe className="w-3.5 h-3.5 text-[#123D32] shrink-0" />
-                    <select
-                      value={heroLanguage}
-                      onChange={(e) => setHeroLanguage(e.target.value)}
-                      aria-label="Preferred learning language"
-                      className="w-full bg-transparent text-xs font-medium text-[#18221F] focus:outline-none cursor-pointer"
+                    <div className="flex items-center gap-1.5 px-2.5 py-2 bg-[#F5F5F2] rounded-xl sm:w-32 shrink-0">
+                      <Globe className="w-3.5 h-3.5 text-[#123D32] shrink-0" />
+                      <select
+                        value={heroLanguage}
+                        onChange={(e) => setHeroLanguage(e.target.value)}
+                        aria-label="Preferred learning language"
+                        className="w-full bg-transparent text-xs font-medium text-[#18221F] focus:outline-none cursor-pointer truncate"
+                      >
+                        {SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES.map((lang) => (
+                          <option key={lang.code} value={lang.label}>
+                            {lang.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     >
-                      {SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES.map((lang) => (
-                        <option key={lang.code} value={lang.label}>
-                          {lang.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <span>Search</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </form>
 
                   <button
-                    type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                    type="button"
+                    onClick={() => {
+                      setHeroSearchFocused(false);
+                      setIsCatalogOpen(true);
+                    }}
+                    title="Open full-screen 22,529-course catalog (All, Professional, YouTube & Playlists)"
+                    className="group bg-white hover:bg-[#123D32] text-[#123D32] hover:text-white border border-slate-200 hover:border-[#123D32] rounded-2xl px-4 py-2.5 shadow-lg shadow-slate-900/5 flex items-center justify-center gap-2.5 transition-colors cursor-pointer shrink-0 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-[#123D32]"
                   >
-                    <span>Search</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <span className="w-8 h-8 rounded-xl bg-[#123D32]/10 group-hover:bg-white/15 flex items-center justify-center shrink-0 transition-colors">
+                      <BookOpen className="w-4 h-4 text-[#123D32] group-hover:text-white transition-colors" />
+                    </span>
+                    <span className="text-left">
+                      <span className="block text-xs font-bold leading-tight">Catalog</span>
+                      <span className="block text-[11px] opacity-75 tabular-nums leading-tight">
+                        {(liveCourseCount ?? 22529).toLocaleString()} Courses
+                      </span>
+                    </span>
                   </button>
-                </form>
+                </div>
 
                 {/* Autocomplete Dropdown */}
                 {heroSearchFocused && (heroSuggestions.length > 0 || heroSearchQuery.trim().length < 2) && (
@@ -1480,6 +1510,36 @@ export const HomePage: React.FC = () => {
         onClose={() => setHomeEnrollCourse(null)}
         course={homeEnrollCourse}
         onEnrolled={() => setHomeEnrollCourse(null)}
+      />
+
+      {/* FULL-SCREEN 22,529-COURSE CATALOG EXPLORER */}
+      <CourseCatalogExplorerModal
+        isOpen={isCatalogOpen}
+        onClose={() => setIsCatalogOpen(false)}
+        initialSegment="all"
+        initialQuery={heroSearchQuery}
+        onEnrollCourse={(course) => {
+          setIsCatalogOpen(false);
+          setHomeEnrollCourse(course);
+        }}
+        onNavigateCourse={(courseId) => {
+          setIsCatalogOpen(false);
+          navigate(`/marketplace/${courseId}`);
+        }}
+        onWatchCourseVideo={(video, playlist) => {
+          setIsCatalogOpen(false);
+          setSelectedVideo(video);
+          setVideoPlaylist(playlist);
+          setIsVideoModalOpen(true);
+        }}
+        onApplyFiltersToPage={(payload) => {
+          const qp = new URLSearchParams();
+          if (payload.query.trim()) qp.set('q', payload.query.trim());
+          if (payload.category && payload.category !== 'All') qp.set('category', payload.category);
+          if (payload.segment !== 'all') qp.set('tab', payload.segment === 'youtube_playlist' ? 'playlists' : payload.segment);
+          const qs = qp.toString();
+          navigate(qs ? `/marketplace?${qs}` : '/marketplace');
+        }}
       />
     </div>
   );

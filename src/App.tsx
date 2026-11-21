@@ -56,6 +56,7 @@ import { SchoolEducationHubPage } from './pages/SchoolEducationHubPage';
 import { NgoDashboardPage } from './pages/NgoDashboardPage';
 import { FieldExecutiveDashboardPage } from './pages/FieldExecutiveDashboardPage';
 import { ProfessionalDashboardPage } from './pages/ProfessionalDashboardPage';
+import { AiStudioHubPage } from './pages/AiStudioHubPage';
 import { GlobalChatbotWidget } from './components/common/GlobalChatbotWidget';
 import { testFirestoreConnection } from './services/firebase';
 import { useAuth } from './context/AuthContext';
@@ -140,6 +141,8 @@ function AppContent() {
       pageTitle = '15,500+ Online Course Marketplace | OpenFrame Education';
     } else if (clean === '/chatbot' || clean === '/qwen-ai' || clean === '/quinn-ai' || clean === '/ai-assistant') {
       pageTitle = 'Quinn AI • Dedicated Learning & Corporate Assistant | OpenFrame';
+    } else if (clean === '/ai-studio' || clean === '/studio') {
+      pageTitle = 'OpenFrame AI Studio • Gemini Chat, Live Voice & Transcription';
     } else if (clean === '/qa' || clean === '/ask') {
       pageTitle = 'Ask Quinn Q&A • Academic & Skill Intelligence | OpenFrame Education';
     } else if (clean.startsWith('/marketplace/') || clean.startsWith('/course/')) {
@@ -337,6 +340,9 @@ function AppContent() {
       case '/quinn-ai':
       case '/ai-assistant':
         return <ChatbotPage />;
+      case '/ai-studio':
+      case '/studio':
+        return <AiStudioHubPage />;
       case '/about-us':
       case '/about':
         return <AboutPage />;

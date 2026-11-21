@@ -134,11 +134,16 @@ export const Footer: React.FC = () => {
             <div className="space-y-1.5 text-xs text-white/75 pt-1">
               <div className="flex items-start gap-2">
                 <MapPin className="w-3.5 h-3.5 text-emerald-300 mt-0.5 shrink-0" />
-                <span>Bengaluru, Karnataka, India</span>
+                <span className="leading-relaxed">
+                  3rd Floor, Akshay Plaza,<br />
+                  Akshay Colony, Vidya Nagar,<br />
+                  Hubballi – 580021,<br />
+                  Karnataka, India.
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                <span>{settings.supportPhone}</span>
+                <span>6362163070</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="w-3.5 h-3.5 text-emerald-300 shrink-0" />

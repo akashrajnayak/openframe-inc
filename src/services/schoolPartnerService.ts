@@ -21,6 +21,8 @@ import {
   stripUndefinedDeep,
   uploadDocumentToStorage,
 } from './firebase';
+import { resolveApiUrl, safeParseJsonResponse } from '../utils/safeApiFetch';
+import { standaloneApiFetch } from './standaloneMockService';
 import {
   AssessmentDimension,
   MarketplaceCourse,
@@ -212,7 +214,7 @@ class SchoolPartnerService {
     docType: SchoolDocumentUpload['docType']
   ): Promise<SchoolDocumentUpload> {
     const headers = await getBearerHeaders();
-    const checkResp = await fetch('/api/school-partner/upload-check', {
+    const checkResp = await standaloneApiFetch('/api/school-partner/upload-check', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -251,7 +253,7 @@ class SchoolPartnerService {
 
     if (submitNow) {
       const headers = await getBearerHeaders();
-      const valResp = await fetch('/api/school-partner/validate-registration', {
+      const valResp = await standaloneApiFetch('/api/school-partner/validate-registration', {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -353,7 +355,7 @@ class SchoolPartnerService {
     actor: SchoolAuditActor;
   }): Promise<SchoolInstitution> {
     const headers = await getBearerHeaders();
-    const reviewResp = await fetch('/api/school-partner/admin/review', {
+    const reviewResp = await standaloneApiFetch('/api/school-partner/admin/review', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -778,7 +780,7 @@ class SchoolPartnerService {
     classes: SchoolTenantClass[]
   ): Promise<BulkStudentParseResult> {
     const headers = await getBearerHeaders();
-    const checkResp = await fetch('/api/school-partner/upload-check', {
+    const checkResp = await standaloneApiFetch('/api/school-partner/upload-check', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -1218,7 +1220,7 @@ class SchoolPartnerService {
     dimension: AssessmentDimension,
     gradeBand: IqEqSqGradeBand
   ): Promise<{ disclaimer: string; questions: any[] }> {
-    const resp = await fetch(
+    const resp = await standaloneApiFetch(
       `/api/school-partner/assessment-sheet?dimension=${encodeURIComponent(dimension)}&gradeBand=${encodeURIComponent(gradeBand)}`
     );
     const data = await resp.json();
@@ -1253,7 +1255,7 @@ class SchoolPartnerService {
     }
 
     const headers = await getBearerHeaders();
-    const scoreResp = await fetch('/api/school-partner/score-assessment', {
+    const scoreResp = await standaloneApiFetch('/api/school-partner/score-assessment', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -1322,8 +1324,27 @@ class SchoolPartnerService {
   // 8. Payments & Razorpay Integration
   // -------------------------------------------------------------
   async getRazorpayConfig(): Promise<{ configured: boolean; keyId: string | null; note: string }> {
-    const resp = await fetch('/api/payments/razorpay/config');
-    return resp.json();
+    try {
+      const resp = await fetch('/api/payments/razorpay/config', {
+        headers: { Accept: 'application/json' },
+      });
+      const parsed = await safeParseJsonResponse<any>(resp);
+      if (parsed.isJson && parsed.data) {
+        return parsed.data;
+      }
+    } catch {
+      // Fall through to standalone status when server is unreachable
+    }
+    const resp = await standaloneApiFetch(resolveApiUrl('/api/payments/razorpay/config'));
+    const parsed = await safeParseJsonResponse<any>(resp);
+    if (!parsed.isJson || !parsed.data) {
+      return {
+        configured: false,
+        keyId: null,
+        note: parsed.errorMessage || 'Razorpay API endpoint unavailable on this host.',
+      };
+    }
+    return parsed.data;
   }
 
   async createRazorpayOrder(params: {
@@ -1338,9 +1359,10 @@ class SchoolPartnerService {
       headers,
       body: JSON.stringify(params),
     });
-    const data = await resp.json();
-    if (!resp.ok || !data.ok) {
-      throw new Error(data.error || 'Unable to create Razorpay order.');
+    const parsed = await safeParseJsonResponse<any>(resp);
+    const data = parsed.data || {};
+    if (!resp.ok || !parsed.isJson || !data.ok) {
+      throw new Error(data.error || parsed.errorMessage || 'Unable to create Razorpay order.');
     }
     return { keyId: data.keyId, order: data.order };
   }
@@ -1356,9 +1378,10 @@ class SchoolPartnerService {
       headers,
       body: JSON.stringify(params),
     });
-    const data = await resp.json();
-    if (!resp.ok || !data.verified) {
-      throw new Error(data.error || 'Razorpay signature verification failed.');
+    const parsed = await safeParseJsonResponse<any>(resp);
+    const data = parsed.data || {};
+    if (!resp.ok || !parsed.isJson || !data.verified) {
+      throw new Error(data.error || parsed.errorMessage || 'Razorpay signature verification failed.');
     }
     return true;
   }
@@ -1640,7 +1663,7 @@ class SchoolPartnerService {
     let smtpAvailable = false;
     for (const email of params.recipientEmails.slice(0, 15)) {
       try {
-        const resp = await fetch('/api/notifications/email', {
+        const resp = await standaloneApiFetch('/api/notifications/email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -28,6 +28,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { standaloneApiFetch } from '../../services/standaloneMockService';
 import { GoogleSignInButton } from '../common/GoogleSignInButton';
 import { ALL_INDIA_BOARDS } from '../../data/allIndiaBoardsData';
 import { ALL_INDIA_LANGUAGE_PACKS } from '../../data/allIndiaLanguagesData';
@@ -367,7 +368,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
 
     try {
       const [ytResp, organizedPath] = await Promise.all([
-        fetch('/api/youtube/search', {
+        standaloneApiFetch('/api/youtube/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -479,7 +480,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
     setLoadingPdfNote(true);
     setStudyMode('pdf');
     try {
-      const resp = await fetch('/api/self-study/analyze-chapter', {
+      const resp = await standaloneApiFetch('/api/self-study/analyze-chapter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -597,7 +598,7 @@ export const StudyOnYourOwnSelfWorkspace: React.FC<StudyOnYourOwnSelfWorkspacePr
     const targetChapter = selectedChapterTitle;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 5000);
-    fetch('/api/self-study/analyze-chapter', {
+    standaloneApiFetch('/api/self-study/analyze-chapter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,

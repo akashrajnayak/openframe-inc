@@ -37,6 +37,7 @@ export const Header: React.FC = () => {
   const primaryLinks = [
     { label: 'Home', path: '/' },
     { label: 'Explore Courses', path: '/marketplace' },
+    { label: 'AI Studio', path: '/ai-studio' },
     { label: 'Ask Q&A', path: '/qa' },
     { label: 'Learning Programs', path: '/education', hasDropdown: true },
     { label: 'For Schools', path: '/partner/school' },
@@ -128,11 +129,23 @@ export const Header: React.FC = () => {
                             </div>
                           </Link>
                           <Link
-                            to="/chatbot"
+                            to="/ai-studio"
                             className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
                           >
                             <div className="text-sm font-semibold text-[#123D32] flex items-center gap-1.5">
                               <Sparkles className="w-3.5 h-3.5 text-[#2563EB]" />
+                              <span>OpenFrame AI Studio</span>
+                            </div>
+                            <div className="text-xs text-[#64748B] mt-0.5">
+                              Gemini Chat, Saved Threads &amp; Audio Transcription
+                            </div>
+                          </Link>
+                          <Link
+                            to="/chatbot"
+                            className="block p-3 rounded-xl hover:bg-[#FAF7F2] transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-[#18221F] flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-[#123D32]" />
                               <span>Quinn AI Personal Tutor</span>
                             </div>
                             <div className="text-xs text-[#64748B] mt-0.5">
@@ -274,6 +287,9 @@ export const Header: React.FC = () => {
           ))}
 
           <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2 text-xs">
+            <Link to="/ai-studio" className="px-3 py-2 rounded-xl bg-[#123D32] text-white font-semibold whitespace-nowrap">
+              OpenFrame AI Studio
+            </Link>
             <Link to="/school" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#18221F] whitespace-nowrap">
               School (LKG–12)
             </Link>
@@ -282,9 +298,6 @@ export const Header: React.FC = () => {
             </Link>
             <Link to="/chatbot" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#123D32] whitespace-nowrap">
               Quinn AI Tutor
-            </Link>
-            <Link to="/verify-certificate" className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-medium text-[#18221F] whitespace-nowrap">
-              Verify Certificate
             </Link>
           </div>
 

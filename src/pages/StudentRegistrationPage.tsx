@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter, Link } from '../router/RouterContext';
+import { standaloneApiFetch } from '../services/standaloneMockService';
 import {
   GraduationCap,
   BookOpen,
@@ -169,7 +170,7 @@ export const StudentRegistrationPage: React.FC = () => {
   }, [authLoading, currentUser, lmsUser, isSubmitting, registeredEntry, currentPath, authorizedDashboardPath, navigate]);
 
   useEffect(() => {
-    fetch('/api/auth/verification-status')
+    standaloneApiFetch('/api/auth/verification-status')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.ok) setAuthStatusInfo(data);

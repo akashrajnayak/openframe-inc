@@ -21,6 +21,7 @@ import { submitStudentRegistration } from '../../services/firebase';
 import { lmsService } from '../../services/lmsService';
 import { quinnAiService } from '../../services/quinnAiService';
 import { marketplaceService } from '../../services/marketplaceService';
+import { standaloneMockService } from '../../services/standaloneMockService';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../../utils/searchIntelligence';
 import {
   ALL_INDIAN_STATES_AND_UTS,
@@ -194,8 +195,29 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         internalNotes: `90%-Off Grant Course Enrollment (${formatInr(grantPricing.finalPriceInr)} vs ${formatInr(grantPricing.marketBenchmarkPrice)} market value). Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
       };
 
+      // Persist reservation & learner profile immediately in browser localStorage
+      standaloneMockService.saveReservation({
+        userId: recordUid,
+        studentName: payload.fullName,
+        email: payload.emailAddress,
+        phone: payload.mobileNumber,
+        courseId: courseId || undefined,
+        courseTitle: courseTitle || 'OpenFrame Certified Learning Programme',
+        courseCategory,
+        departmentOrLevel: payload.currentClassQualification,
+        notes: payload.internalNotes,
+      });
+      standaloneMockService.saveUserData(recordUid, {
+        fullName: payload.fullName,
+        email: payload.emailAddress,
+        phone: payload.mobileNumber,
+        degreeOrClass: payload.currentClassQualification,
+        institution: payload.schoolCollegeName,
+        city: payload.city,
+      });
+
       try {
-        await submitStudentRegistration(payload);
+        await submitStudentRegistration(payload).catch(() => {});
         await lmsService.recordConsentRecord({
           userId: recordUid,
           email: payload.emailAddress,

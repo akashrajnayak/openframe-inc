@@ -22,6 +22,7 @@ import {
   youtubeDiscoveryEngine,
   parseIsoDuration,
 } from './server/youtubeDiscoveryEngine';
+import { registerGeminiStudioRoutes } from './server/geminiStudioRouter.ts';
 import {
   detectQueryLanguage,
   normalizeAndExpandQuery,
@@ -1162,7 +1163,7 @@ async function startServer() {
   const app = express();
   app.use(
     express.json({
-      limit: '5mb',
+      limit: '25mb',
       verify: (req: any, _res, buf) => {
         req.rawBody = buf;
       },
@@ -2243,6 +2244,87 @@ async function startServer() {
       nextPageToken: null,
       videos: fallback,
     });
+  });
+
+  app.get('/api/youtube/video-details/:videoId', async (req, res) => {
+    const rawId = String(req.params.videoId || '').trim();
+    if (!rawId || !/^[A-Za-z0-9_-]{6,32}$/.test(rawId)) {
+      return res.status(400).json({ ok: false, error: 'Invalid YouTube video ID.' });
+    }
+    const baseMatch = getBaseCatalogIndex().items.find(
+      (entry) => entry.course.youtubeVideoId === rawId
+    )?.course;
+    const thumb = `https://i.ytimg.com/vi/${rawId}/hqdefault.jpg`;
+    const video = {
+      id: `yt-${rawId}`,
+      videoId: rawId,
+      youtubeId: rawId,
+      title: baseMatch?.title || 'OpenFrame Educational Lecture',
+      channelTitle: baseMatch?.youtubeChannelName || 'OpenFrame Academic Channel',
+      duration: baseMatch?.duration || '45m',
+      description: baseMatch?.shortDesc || 'Curated OpenFrame educational lecture video.',
+      thumbnail: baseMatch?.thumbnailUrl || thumb,
+      thumbnailUrl: baseMatch?.thumbnailUrl || thumb,
+      embedUrl: `https://www.youtube-nocookie.com/embed/${rawId}`,
+      youtubeUrl: `https://www.youtube.com/watch?v=${rawId}`,
+      level: baseMatch?.level || 'Beginner',
+      category: baseMatch?.category || 'Education',
+      language: baseMatch?.language || 'English',
+      embeddable: true,
+    };
+    return res.json({ ok: true, source: 'server_catalog', video, ...video });
+  });
+
+  app.post('/api/youtube/related-resources', async (req, res) => {
+    forwardRequestReferer(req);
+    const {
+      query = '',
+      excludeVideoId = '',
+      language = 'English',
+      maxResults = 6,
+    } = req.body || {};
+    const cleanQuery = String(query || '').trim() || 'Education';
+    const limit = Math.min(12, Math.max(1, Number(maxResults) || 6));
+
+    try {
+      const page = await youtubeDiscoveryEngine.discoverPage({
+        query: cleanQuery,
+        category: 'Education',
+        languageLabel: String(language || 'English'),
+        searchType: 'video',
+        maxResults: limit + 2,
+      });
+      const filtered = (page.items || [])
+        .filter((item) => item.youtubeVideoId && item.youtubeVideoId !== excludeVideoId)
+        .slice(0, limit)
+        .map((item) => ({
+          id: item.id,
+          videoId: item.youtubeVideoId,
+          youtubeId: item.youtubeVideoId,
+          title: item.title,
+          channelTitle: item.youtubeChannelName,
+          thumbnail: item.thumbnailUrl,
+          thumbnailUrl: item.thumbnailUrl,
+          duration: item.duration || 'Tutorial',
+          level: item.level === 'All Levels' ? 'Beginner' : item.level,
+          difficultyLevel: item.level,
+          recommendedReason: item.learningObjectives[0] || item.title,
+          rationale: item.learningObjectives[0] || item.title,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${item.youtubeVideoId}`,
+          youtubeUrl: `https://www.youtube.com/watch?v=${item.youtubeVideoId}`,
+          embeddable: item.embeddable !== false,
+        }));
+      if (filtered.length > 0) {
+        return res.json({ ok: true, source: 'youtube_data_api', videos: filtered });
+      }
+    } catch (err: any) {
+      console.warn('[api/youtube/related-resources] Fallback to curated index:', err?.message || err);
+    }
+
+    const fallback = selectCuratedFallbackVideos(cleanQuery, '')
+      .filter((v) => v.videoId !== excludeVideoId)
+      .slice(0, limit);
+    return res.json({ ok: true, source: 'curated_library', videos: fallback });
   });
 
   app.post('/api/quinn/recommend-videos', async (req, res) => {
@@ -4488,29 +4570,49 @@ Allowed Categories: ${catChoices.join(', ')}`,
   });
 
   app.post('/api/payments/razorpay/order', async (req, res) => {
-    const caller = await verifyFirebaseBearerToken(req);
-    if (!caller) {
-      return res.status(401).json({ error: 'Valid Firebase authentication token required.' });
+    const authHeader = String(req.headers.authorization || '').trim();
+    let caller = null as VerifiedFirebaseUser | null;
+    if (authHeader) {
+      caller = await verifyFirebaseBearerToken(req);
+      if (!caller) {
+        return res.status(401).json({ ok: false, error: 'Invalid Firebase authentication token.' });
+      }
     }
 
     const { amountInr, receipt, institutionId, purpose, notes, courseId } = req.body || {};
     const numAmount = Number(amountInr);
-    if (!Number.isFinite(numAmount) || numAmount <= 0 || numAmount > 10000000) {
-      return res.status(400).json({ error: 'Valid positive amountInr is required.' });
+    if (!Number.isFinite(numAmount) || numAmount < 1 || numAmount > 10000000) {
+      return res.status(400).json({ ok: false, error: 'Valid positive amountInr is required.' });
     }
     const effectiveInstitutionId =
       typeof institutionId === 'string' && institutionId.trim()
         ? institutionId.trim()
         : 'OPENFRAME_MARKETPLACE';
 
-    const keyId = process.env.RAZORPAY_KEY_ID || '';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    const keyId = (process.env.RAZORPAY_KEY_ID || '').trim();
+    const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
     if (!keyId || !keySecret) {
       return res.status(503).json({
         ok: false,
         configured: false,
         error: 'Razorpay credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are not configured on the server.',
       });
+    }
+
+    const rawNotes: Record<string, unknown> = {
+      institutionId: String(effectiveInstitutionId).slice(0, 80),
+      ...(courseId ? { courseId: String(courseId).slice(0, 80) } : {}),
+      purpose: String(purpose || 'Course Enrollment Fee').slice(0, 120),
+      requestedByUid: caller?.uid || 'guest_learner',
+      ...(notes && typeof notes === 'object' ? notes : {}),
+    };
+    const sanitizedNotes: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawNotes)) {
+      if (Object.keys(sanitizedNotes).length >= 12) break;
+      if (v === undefined || v === null) continue;
+      const ck = String(k).trim().slice(0, 60);
+      const cv = String(v).trim().slice(0, 200);
+      if (ck && cv) sanitizedNotes[ck] = cv;
     }
 
     try {
@@ -4525,21 +4627,28 @@ Allowed Categories: ${catChoices.join(', ')}`,
           amount: Math.round(numAmount * 100),
           currency: 'INR',
           receipt: String(receipt || `OFRCP_${Date.now()}`).slice(0, 40),
-          notes: {
-            institutionId: String(effectiveInstitutionId).slice(0, 80),
-            courseId: courseId ? String(courseId).slice(0, 80) : undefined,
-            purpose: String(purpose || 'Course Enrollment Fee').slice(0, 120),
-            requestedByUid: caller.uid,
-            ...(notes && typeof notes === 'object' ? notes : {}),
-          },
+          notes: sanitizedNotes,
         }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(10000),
       });
-      const data = (await rzpResp.json()) as any;
+      const rawText = await rzpResp.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        return res.status(502).json({
+          ok: false,
+          error: 'Razorpay returned an unexpected non-JSON response. Please retry.',
+        });
+      }
       if (!rzpResp.ok) {
+        const isAuthError = rzpResp.status === 401;
         return res.status(rzpResp.status).json({
           ok: false,
-          error: data?.error?.description || 'Failed to create Razorpay order.',
+          authFailed: isAuthError,
+          error: isAuthError
+            ? 'Razorpay API authentication failed. Please verify RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Settings → Secrets.'
+            : data?.error?.description || 'Failed to create Razorpay order.',
         });
       }
       return res.json({ ok: true, keyId, order: data });
@@ -4552,12 +4661,16 @@ Allowed Categories: ${catChoices.join(', ')}`,
   });
 
   app.post('/api/payments/razorpay/verify', async (req, res) => {
-    const caller = await verifyFirebaseBearerToken(req);
-    if (!caller) {
-      return res.status(401).json({ error: 'Valid Firebase authentication token required.' });
+    const authHeader = String(req.headers.authorization || '').trim();
+    let caller = null as VerifiedFirebaseUser | null;
+    if (authHeader) {
+      caller = await verifyFirebaseBearerToken(req);
+      if (!caller) {
+        return res.status(401).json({ verified: false, error: 'Invalid Firebase authentication token.' });
+      }
     }
 
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, userId } = req.body || {};
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({
         verified: false,
@@ -4565,7 +4678,7 @@ Allowed Categories: ${catChoices.join(', ')}`,
       });
     }
 
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
     if (!keySecret) {
       return res.status(503).json({
         verified: false,
@@ -4592,7 +4705,8 @@ Allowed Categories: ${catChoices.join(', ')}`,
     }
 
     const verifiedAt = new Date().toISOString();
-    const tokenPayload = `${String(razorpay_order_id)}|${String(razorpay_payment_id)}|${caller.uid}|${verifiedAt}`;
+    const effectiveUid = caller?.uid || (typeof userId === 'string' && userId.trim() ? userId.trim().slice(0, 128) : 'guest_learner');
+    const tokenPayload = `${String(razorpay_order_id)}|${String(razorpay_payment_id)}|${effectiveUid}|${verifiedAt}`;
     const enrollmentVerificationToken = crypto
       .createHmac('sha256', keySecret)
       .update(tokenPayload)
@@ -4602,7 +4716,7 @@ Allowed Categories: ${catChoices.join(', ')}`,
       verified: true,
       orderId: String(razorpay_order_id),
       paymentId: String(razorpay_payment_id),
-      verifiedByUid: caller.uid,
+      verifiedByUid: effectiveUid,
       verifiedAt,
       enrollmentVerificationToken,
     });
@@ -5947,6 +6061,13 @@ ${JSON.stringify({
         message: err?.message || 'YouTube API search temporarily unavailable; open the safe curriculum search link.',
       });
     }
+  });
+
+  registerGeminiStudioRoutes(app);
+
+  // Ensure unmatched /api/* endpoints always return JSON rather than HTML/plain-text fallbacks
+  app.all('/api/*', (_req, res) => {
+    return res.status(404).json({ ok: false, error: 'API endpoint not found.' });
   });
 
   const httpServer = http.createServer(app);

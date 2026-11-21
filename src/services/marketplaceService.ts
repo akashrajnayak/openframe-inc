@@ -14,7 +14,8 @@ import {
   getCountFromServer,
   increment,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
+import { standaloneApiFetch } from './standaloneMockService';
 import {
   MarketplaceCourse,
   MarketplacePricingTier,
@@ -562,32 +563,40 @@ class MarketplaceService {
       return this.overridesCache.map;
     }
     const map = new Map<string, MarketplaceCourse>();
+    if (auth.currentUser) {
+      try {
+        const q = query(
+          collection(db, 'courses'),
+          where('isBaseOverride', '==', true),
+          limit(MAX_LOCAL_OVERRIDE_SCAN)
+        );
+        const snap = await getDocs(q);
+        snap.forEach((d) => {
+          const data = d.data() as MarketplaceCourse;
+          map.set(data.id || d.id, data);
+        });
+        this.overridesCache = { map, ts: now };
+        return map;
+      } catch {
+        // Non-admin authenticated users fall through to rule-compliant Published query
+      }
+    }
     try {
-      const q = query(
-        collection(db, 'courses'),
-        where('isBaseOverride', '==', true),
-        limit(MAX_LOCAL_OVERRIDE_SCAN)
-      );
-      const snap = await getDocs(q);
-      snap.forEach((d) => {
-        const data = d.data() as MarketplaceCourse;
-        map.set(data.id || d.id, data);
-      });
-    } catch {
-      // Non-admin/public visitors cannot list non-Published docs; read Published overrides via rule-compliant query
       const published = await this.fetchPublishedFirestoreCourses(force);
       for (const c of published) {
         if (c.isBaseOverride) {
           map.set(c.id, c);
         }
       }
+    } catch {
+      // Fall back cleanly to standalone base catalog when offline
     }
     this.overridesCache = { map, ts: now };
     return map;
   }
 
   private async fetchBaseStatsFromServer(excludeIds: string[]) {
-    const res = await fetch('/api/marketplace/base-stats', {
+    const res = await standaloneApiFetch('/api/marketplace/base-stats', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ excludeIds }),
@@ -685,17 +694,19 @@ class MarketplaceService {
         }
       }
 
-      // Draft counts (succeeds quietly for admins/educators, ignored for public visitors)
-      try {
-        const draftSnap = await getDocs(
-          query(collection(db, 'courses'), where('status', '==', 'Draft'), limit(500))
-        );
-        draftSnap.forEach((d) => {
-          const c = d.data() as MarketplaceCourse;
-          if (c.isCustomAdded) customDraft++;
-        });
-      } catch {
-        // Public visitors do not have permission to list Draft courses
+      // Draft counts (only queried for authenticated admins/educators; skipped for public visitors)
+      if (auth.currentUser) {
+        try {
+          const draftSnap = await getDocs(
+            query(collection(db, 'courses'), where('status', '==', 'Draft'), limit(500))
+          );
+          draftSnap.forEach((d) => {
+            const c = d.data() as MarketplaceCourse;
+            if (c.isCustomAdded) customDraft++;
+          });
+        } catch {
+          // Non-admin users do not have permission to list Draft courses
+        }
       }
 
       const catCountSnap = await getCountFromServer(collection(db, 'course_categories'));
@@ -1034,7 +1045,7 @@ class MarketplaceService {
     try {
       const baseOffset = Math.max(0, startGlobal - fsTotal);
       const basePageNeeded = remainingSlots > 0 ? Math.floor(baseOffset / pageSize) + 1 : 1;
-      const res = await fetch('/api/marketplace/base-search', {
+      const res = await standaloneApiFetch('/api/marketplace/base-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1052,7 +1063,7 @@ class MarketplaceService {
           serverCourses = data.courses.slice(offsetWithinPage, offsetWithinPage + remainingSlots);
           // If boundary straddles two server pages, fetch next page tail
           if (serverCourses.length < remainingSlots && data.total > basePageNeeded * pageSize) {
-            const nextRes = await fetch('/api/marketplace/base-search', {
+            const nextRes = await standaloneApiFetch('/api/marketplace/base-search', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1166,7 +1177,7 @@ class MarketplaceService {
     }
 
     try {
-      const res = await fetch(`/api/marketplace/base-autocomplete?q=${encodeURIComponent(queryText)}`);
+      const res = await standaloneApiFetch(`/api/marketplace/base-autocomplete?q=${encodeURIComponent(queryText)}`);
       if (res.ok) {
         const data = await res.json();
         for (const s of data.suggestions || []) {
@@ -1249,7 +1260,7 @@ class MarketplaceService {
 
     // 2. Check server indexed base catalog (handles OF-AI-*, OF-YT-*, OF-CRS-00001..16000, yt-*, disc-vid-*, disc-pl-*)
     try {
-      const res = await fetch(`/api/marketplace/base-course/${encodeURIComponent(cleanId)}`);
+      const res = await standaloneApiFetch(`/api/marketplace/base-course/${encodeURIComponent(cleanId)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.course) return data.course;
@@ -1434,7 +1445,7 @@ class MarketplaceService {
    * Resolves metadata from a YouTube Video or Playlist URL using backend API.
    */
   async resolveYouTubeCourse(url: string): Promise<ResolvedYouTubeMetadata> {
-    const res = await fetch('/api/youtube/resolve-course', {
+    const res = await standaloneApiFetch('/api/youtube/resolve-course', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -2134,7 +2145,7 @@ class MarketplaceService {
       let page = 1;
       let totalPages = 1;
       while (page <= totalPages && page <= 10 && resultMap.size < maxRows) {
-        const res = await fetch('/api/marketplace/base-search', {
+        const res = await standaloneApiFetch('/api/marketplace/base-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -8,6 +8,7 @@ import {
   SchoolQuizQuestion,
   TranslatedConceptBundle,
 } from '../types';
+import { standaloneApiFetch } from './standaloneMockService';
 
 export interface SchoolTutorRequest {
   message: string;
@@ -37,7 +38,7 @@ export interface SchoolTutorRequest {
 
 export async function askSchoolTutor(payload: SchoolTutorRequest): Promise<{ reply: string; source: string }> {
   try {
-    const res = await fetch('/api/school/tutor', {
+    const res = await standaloneApiFetch('/api/school/tutor', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -63,7 +64,7 @@ export async function generateSchoolQuiz(params: {
   formats: SchoolQuestionFormat[];
   questionCount?: number;
 }): Promise<{ questions: SchoolQuizQuestion[]; source: string }> {
-  const res = await fetch('/api/school/generate-quiz', {
+  const res = await standaloneApiFetch('/api/school/generate-quiz', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -88,7 +89,7 @@ export async function evaluateSchoolQuiz(params: {
   quizMode: SchoolQuizMode;
   language: SchoolLanguage;
 }): Promise<SchoolQuizAttempt> {
-  const res = await fetch('/api/school/evaluate-quiz', {
+  const res = await standaloneApiFetch('/api/school/evaluate-quiz', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -107,7 +108,7 @@ export async function evaluatePresentationWithAI(params: {
   summaryNotes: string;
   externalUrl?: string;
 }) {
-  const res = await fetch('/api/school/evaluate-presentation', {
+  const res = await standaloneApiFetch('/api/school/evaluate-presentation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -147,7 +148,7 @@ export async function translateSchoolConcept(params: {
   subjectName: string;
   className: string;
 }): Promise<{ translatedText: string; targetLanguage: SchoolLanguage }> {
-  const res = await fetch('/api/school/translate-concept', {
+  const res = await standaloneApiFetch('/api/school/translate-concept', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -176,7 +177,7 @@ export async function translateSchoolConceptBundle(params: {
   }
 
   try {
-    const res = await fetch('/api/school/translate-concept-bundle', {
+    const res = await standaloneApiFetch('/api/school/translate-concept-bundle', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -232,7 +233,7 @@ export async function fetchSchoolYouTubeLessons(params: {
   videos: SchoolYouTubeVideoResult[];
   message?: string;
 }> {
-  const res = await fetch('/api/school/youtube-lessons', {
+  const res = await standaloneApiFetch('/api/school/youtube-lessons', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

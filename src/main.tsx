@@ -35,13 +35,24 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             <p className="text-xs text-slate-300">
               The application encountered a transient browser or extension error.
             </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold uppercase tracking-wider"
-            >
-              Reload Page
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = '/';
+                }}
+                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold uppercase tracking-wider"
+              >
+                Return Home
+              </button>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold uppercase tracking-wider"
+              >
+                Reload Page
+              </button>
+            </div>
           </div>
         </div>
       );

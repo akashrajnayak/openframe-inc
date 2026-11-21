@@ -34,6 +34,14 @@ import {
   type CertificateAddressDetails,
 } from '../../utils/pricingEngine';
 import { GoogleSignInButton } from './GoogleSignInButton';
+import {
+  standaloneMockService,
+  type StandaloneOrderRecord,
+} from '../../services/standaloneMockService';
+import {
+  fetchLiveRazorpayConfig,
+  launchLiveRazorpayPayment,
+} from '../../services/razorpayCheckoutService';
 
 interface CourseEnrollmentModalProps {
   isOpen: boolean;
@@ -41,31 +49,6 @@ interface CourseEnrollmentModalProps {
   course: MarketplaceCourse | null;
   onEnrolled?: (enrollment: CourseEnrollment) => void;
   skipAutoRedirect?: boolean;
-}
-
-declare global {
-  interface Window {
-    Razorpay?: any;
-  }
-}
-
-async function loadRazorpayCheckoutScript(): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
-  if (window.Razorpay) return true;
-  return new Promise((resolve) => {
-    const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(Boolean(window.Razorpay)));
-      existing.addEventListener('error', () => resolve(false));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.onload = () => resolve(Boolean(window.Razorpay));
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
 }
 
 export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
@@ -82,7 +65,11 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
   const [alreadyEnrolled, setAlreadyEnrolled] = useState<CourseEnrollment | null>(null);
   const [pendingEnrollment, setPendingEnrollment] = useState<CourseEnrollment | null>(null);
   const [showAddressFields, setShowAddressFields] = useState(false);
-  const [step, setStep] = useState<'details' | 'confirm' | 'success'>('details');
+  const [continueStandalone, setContinueStandalone] = useState(false);
+  const [step, setStep] = useState<'details' | 'razorpay_checkout' | 'confirm' | 'success'>('details');
+  const [activeMockOrder, setActiveMockOrder] = useState<StandaloneOrderRecord | null>(null);
+  const [selectedPayMethod, setSelectedPayMethod] = useState<'UPI' | 'Card' | 'NetBanking' | 'Wallet'>('UPI');
+  const [upiHandle, setUpiHandle] = useState('student@upi');
 
   // Core learner details
   const [fullName, setFullName] = useState('');
@@ -111,54 +98,56 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [completedEnrollment, setCompletedEnrollment] = useState<CourseEnrollment | null>(null);
 
+  const activeLearnerUid = currentUser?.uid || standaloneMockService.getActiveLearner().uid;
+
   useEffect(() => {
     if (!isOpen || !course) return;
     setStep('details');
     setErrorMsg('');
     setGatewayUnavailable(false);
+    setActiveMockOrder(null);
     setCompletedEnrollment(null);
     setAlreadyEnrolled(null);
     setPendingEnrollment(null);
     setShowAddressFields(false);
+    setContinueStandalone(false);
 
-    setFullName(studentProfile?.fullName || lmsUser?.displayName || currentUser?.displayName || '');
-    setEmail(studentProfile?.email || lmsUser?.email || currentUser?.email || '');
-    setMobileNumber(studentProfile?.mobileNumber || '');
+    const savedLocal = standaloneMockService.getUserData(activeLearnerUid);
+    setFullName(studentProfile?.fullName || lmsUser?.displayName || currentUser?.displayName || savedLocal?.fullName || '');
+    setEmail(studentProfile?.email || lmsUser?.email || currentUser?.email || savedLocal?.email || '');
+    setMobileNumber(studentProfile?.mobileNumber || savedLocal?.phone || '');
     setAlternativeMobileNumber(studentProfile?.alternativeMobileNumber || studentProfile?.whatsappNumber || '');
-    setHomeAddress(studentProfile?.homeAddress || '');
-    setFlatNumber(studentProfile?.flatNumber || studentProfile?.houseNumber || '');
-    setStreetAddress(studentProfile?.streetAddress || '');
-    setPincode(studentProfile?.pincode || '');
+    setHomeAddress(studentProfile?.homeAddress || savedLocal?.address?.homeAddress || '');
+    setFlatNumber(studentProfile?.flatNumber || studentProfile?.houseNumber || savedLocal?.address?.flatNumber || '');
+    setStreetAddress(studentProfile?.streetAddress || savedLocal?.address?.streetAddress || '');
+    setPincode(studentProfile?.pincode || savedLocal?.address?.pincode || '');
     setDob(studentProfile?.dob || '');
-    setEducationLevel(studentProfile?.educationLevel || 'G');
-    setDegreeOrClass(studentProfile?.degreeOrClass || studentProfile?.qualification || 'Skill Development / Self-Paced');
-    setInstitution(studentProfile?.institution || lmsUser?.institutionName || '');
-    setCity(studentProfile?.city || '');
-    setStateName(studentProfile?.state || 'Karnataka');
+    setEducationLevel((studentProfile?.educationLevel || savedLocal?.educationLevel || 'G') as EducationCategoryCode);
+    setDegreeOrClass(studentProfile?.degreeOrClass || studentProfile?.qualification || savedLocal?.degreeOrClass || 'Skill Development / Self-Paced');
+    setInstitution(studentProfile?.institution || lmsUser?.institutionName || savedLocal?.institution || '');
+    setCity(studentProfile?.city || savedLocal?.city || '');
+    setStateName(studentProfile?.state || savedLocal?.address?.state || 'Karnataka');
     setParentName(studentProfile?.parentName || '');
     setParentMobile(studentProfile?.parentMobile || '');
 
-    if (currentUser?.uid) {
-      setCheckingExisting(true);
-      lmsService
-        .getStudentEnrollments(currentUser.uid)
-        .then((enrollments) => {
-          const match = enrollments.find(
-            (e) => e.courseId.toLowerCase() === course.id.toLowerCase() && e.status !== 'Suspended'
-          );
-          if (match) {
-            if (lmsService.isVerifiedPaidEnrollment(match)) {
-              setAlreadyEnrolled(match);
-            } else {
-              // Enrollment exists without completed Razorpay payment — require payment FIRST!
-              setPendingEnrollment(match);
-            }
+    setCheckingExisting(true);
+    lmsService
+      .getStudentEnrollments(activeLearnerUid)
+      .then((enrollments) => {
+        const match = enrollments.find(
+          (e) => e.courseId.toLowerCase() === course.id.toLowerCase() && e.status !== 'Suspended'
+        );
+        if (match) {
+          if (lmsService.isVerifiedPaidEnrollment(match)) {
+            setAlreadyEnrolled(match);
+          } else {
+            setPendingEnrollment(match);
           }
-        })
-        .catch(() => {})
-        .finally(() => setCheckingExisting(false));
-    }
-  }, [isOpen, course, currentUser, studentProfile, lmsUser]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setCheckingExisting(false));
+  }, [isOpen, course, currentUser, studentProfile, lmsUser, activeLearnerUid]);
 
   const programmeOptions = useMemo(() => {
     return getAllProgrammesForCategory(educationLevel);
@@ -274,21 +263,37 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
       verifiedAt?: string;
     }
   ) => {
-    if (!currentUser) {
-      throw new Error('Please sign in to your learner account to complete enrollment.');
-    }
+    const effectiveUid = activeLearnerUid;
+
+    // Persist user profile locally in browser storage
+    standaloneMockService.saveUserData(effectiveUid, {
+      fullName: fullName.trim() || currentUser?.displayName || 'OpenFrame Learner',
+      email: email.trim() || currentUser?.email || 'learner@openframe.local',
+      phone: addressDetails.mobileNumber || undefined,
+      educationLevel,
+      degreeOrClass: degreeOrClass.trim() || 'Skill Development / Self-Paced',
+      institution: institution.trim() || 'Independent Learner',
+      city: city.trim() || undefined,
+      address: {
+        homeAddress: addressDetails.homeAddress || '',
+        flatNumber: addressDetails.flatNumber || '',
+        streetAddress: addressDetails.streetAddress || '',
+        pincode: addressDetails.pincode || '',
+        state: addressDetails.state || '',
+      },
+    });
 
     // Cache the course immediately so /learn/:courseId ALWAYS finds it instantaneously after payment
     cacheYouTubeCourse(course);
 
     const activeProfile =
       (await syncUpdatedStudentProfile()) || {
-        id: currentUser.uid,
-        uid: currentUser.uid,
-        studentId: currentUser.uid,
+        id: effectiveUid,
+        uid: effectiveUid,
+        studentId: effectiveUid,
         registrationNumber: lmsUser?.registrationNumber || `OF-STU-${Date.now().toString().slice(-6)}`,
-        fullName: fullName.trim() || currentUser.displayName || 'Student Learner',
-        email: email.trim() || currentUser.email || '',
+        fullName: fullName.trim() || currentUser?.displayName || 'OpenFrame Learner',
+        email: email.trim() || currentUser?.email || 'learner@openframe.local',
         mobileNumber: addressDetails.mobileNumber,
         alternativeMobileNumber: addressDetails.alternativeMobileNumber,
         homeAddress: addressDetails.homeAddress,
@@ -306,7 +311,7 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
     const { enrollment } = await lmsService.enrollStudentInCourse(
       course,
       {
-        uid: currentUser.uid,
+        uid: effectiveUid,
         fullName: activeProfile.fullName,
         email: activeProfile.email,
         registrationNumber: activeProfile.registrationNumber,
@@ -319,7 +324,7 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
 
     lmsService
       .logDiscoveryAnalyticsEvent({
-        userId: currentUser.uid,
+        userId: effectiveUid,
         eventType: 'course_enroll_click',
         query: course.title,
         educationLevelCode: educationLevel,
@@ -360,131 +365,148 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
 
   const handleConfirmRazorpayCheckout = async () => {
     setErrorMsg('');
-    if (!currentUser) {
-      onClose();
-      navigate('/login/student');
-      return;
-    }
-
+    setGatewayUnavailable(false);
     setProcessing(true);
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
-        throw new Error('Authentication session expired. Please sign in again.');
-      }
+      const cfg = await fetchLiveRazorpayConfig();
 
-      const orderRes = await fetch('/api/payments/razorpay/order', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
+      if (cfg.configured && cfg.keyId) {
+        const verified = await launchLiveRazorpayPayment({
           amountInr: priceInr,
           courseId: course.id,
+          courseTitle: course.title,
           institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
           purpose: `90%-Off OpenFrame Grant Enrollment: ${course.title}`,
+          description: `${course.title} (${course.id})`,
+          customerName: fullName.trim() || currentUser?.displayName || 'OpenFrame Learner',
+          customerEmail: email.trim() || currentUser?.email || 'learner@openframe.local',
+          customerPhone: addressDetails.mobileNumber || undefined,
+          userId: activeLearnerUid,
           notes: {
-            studentName: fullName.trim(),
-            courseTitle: course.title,
+            studentName: (fullName.trim() || 'OpenFrame Learner').slice(0, 120),
+            courseTitle: course.title.slice(0, 120),
             marketBenchmarkPrice: String(marketPriceInr),
             discountPercent: '90',
-            pincode: addressDetails.pincode,
-            state: addressDetails.state,
-          },
-        }),
-      });
-
-      const orderData = await orderRes.json();
-      if (!orderRes.ok || !orderData.ok) {
-        if (orderRes.status === 503 || orderData.configured === false) {
-          setGatewayUnavailable(true);
-          setErrorMsg(
-            'Online Razorpay checkout keys are not active on this preview server. You may complete Provisional 90%-Off Grant Enrollment (Pay-Later / Offline Challan) below to unlock your modules immediately.'
-          );
-          return;
-        }
-        throw new Error(orderData.error || 'Unable to initiate payment checkout.');
-      }
-
-      const loaded = await loadRazorpayCheckoutScript();
-      if (!loaded || !window.Razorpay) {
-        throw new Error('Unable to load Razorpay Checkout SDK. Please check network connectivity and retry.');
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        const rzp = new window.Razorpay({
-          key: orderData.keyId,
-          amount: orderData.order.amount,
-          currency: orderData.order.currency || 'INR',
-          name: 'OpenFrame Education',
-          description: `${course.title} (90% Grant Fee)`,
-          order_id: orderData.order.id,
-          prefill: {
-            name: fullName.trim(),
-            email: email.trim(),
-            contact: addressDetails.mobileNumber,
-          },
-          theme: { color: '#123D32' },
-          handler: async (response: any) => {
-            try {
-              const verifyRes = await fetch('/api/payments/razorpay/verify', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${idToken}`,
-                },
-                body: JSON.stringify({
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_signature: response.razorpay_signature,
-                }),
-              });
-              const verifyData = await verifyRes.json();
-              if (!verifyRes.ok || !verifyData.verified) {
-                reject(new Error(verifyData.error || 'Payment signature verification failed.'));
-                return;
-              }
-
-              const payId = `pay_${Date.now().toString(36)}`;
-              await setDoc(doc(db, 'payments', payId), {
-                id: payId,
-                userId: currentUser.uid,
-                studentId: currentUser.uid,
-                institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
-                courseId: course.id,
-                courseTitle: course.title,
-                amount: priceInr,
-                amountInr: priceInr,
-                marketBenchmarkPrice: marketPriceInr,
-                discountPercent: 90,
-                gateway: 'Razorpay',
-                status: 'Paid',
-                razorpayOrderId: response.razorpay_order_id,
-                razorpayPaymentId: response.razorpay_payment_id,
-                verifiedServerSide: true,
-                createdAt: new Date().toISOString(),
-              }).catch(() => {});
-
-              await finalizeCourseEnrollment('Paid', priceInr, {
-                razorpayOrderId: response.razorpay_order_id,
-                razorpayPaymentId: response.razorpay_payment_id,
-                paymentGateway: 'Razorpay',
-                verifiedAt: verifyData.verifiedAt || new Date().toISOString(),
-              });
-              resolve();
-            } catch (err: any) {
-              reject(err);
-            }
-          },
-          modal: {
-            ondismiss: () => reject(new Error('Payment cancelled before completion.')),
+            ...(addressDetails.pincode ? { pincode: addressDetails.pincode } : {}),
+            ...(addressDetails.state ? { state: addressDetails.state } : {}),
           },
         });
-        rzp.open();
+
+        // Best-effort mirror to Firestore when signed in
+        if (currentUser?.uid) {
+          const payId = `rzp_${verified.paymentId}`;
+          await setDoc(doc(db, 'payments', payId), {
+            id: payId,
+            userId: currentUser.uid,
+            studentId: currentUser.uid,
+            institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
+            courseId: course.id,
+            courseTitle: course.title,
+            amount: priceInr,
+            amountInr: priceInr,
+            marketBenchmarkPrice: marketPriceInr,
+            discountPercent: 90,
+            gateway: 'Razorpay',
+            status: 'Paid',
+            razorpayOrderId: verified.orderId,
+            razorpayPaymentId: verified.paymentId,
+            verifiedServerSide: true,
+            createdAt: verified.verifiedAt,
+          }).catch(() => {});
+        }
+
+        await finalizeCourseEnrollment('Paid', priceInr, {
+          razorpayOrderId: verified.orderId,
+          razorpayPaymentId: verified.paymentId,
+          paymentGateway: 'Razorpay',
+          verifiedAt: verified.verifiedAt,
+        });
+        return;
+      }
+
+      // Fallback to local standalone checkout ONLY when server Razorpay keys are not configured / backend unreachable
+      const { order } = standaloneMockService.createMockRazorpayOrder({
+        amountInr: priceInr,
+        courseId: course.id,
+        institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
+        purpose: `90%-Off OpenFrame Grant Enrollment: ${course.title}`,
+        notes: {
+          studentName: fullName.trim().slice(0, 120),
+          courseTitle: course.title.slice(0, 120),
+          marketBenchmarkPrice: String(marketPriceInr),
+          discountPercent: '90',
+          pincode: addressDetails.pincode || '',
+          state: addressDetails.state || '',
+        },
+      });
+      setActiveMockOrder(order);
+      setStep('razorpay_checkout');
+    } catch (err: any) {
+      if (err?.code === 'PAYMENT_CANCELLED') {
+        setErrorMsg('Razorpay checkout was closed before payment completed. Click Pay to retry.');
+      } else {
+        setErrorMsg(err?.message || 'Unable to launch Razorpay checkout. Please retry.');
+        if (err?.code === 'RAZORPAY_NOT_CONFIGURED' || err?.code === 'RAZORPAY_AUTH_FAILED') {
+          setGatewayUnavailable(true);
+        }
+      }
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleCompleteStandalonePayment = async () => {
+    if (!activeMockOrder) return;
+    setErrorMsg('');
+    setProcessing(true);
+    try {
+      // Short visual confirmation beat so payment processing feels responsive
+      await new Promise((r) => setTimeout(r, 350));
+
+      const verified = standaloneMockService.verifyMockRazorpayPayment({
+        razorpay_order_id: activeMockOrder.id,
+        userId: activeLearnerUid,
+        studentName: fullName.trim() || 'OpenFrame Learner',
+        studentEmail: email.trim() || 'learner@openframe.local',
+        courseId: course.id,
+        courseTitle: course.title,
+        institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
+        purpose: `OpenFrame Enrollment: ${course.title}`,
+        amountInr: priceInr,
+        method: selectedPayMethod,
+      });
+
+      // Best-effort mirror to Firestore when signed in (never blocks standalone mode)
+      if (currentUser?.uid) {
+        const payId = verified.paymentRecord.id;
+        await setDoc(doc(db, 'payments', payId), {
+          id: payId,
+          userId: currentUser.uid,
+          studentId: currentUser.uid,
+          institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
+          courseId: course.id,
+          courseTitle: course.title,
+          amount: priceInr,
+          amountInr: priceInr,
+          marketBenchmarkPrice: marketPriceInr,
+          discountPercent: 90,
+          gateway: 'Razorpay',
+          status: 'Paid',
+          razorpayOrderId: verified.orderId,
+          razorpayPaymentId: verified.paymentId,
+          verifiedServerSide: true,
+          createdAt: verified.verifiedAt,
+        }).catch(() => {});
+      }
+
+      await finalizeCourseEnrollment('Paid', priceInr, {
+        razorpayOrderId: verified.orderId,
+        razorpayPaymentId: verified.paymentId,
+        paymentGateway: 'Razorpay',
+        verifiedAt: verified.verifiedAt,
       });
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Unable to complete enrollment.');
+      setErrorMsg(err?.message || 'Unable to complete payment verification.');
     } finally {
       setProcessing(false);
     }
@@ -619,25 +641,33 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
                 </button>
               </div>
             </div>
-          ) : !currentUser ? (
+          ) : !currentUser && !continueStandalone ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
               <div className="flex items-start gap-3">
                 <Lock className="w-5 h-5 text-[#14213D] shrink-0 mt-1" />
                 <div>
                   <h3 className="font-heading text-lg font-bold text-[#18221F]">
-                    Sign in to enroll &amp; track your verified certificate
+                    Continue to Payment &amp; Instant Course Access
                   </h3>
                   <p className="text-sm text-slate-600 mt-1">
-                    Verified authentication is required to save your 7-field certificate address details, enroll at the 90%-off grant fee of{' '}
+                    Sign in to sync across devices, or proceed directly in standalone mode (saved locally in your browser) to pay{' '}
                     <strong className="text-[#123D32] tabular-nums">{formatInr(priceInr)}</strong> (Market Value{' '}
-                    <span className="line-through tabular-nums">{formatInr(marketPriceInr)}</span>), and issue your QR-verified certificate.
+                    <span className="line-through tabular-nums">{formatInr(marketPriceInr)}</span>) and unlock your workspace immediately.
                   </p>
                 </div>
               </div>
               <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setContinueStandalone(true)}
+                  className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-[#123D32] hover:bg-[#0D2E25] text-white text-sm font-bold rounded-xl transition-colors cursor-pointer shadow-sm"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Continue Standalone &amp; Pay {formatInr(priceInr)} Now</span>
+                </button>
                 <GoogleSignInButton
                   role="student"
-                  label="Continue with Google to Enroll"
+                  label="Or Continue with Google"
                   variant="dark"
                 />
                 <div className="flex flex-wrap gap-3">
@@ -657,6 +687,113 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
                     className="px-4 py-2.5 border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-700 rounded-xl cursor-pointer"
                   >
                     Continue Browsing
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : step === 'razorpay_checkout' && activeMockOrder ? (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+              <div className="bg-[#0B1930] text-white px-5 py-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
+                    OpenFrame Checkout · Instant Local Verification
+                  </div>
+                  <div className="text-base font-bold mt-0.5 line-clamp-1">{course.title}</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5 tabular-nums">
+                    Order ID: {activeMockOrder.id} · {fullName || 'OpenFrame Learner'}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-xs text-slate-300">Amount Payable</div>
+                  <div className="text-2xl font-extrabold text-emerald-300 tabular-nums">
+                    {formatInr(priceInr)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
+                    Select Payment Method
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(['UPI', 'Card', 'NetBanking', 'Wallet'] as const).map((method) => (
+                      <button
+                        key={method}
+                        type="button"
+                        onClick={() => setSelectedPayMethod(method)}
+                        className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
+                          selectedPayMethod === method
+                            ? 'bg-[#123D32] text-white border-[#123D32]'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {selectedPayMethod === 'UPI' && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      UPI ID (GPay / PhonePe / Paytm / BHIM)
+                    </label>
+                    <input
+                      type="text"
+                      value={upiHandle}
+                      onChange={(e) => setUpiHandle(e.target.value)}
+                      placeholder="yourname@upi"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900"
+                    />
+                  </div>
+                )}
+
+                {selectedPayMethod === 'Card' && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                    <div className="font-bold text-slate-900">Instant Demo Card Verification</div>
+                    <p>Visa / Mastercard / RuPay test authorization runs locally in your browser without charging a real card.</p>
+                  </div>
+                )}
+
+                {selectedPayMethod === 'NetBanking' && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                    <div className="font-bold text-slate-900">Indian NetBanking (SBI, HDFC, ICICI, Axis)</div>
+                    <p>Simulated bank confirmation completes instantly and stores your receipt in localStorage.</p>
+                  </div>
+                )}
+
+                {selectedPayMethod === 'Wallet' && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                    <div className="font-bold text-slate-900">Mobile Wallets (Paytm, PhonePe, Amazon Pay)</div>
+                    <p>Instant standalone checkout verification — unlocks your course workspace right away.</p>
+                  </div>
+                )}
+
+                {errorMsg && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs font-medium text-red-700 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setStep('details')}
+                    disabled={processing}
+                    className="px-4 py-2.5 border border-slate-300 bg-white text-xs sm:text-sm font-semibold text-slate-700 rounded-xl hover:bg-slate-50 cursor-pointer"
+                  >
+                    Back to Details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCompleteStandalonePayment}
+                    disabled={processing}
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-[#123D32] hover:bg-[#0D2E25] text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-60 cursor-pointer shadow-sm tabular-nums"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-emerald-300" />
+                    <span>{processing ? 'Verifying Payment...' : `Pay ${formatInr(priceInr)} & Verify Now`}</span>
                   </button>
                 </div>
               </div>

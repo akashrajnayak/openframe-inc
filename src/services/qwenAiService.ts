@@ -1,4 +1,5 @@
 import { ExtendedYouTubeVideo, youtubeVideoService } from './youtubeVideoService';
+import { standaloneApiFetch } from './standaloneMockService';
 
 export interface ChatMessage {
   id: string;
@@ -129,7 +130,7 @@ How can I assist your learning or technology goals today?`,
 
     // Try live Gemini AI backend first while preserving rich contextual action prompts
     try {
-      const apiRes = await fetch('/api/quinn/chat', {
+      const apiRes = await standaloneApiFetch('/api/quinn/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

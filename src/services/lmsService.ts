@@ -14,6 +14,7 @@ import {
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 import { db, handleFirestoreError, OperationType, uploadDocumentToStorage, stripUndefinedDeep } from './firebase';
+import { standaloneMockService, standaloneApiFetch } from './standaloneMockService';
 import {
   StudentProgressRecord,
   VideoLearningSession,
@@ -280,8 +281,14 @@ export class LmsService {
       ...(hasVerifiedRzp ? { verifiedServerSide: true } : {}),
     } as CourseEnrollment;
 
-    // Immediately store in local write-through cache before Firestore roundtrip
+    // Immediately store in localStorage (standalone mock store + write-through cache)
     writeCachedEnrollment(student.uid, enrollment);
+    standaloneMockService.saveEnrollment(enrollment);
+    standaloneMockService.saveUserData(student.uid, {
+      fullName: student.fullName,
+      email: student.email,
+      phone: ad.mobileNumber || undefined,
+    });
 
     try {
       const shouldWriteDoc =
@@ -289,11 +296,10 @@ export class LmsService {
         (paymentStatusOverride && PAID_STATUSES.has(paymentStatusOverride)) ||
         Boolean(paymentMetadata?.razorpayPaymentId);
 
-      if (shouldWriteDoc) {
+      if (shouldWriteDoc && !student.uid.startsWith('local_learner_')) {
         try {
           await setDoc(doc(db, 'course_enrollments', enrollmentId), stripUndefinedDeep(enrollment), { merge: true });
         } catch (writeErr) {
-          // If an older Pending doc exists and update rule blocks modifying paymentStatus for non-admin, create a dedicated verified-paid enrollment doc
           if (paymentMetadata?.razorpayPaymentId) {
             const paidDocId = sanitizeId(`${enrollmentId}_rzp_${paymentMetadata.razorpayPaymentId.slice(-8)}`);
             const paidDocPayload = stripUndefinedDeep({
@@ -301,9 +307,9 @@ export class LmsService {
               id: paidDocId,
               verifiedServerSide: true,
             });
-            await setDoc(doc(db, 'course_enrollments', paidDocId), paidDocPayload);
+            await setDoc(doc(db, 'course_enrollments', paidDocId), paidDocPayload).catch(() => {});
           } else {
-            throw writeErr;
+            console.warn('Firestore enrollment mirror skipped (saved locally):', writeErr);
           }
         }
         if (!existingEnrollment || (paymentStatusOverride && PAID_STATUSES.has(paymentStatusOverride))) {
@@ -324,7 +330,7 @@ export class LmsService {
         }
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `course_enrollments/${enrollmentId}`);
+      console.warn('Enrollment saved locally in browser storage; remote sync skipped:', err);
     }
 
     const totalMandatoryLessons = Math.max(
@@ -360,19 +366,25 @@ export class LmsService {
       } catch {
         cached = [];
       }
+      const standaloneList = standaloneMockService.getEnrollments(studentUid);
+      if (standaloneList.length > 0) {
+        cached = [...standaloneList, ...cached];
+      }
     }
 
     let remote: CourseEnrollment[] = [];
-    try {
-      const q = query(
-        collection(db, 'course_enrollments'),
-        where('studentId', '==', studentUid),
-        limit(100)
-      );
-      const snap = await getDocs(q);
-      remote = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-    } catch (err) {
-      console.warn('Error fetching enrollments:', err);
+    if (!studentUid.startsWith('local_learner_')) {
+      try {
+        const q = query(
+          collection(db, 'course_enrollments'),
+          where('studentId', '==', studentUid),
+          limit(100)
+        );
+        const snap = await getDocs(q);
+        remote = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      } catch (err) {
+        console.warn('Using local enrollment records (remote unavailable):', err);
+      }
     }
 
     // Merge remote & local cache, preferring verified Razorpay Paid / Scholarship records
@@ -2157,7 +2169,7 @@ export class LmsService {
     }
 
     if (notif.recipientEmail) {
-      fetch('/api/notifications/email', {
+      standaloneApiFetch('/api/notifications/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2766,7 +2778,7 @@ export class LmsService {
 
   async getSystemTelemetry(): Promise<ApiUsageTelemetry | null> {
     try {
-      const res = await fetch('/api/system/telemetry');
+      const res = await standaloneApiFetch('/api/system/telemetry');
       if (res.ok) return await res.json();
     } catch {
       // ignore
