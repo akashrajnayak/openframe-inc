@@ -11,7 +11,8 @@ import {
   CheckCircle2,
   Clock,
   User,
-  Shield
+  Shield,
+  CreditCard
 } from 'lucide-react';
 import { AdminModuleKey } from './AdminSidebar';
 import { AdminRole } from '../../types';
@@ -65,6 +66,7 @@ const moduleTitles: Record<AdminModuleKey, { title: string; category: string }> 
   activity_logs: { title: 'Audit Trail & Activity Logs', category: 'System & Governance' },
   lms_management: { title: 'Quinn AI & LMS Control Center', category: 'Academic & Education' },
   school_management: { title: 'School Education Management (LKG – 12th Std)', category: 'Academic & Education' },
+  payment_settings: { title: 'Razorpay Payment Gateway & API Keys', category: 'System & Governance' },
   settings: { title: 'Website Configuration & Meta Settings', category: 'System & Governance' }
 };
 
@@ -263,6 +265,19 @@ export const AdminTopNav: React.FC<AdminTopNavProps> = ({
                 <Database className="w-3.5 h-3.5" />
                 <span>Console Settings</span>
               </button>
+
+              {isSuperAdmin && (
+                <button
+                  onClick={() => {
+                    onSelectModule('payment_settings');
+                    setShowProfileMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors text-left"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Razorpay Payment Keys</span>
+                </button>
+              )}
 
               <div className="my-1 border-t border-slate-100" />
 

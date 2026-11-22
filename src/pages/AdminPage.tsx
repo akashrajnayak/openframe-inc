@@ -36,10 +36,12 @@ import {
   Users,
   ShieldCheck,
   Settings,
+  CreditCard,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AdminSidebar, AdminModuleKey } from '../components/admin/AdminSidebar';
 import { AdminTopNav } from '../components/admin/AdminTopNav';
+import { PaymentSettings } from '../components/admin/PaymentSettings';
 import { AdminLoginPage } from './AdminLoginPage';
 import {
   getAllAdminUsers,
@@ -366,6 +368,7 @@ export const AdminPage: React.FC = () => {
       case 'admin_users':
       case 'activity_logs':
       case 'settings':
+      case 'payment_settings':
         return isSuperAdmin || (effectiveRole as string) === 'Super Admin';
       default:
         return false;
@@ -2676,7 +2679,42 @@ export const AdminPage: React.FC = () => {
                   </button>
                 </div>
               </form>
+
+              {(isSuperAdmin || effectiveRole === 'Super Admin') && (
+                <div className="pt-6 border-t border-slate-100">
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                        <CreditCard className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">
+                          Razorpay Payment Gateway Keys
+                        </h3>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Manage Razorpay Key ID and Key Secret bound to Firestore and linked to live checkout.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModule('payment_settings')}
+                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs whitespace-nowrap shrink-0 transition-colors"
+                    >
+                      Configure Razorpay &rarr;
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
+          )}
+
+          {/* MODULE 23: SUPER ADMIN PAYMENT GATEWAY (RAZORPAY) */}
+          {activeModule === 'payment_settings' && (
+            <PaymentSettings
+              isSuperAdmin={isSuperAdmin || effectiveRole === 'Super Admin'}
+              showToast={showToast}
+            />
           )}
       </div>
 

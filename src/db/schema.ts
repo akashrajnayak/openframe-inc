@@ -3,6 +3,7 @@ import {
   serial,
   text,
   integer,
+  boolean,
   timestamp,
   jsonb,
 } from 'drizzle-orm/pg-core';
@@ -54,6 +55,46 @@ export const aiTranscriptions = pgTable('ai_transcriptions', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+export const paymentGatewaySettings = pgTable('payment_gateway_settings', {
+  provider: text('provider').primaryKey(),
+  keyId: text('key_id').notNull(),
+  keySecret: text('key_secret').notNull(),
+  webhookSecret: text('webhook_secret'),
+  mode: text('mode').default('live').notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  updatedByUid: text('updated_by_uid'),
+  updatedByEmail: text('updated_by_email'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Retained legacy tables in Cloud SQL so Drizzle schema stays non-destructively aligned
+export const aiGroundedResearch = pgTable('ai_grounded_research', {
+  id: serial('id').primaryKey(),
+  userUid: text('user_uid')
+    .notNull()
+    .references(() => users.uid, { onDelete: 'cascade' }),
+  mode: text('mode').notNull(),
+  query: text('query').notNull(),
+  answer: text('answer').notNull(),
+  sourcesJson: jsonb('sources_json'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const aiMediaCreations = pgTable('ai_media_creations', {
+  id: serial('id').primaryKey(),
+  userUid: text('user_uid')
+    .notNull()
+    .references(() => users.uid, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  prompt: text('prompt').notNull(),
+  model: text('model').notNull(),
+  aspectRatio: text('aspect_ratio').notNull(),
+  mimeType: text('mime_type').notNull(),
+  mediaDataUrl: text('media_data_url'),
+  interactionId: text('interaction_id'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   chatSessions: many(aiChatSessions),
   transcriptions: many(aiTranscriptions),
@@ -85,3 +126,4 @@ export type UserRecord = typeof users.$inferSelect;
 export type AiChatSessionRecord = typeof aiChatSessions.$inferSelect;
 export type AiChatMessageRecord = typeof aiChatMessages.$inferSelect;
 export type AiTranscriptionRecord = typeof aiTranscriptions.$inferSelect;
+export type PaymentGatewaySettingsRecord = typeof paymentGatewaySettings.$inferSelect;

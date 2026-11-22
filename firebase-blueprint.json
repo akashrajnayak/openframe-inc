@@ -1679,9 +1679,27 @@
         "submittedAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "studentId", "studentName", "boardName", "educationLevelNumber", "subject", "chapterTitle", "thirtyQuestionScore", "iqScore", "eqScore", "sqScore", "submittedAt"]
+    },
+    "PaymentSettings": {
+      "title": "PaymentSettings",
+      "description": "Super Admin Razorpay payment gateway credentials and configuration bound to Firestore.",
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "enum": ["razorpay"] },
+        "keyId": { "type": "string", "maxLength": 120, "pattern": "^rzp_(live|test)_[a-zA-Z0-9]+$" },
+        "keySecret": { "type": "string", "maxLength": 200 },
+        "webhookSecret": { "type": "string", "maxLength": 200 },
+        "mode": { "type": "string", "enum": ["live", "test"] },
+        "enabled": { "type": "boolean" },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedByEmail": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["provider", "keyId", "keySecret", "mode", "enabled", "updatedByUid", "updatedByEmail", "updatedAt"]
     }
   },
   "firestore": {
+    "/payment_settings/{docId}": { "schema": { "$ref": "#/entities/PaymentSettings" }, "description": "Super Admin only Razorpay payment gateway credentials and live/test configuration" },
     "/contact_messages/{id}": { "schema": { "$ref": "#/entities/ContactMessage" }, "description": "Contact form submissions" },
     "/general_enquiries/{id}": { "schema": { "$ref": "#/entities/GeneralEnquiry" }, "description": "General corporate enquiries" },
     "/software_enquiries/{id}": { "schema": { "$ref": "#/entities/SoftwareEnquiry" }, "description": "Software quotation enquiries" },

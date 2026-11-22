@@ -24,6 +24,13 @@ import {
 } from './server/youtubeDiscoveryEngine';
 import { registerGeminiStudioRoutes } from './server/geminiStudioRouter.ts';
 import {
+  getActiveRazorpayCredentials,
+  saveRazorpayGatewaySettings,
+  clearRazorpayGatewaySettings,
+  inferRazorpayMode,
+  maskSecretValue,
+} from './src/db/paymentSettings.ts';
+import {
   detectQueryLanguage,
   normalizeAndExpandQuery,
   parseEducationalIntent,
@@ -1286,12 +1293,35 @@ async function startServer() {
     }
   }
 
+  async function isVerifiedSuperAdmin(user: VerifiedFirebaseUser): Promise<boolean> {
+    if (user.emailVerified && SERVER_SUPER_ADMIN_EMAILS.has(user.email)) {
+      return true;
+    }
+    if (!firebaseAppletCfg.projectId) return false;
+    const dbId = firebaseAppletCfg.firestoreDatabaseId || '(default)';
+    const url = `https://firestore.googleapis.com/v1/projects/${firebaseAppletCfg.projectId}/databases/${dbId}/documents/admin_users/${encodeURIComponent(user.uid)}`;
+    try {
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${user.rawToken}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!resp.ok) return false;
+      const doc = (await resp.json()) as any;
+      const fields = doc.fields || {};
+      const isActive = fields.isActive?.booleanValue === true;
+      const role = fields.role?.stringValue || '';
+      return isActive && role === 'Super Admin';
+    } catch {
+      return false;
+    }
+  }
+
   // Lightweight sliding-window per-IP rate limiter for AI, YouTube, Discovery, Payments & School Partner APIs
   const rateLimitMap = new Map<string, number[]>();
   const RATE_LIMIT_WINDOW_MS = 60_000;
   const RATE_LIMIT_MAX_REQUESTS = 90;
 
-  app.use(['/api/youtube', '/api/discovery', '/api/quinn', '/api/school-partner', '/api/payments'], (req, res, next) => {
+  app.use(['/api/youtube', '/api/discovery', '/api/quinn', '/api/school-partner', '/api/payments', '/api/admin/payment-settings'], (req, res, next) => {
     const forwarded = req.headers['x-forwarded-for'];
     const ip =
       (Array.isArray(forwarded) ? forwarded[0] : String(forwarded || '').split(',')[0].trim()) ||
@@ -4552,20 +4582,206 @@ Allowed Categories: ${catChoices.join(', ')}`,
   });
 
   // ------------------------------------------------------------------
+  // SUPER ADMIN PAYMENT GATEWAY SETTINGS (RAZORPAY LINKING & TESTING)
+  // ------------------------------------------------------------------
+  const RAZORPAY_KEY_ID_PATTERN = /^rzp_(live|test)_[a-zA-Z0-9]+$/;
+
+  const serializeAdminPaymentSettings = (creds: Awaited<ReturnType<typeof getActiveRazorpayCredentials>>) => ({
+    configured: creds.configured,
+    enabled: creds.enabled,
+    keyId: creds.keyId || null,
+    hasSecret: Boolean(creds.keySecret),
+    secretPreview: maskSecretValue(creds.keySecret),
+    hasWebhookSecret: Boolean(creds.webhookSecret),
+    mode: creds.mode,
+    source: creds.source,
+    updatedAt: creds.updatedAt,
+    updatedByEmail: creds.updatedByEmail,
+  });
+
+  app.get('/api/admin/payment-settings', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    }
+    const allowed = await isVerifiedSuperAdmin(caller);
+    if (!allowed) {
+      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    }
+    const creds = await getActiveRazorpayCredentials();
+    return res.json({
+      ok: true,
+      settings: serializeAdminPaymentSettings(creds),
+    });
+  });
+
+  app.put('/api/admin/payment-settings', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    }
+    const allowed = await isVerifiedSuperAdmin(caller);
+    if (!allowed) {
+      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    }
+
+    const { keyId, keySecret, webhookSecret, mode, enabled } = req.body || {};
+    const cleanKeyId = typeof keyId === 'string' ? keyId.trim() : '';
+    const cleanKeySecret = typeof keySecret === 'string' ? keySecret.trim() : '';
+    const cleanWebhookSecret = typeof webhookSecret === 'string' ? webhookSecret.trim() : '';
+
+    if (!cleanKeyId || cleanKeyId.length > 120 || !RAZORPAY_KEY_ID_PATTERN.test(cleanKeyId)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Valid Razorpay Key ID is required (must start with rzp_live_ or rzp_test_).',
+      });
+    }
+    if (!cleanKeySecret || cleanKeySecret.length < 8 || cleanKeySecret.length > 200) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Valid Razorpay Key Secret is required (8–200 characters).',
+      });
+    }
+    if (cleanWebhookSecret.length > 200) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Webhook secret exceeds maximum allowed length (200 characters).',
+      });
+    }
+
+    const resolvedMode = inferRazorpayMode(cleanKeyId, mode === 'test' ? 'test' : 'live');
+    try {
+      const saved = await saveRazorpayGatewaySettings({
+        keyId: cleanKeyId,
+        keySecret: cleanKeySecret,
+        webhookSecret: cleanWebhookSecret,
+        mode: resolvedMode,
+        enabled: enabled !== false,
+        updatedByUid: caller.uid,
+        updatedByEmail: caller.email || 'superadmin@openframeitsolutions.com',
+      });
+      return res.json({
+        ok: true,
+        settings: serializeAdminPaymentSettings(saved),
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        ok: false,
+        error: err?.message || 'Failed to persist Razorpay settings.',
+      });
+    }
+  });
+
+  app.delete('/api/admin/payment-settings', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    }
+    const allowed = await isVerifiedSuperAdmin(caller);
+    if (!allowed) {
+      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    }
+    try {
+      const fallback = await clearRazorpayGatewaySettings();
+      return res.json({
+        ok: true,
+        settings: serializeAdminPaymentSettings(fallback),
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        ok: false,
+        error: err?.message || 'Failed to clear Razorpay settings.',
+      });
+    }
+  });
+
+  app.post('/api/admin/payment-settings/test', async (req, res) => {
+    const caller = await verifyFirebaseBearerToken(req);
+    if (!caller) {
+      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    }
+    const allowed = await isVerifiedSuperAdmin(caller);
+    if (!allowed) {
+      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    }
+
+    const active = await getActiveRazorpayCredentials();
+    const submittedKeyId = typeof req.body?.keyId === 'string' ? req.body.keyId.trim() : '';
+    const submittedSecret = typeof req.body?.keySecret === 'string' ? req.body.keySecret.trim() : '';
+
+    const testKeyId = submittedKeyId || active.keyId;
+    const testSecret = submittedSecret || active.keySecret;
+
+    if (!testKeyId || !testSecret) {
+      return res.status(400).json({
+        ok: false,
+        verified: false,
+        error: 'Provide both Razorpay Key ID and Key Secret (or save them first) to test the connection.',
+      });
+    }
+    if (!RAZORPAY_KEY_ID_PATTERN.test(testKeyId)) {
+      return res.status(400).json({
+        ok: false,
+        verified: false,
+        error: 'Invalid Razorpay Key ID format. Must start with rzp_live_ or rzp_test_.',
+      });
+    }
+
+    try {
+      const authBasic = Buffer.from(`${testKeyId}:${testSecret}`).toString('base64');
+      const rzpResp = await fetch('https://api.razorpay.com/v1/orders?count=1', {
+        method: 'GET',
+        headers: {
+          Authorization: `Basic ${authBasic}`,
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      const testMode = inferRazorpayMode(testKeyId, 'live');
+      if (rzpResp.ok) {
+        return res.json({
+          ok: true,
+          verified: true,
+          mode: testMode,
+          keyIdPrefix: testKeyId.slice(0, 14),
+          message: `Razorpay ${testMode.toUpperCase()} API credentials authenticated successfully.`,
+        });
+      }
+      const errBody = await rzpResp.json().catch(() => ({}));
+      const isAuthErr = rzpResp.status === 401;
+      return res.status(isAuthErr ? 401 : 502).json({
+        ok: false,
+        verified: false,
+        mode: testMode,
+        error: isAuthErr
+          ? 'Razorpay rejected these credentials (401 Unauthorized). Check that your Key ID and Key Secret match.'
+          : errBody?.error?.description || `Razorpay API returned HTTP ${rzpResp.status}.`,
+      });
+    } catch (err: any) {
+      return res.status(502).json({
+        ok: false,
+        verified: false,
+        error: err?.message || 'Unable to connect to Razorpay API.',
+      });
+    }
+  });
+
+  // ------------------------------------------------------------------
   // RAZORPAY PAYMENT GATEWAY & INSTITUTIONAL SCHOOL PARTNER APIs
   // ------------------------------------------------------------------
-  app.get('/api/payments/razorpay/config', (_req, res) => {
-    const keyId = process.env.RAZORPAY_KEY_ID || '';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+  app.get('/api/payments/razorpay/config', async (_req, res) => {
+    const creds = await getActiveRazorpayCredentials();
     return res.json({
       ok: true,
       gateway: 'razorpay',
-      configured: Boolean(keyId && keySecret),
-      keyId: keyId && keySecret ? keyId : null,
+      configured: creds.configured,
+      keyId: creds.configured ? creds.keyId : null,
+      mode: creds.mode,
       currency: 'INR',
-      note: keyId && keySecret
-        ? 'Razorpay server-side verification active.'
-        : 'Razorpay credentials not configured. Authorized offline/bank challan ledger entry remains available.',
+      note: creds.configured
+        ? `Razorpay ${creds.mode.toUpperCase()} server-side verification active.`
+        : creds.source === 'super_admin_disabled'
+        ? 'Razorpay online checkout is currently paused by Super Admin.'
+        : 'Razorpay credentials not configured. Super Admin can add them in Admin → Payment Gateway (Razorpay).',
     });
   });
 
@@ -4589,13 +4805,17 @@ Allowed Categories: ${catChoices.join(', ')}`,
         ? institutionId.trim()
         : 'OPENFRAME_MARKETPLACE';
 
-    const keyId = (process.env.RAZORPAY_KEY_ID || '').trim();
-    const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
-    if (!keyId || !keySecret) {
+    const creds = await getActiveRazorpayCredentials();
+    const keyId = creds.keyId;
+    const keySecret = creds.keySecret;
+    if (!creds.configured || !keyId || !keySecret) {
       return res.status(503).json({
         ok: false,
         configured: false,
-        error: 'Razorpay credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are not configured on the server.',
+        error:
+          creds.source === 'super_admin_disabled'
+            ? 'Razorpay checkout is currently paused by the Super Admin.'
+            : 'Razorpay credentials are not configured. Super Admin can configure them in Admin → Payment Gateway (Razorpay).',
       });
     }
 
@@ -4647,7 +4867,7 @@ Allowed Categories: ${catChoices.join(', ')}`,
           ok: false,
           authFailed: isAuthError,
           error: isAuthError
-            ? 'Razorpay API authentication failed. Please verify RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Settings → Secrets.'
+            ? 'Razorpay API authentication failed. Please verify the Razorpay Key ID and Key Secret in Super Admin → Payment Gateway.'
             : data?.error?.description || 'Failed to create Razorpay order.',
         });
       }
@@ -4678,11 +4898,12 @@ Allowed Categories: ${catChoices.join(', ')}`,
       });
     }
 
-    const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
-    if (!keySecret) {
+    const creds = await getActiveRazorpayCredentials();
+    const keySecret = creds.keySecret;
+    if (!creds.configured || !keySecret) {
       return res.status(503).json({
         verified: false,
-        error: 'RAZORPAY_KEY_SECRET is not configured on the server.',
+        error: 'Razorpay Key Secret is not configured on the server.',
       });
     }
 
@@ -4728,8 +4949,9 @@ Allowed Categories: ${catChoices.join(', ')}`,
       return res.status(401).json({ ok: false, verified: false, error: 'Authentication required.' });
     }
     const { orderId, paymentId, verifiedAt, token } = req.body || {};
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
-    if (!keySecret || !orderId || !paymentId || !verifiedAt || !token) {
+    const creds = await getActiveRazorpayCredentials();
+    const keySecret = creds.keySecret;
+    if (!creds.configured || !keySecret || !orderId || !paymentId || !verifiedAt || !token) {
       return res.status(400).json({ ok: false, verified: false, error: 'Missing payment verification fields.' });
     }
     const expected = crypto
