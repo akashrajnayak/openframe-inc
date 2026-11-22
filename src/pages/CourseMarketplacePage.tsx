@@ -3891,7 +3891,7 @@ export const CourseMarketplacePage: React.FC = () => {
           } else if (enrollModalCourse?.id) {
             setPaidCourseIds((prev) => new Set([...prev, enrollModalCourse.id.toLowerCase()]));
           }
-          showToast('Payment verified! Redirecting to Open Learning Workspace...');
+          showToast('Razorpay payment verified! Your course workspace is now unlocked.');
         }}
       />
 

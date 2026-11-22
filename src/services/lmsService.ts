@@ -352,11 +352,7 @@ export class LmsService {
 
   async getStudentEnrollments(studentUid: string): Promise<CourseEnrollment[]> {
     const isVerifiedPaid = (e?: CourseEnrollment | null) =>
-      Boolean(
-        e &&
-          ((e.paymentStatus === 'Paid' && Boolean((e as any).razorpayPaymentId)) ||
-            e.paymentStatus === 'Scholarship')
-      );
+      this.isVerifiedPaidEnrollment(e);
     let cached: CourseEnrollment[] = [];
     if (typeof window !== 'undefined' && studentUid) {
       try {
@@ -424,7 +420,20 @@ export class LmsService {
   public isVerifiedPaidEnrollment(enrollment?: CourseEnrollment | null): boolean {
     if (!enrollment) return false;
     if (enrollment.paymentStatus === 'Scholarship') return true;
-    return enrollment.paymentStatus === 'Paid' && Boolean((enrollment as any).razorpayPaymentId);
+    if (enrollment.paymentStatus !== 'Paid') return false;
+    const payId = String((enrollment as any).razorpayPaymentId || '').trim();
+    const orderId = String((enrollment as any).razorpayOrderId || '').trim();
+    if (!payId || !payId.startsWith('pay_')) return false;
+    // Reject legacy local/mock payment IDs so paid courses strictly enforce live Razorpay checkout
+    if (
+      payId.startsWith('pay_OF') ||
+      payId.startsWith('pay_mock') ||
+      payId.startsWith('pay_local') ||
+      orderId.startsWith('order_OF')
+    ) {
+      return false;
+    }
+    return Boolean((enrollment as any).verifiedServerSide !== false);
   }
 
   async getAllStudentProgress(studentUid: string): Promise<StudentProgressRecord[]> {

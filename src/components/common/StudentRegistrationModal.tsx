@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   GraduationCap,
@@ -9,19 +9,27 @@ import {
   Calendar,
   CheckCircle2,
   Sparkles,
-  Send,
+  CreditCard,
   HelpCircle,
   Globe,
   ShieldCheck,
-  ArrowRight
+  ArrowRight,
+  KeyRound,
+  AlertCircle,
 } from 'lucide-react';
+import { doc, setDoc } from 'firebase/firestore';
 import { useRouter } from '../../router/RouterContext';
 import { useAuth } from '../../context/AuthContext';
-import { submitStudentRegistration } from '../../services/firebase';
+import { db, submitStudentRegistration } from '../../services/firebase';
 import { lmsService } from '../../services/lmsService';
-import { quinnAiService } from '../../services/quinnAiService';
-import { marketplaceService } from '../../services/marketplaceService';
+import { marketplaceService, cacheYouTubeCourse } from '../../services/marketplaceService';
 import { standaloneMockService } from '../../services/standaloneMockService';
+import {
+  fetchLiveRazorpayConfig,
+  launchLiveRazorpayPayment,
+  type LiveRazorpayConfig,
+} from '../../services/razorpayCheckoutService';
+import { RazorpayKeyPromptModal } from './RazorpayKeyPromptModal';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../../utils/searchIntelligence';
 import {
   ALL_INDIAN_STATES_AND_UTS,
@@ -48,7 +56,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   courseCategory = 'Information Technology'
 }) => {
   const { navigate } = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, isSuperAdmin } = useAuth();
 
   // Form fields
   const [fullName, setFullName] = useState('');
@@ -77,11 +85,29 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   const [notes, setNotes] = useState('');
   const [consentAccepted, setConsentAccepted] = useState(true);
 
-  // Submission state
+  // Submission & Razorpay Gateway state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
   const [applicationId, setApplicationId] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [razorpayConfig, setRazorpayConfig] = useState<LiveRazorpayConfig | null>(null);
+  const [gatewayUnavailable, setGatewayUnavailable] = useState(false);
+  const [keyPromptOpen, setKeyPromptOpen] = useState(false);
+  const [verifiedPaymentInfo, setVerifiedPaymentInfo] = useState<{ orderId: string; paymentId: string } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setErrorMsg('');
+    setGatewayUnavailable(false);
+    fetchLiveRazorpayConfig()
+      .then((cfg) => {
+        setRazorpayConfig(cfg);
+        if (!cfg.configured || !cfg.keyId) {
+          setGatewayUnavailable(true);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   const isMinor = (() => {
     if (!dob) return false;
@@ -156,11 +182,49 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
     }
 
     setIsSubmitting(true);
+    setGatewayUnavailable(false);
 
     const generatedId = `OF-APP-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-    const recordUid = currentUser?.uid || `reg_${generatedId}`;
+    const recordUid = currentUser?.uid || standaloneMockService.getActiveLearner().uid;
+    const targetCourseId = videoId ? `yt_${videoId}` : courseId && courseId !== 'VIDEO-SELECT' ? courseId : 'OF-ADMISSION';
 
     try {
+      // 1. Enforce Live Razorpay Standard Checkout FIRST before creating paid enrollment
+      const cfg = await fetchLiveRazorpayConfig();
+      setRazorpayConfig(cfg);
+      if (!cfg.configured || !cfg.keyId) {
+        setGatewayUnavailable(true);
+        setErrorMsg(
+          isSuperAdmin
+            ? 'Razorpay API keys are not configured yet. Please insert your Razorpay Key ID and Key Secret in the Super Admin prompt to enable payment checkout.'
+            : 'Razorpay payment gateway is currently being configured by the administrator. Please try again shortly.'
+        );
+        if (isSuperAdmin) {
+          setKeyPromptOpen(true);
+        }
+        return;
+      }
+
+      const verified = await launchLiveRazorpayPayment({
+        amountInr: grantPricing.finalPriceInr,
+        courseId: targetCourseId,
+        courseTitle,
+        institutionId: 'OPENFRAME_MARKETPLACE',
+        purpose: `90%-Off OpenFrame Grant Enrollment: ${courseTitle}`,
+        description: `${courseTitle} (${targetCourseId})`,
+        customerName: fullName.trim(),
+        customerEmail: emailAddress.trim().toLowerCase(),
+        customerPhone: mobileNumber.trim(),
+        userId: recordUid,
+        notes: {
+          applicationId: generatedId,
+          studentName: fullName.trim().slice(0, 120),
+          courseTitle: courseTitle.slice(0, 120),
+          pincode: pincode.trim(),
+          state: state.trim(),
+        },
+      });
+
       const payload = {
         fullName: fullName.trim(),
         mobileNumber: mobileNumber.trim(),
@@ -181,7 +245,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         preferredLanguage,
         schoolCollegeName: schoolCollegeName.trim() || 'Independent / Self-Paced',
         currentClassQualification: currentQualification,
-        interestedCourse: courseTitle ? `${courseTitle} (${courseId || 'OpenFrame'})` : 'OpenFrame Certified Learning Programme',
+        interestedCourse: courseTitle ? `${courseTitle} (${targetCourseId})` : 'OpenFrame Certified Learning Programme',
         parentName: parentName.trim() || undefined,
         parentMobile: parentMobile.trim() || undefined,
         isMinor,
@@ -192,16 +256,16 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         consentAccepted,
         registeredAt: new Date().toISOString(),
         status: 'Registered' as const,
-        internalNotes: `90%-Off Grant Course Enrollment (${formatInr(grantPricing.finalPriceInr)} vs ${formatInr(grantPricing.marketBenchmarkPrice)} market value). Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
+        internalNotes: `Paid via Razorpay (${verified.paymentId} / ${verified.orderId}) — ${formatInr(grantPricing.finalPriceInr)}. Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
       };
 
-      // Persist reservation & learner profile immediately in browser localStorage
+      // Persist verified payment & learner profile
       standaloneMockService.saveReservation({
         userId: recordUid,
         studentName: payload.fullName,
         email: payload.emailAddress,
         phone: payload.mobileNumber,
-        courseId: courseId || undefined,
+        courseId: targetCourseId,
         courseTitle: courseTitle || 'OpenFrame Certified Learning Programme',
         courseCategory,
         departmentOrLevel: payload.currentClassQualification,
@@ -230,69 +294,107 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
           termsAccepted: consentAccepted,
         });
 
-        // Isolated single-target enrollment when signed in
         if (currentUser?.uid) {
-          const targetCourseId = videoId ? `yt_${videoId}` : courseId;
-          if (targetCourseId && targetCourseId !== 'VIDEO-SELECT') {
-            const catalogCourse = videoId
-              ? null
-              : await marketplaceService.getCourseById(targetCourseId).catch(() => null);
-            const targetCourse = catalogCourse || ({
-              id: targetCourseId,
-              title: courseTitle,
-              category: courseCategory,
-              categoryGroup: 'Technology',
-              level: 'Beginner',
-              duration: 'Self-Paced',
-              price: grantPricing.finalPriceInr,
-              marketBenchmarkPrice: grantPricing.marketBenchmarkPrice,
-              discountPercent: 90,
-              isFree: false,
-              courseType: videoId ? 'youtube_video' : 'standard',
-              youtubeVideoId: videoId || undefined,
-              language: preferredLanguage,
-              description: `OpenFrame certified learning workspace for ${courseTitle}.`,
-              skillsAcquired: [courseCategory],
-              status: 'Published',
-            } as any);
-            await lmsService.enrollStudentInCourse(
-              targetCourse,
-              {
-                uid: currentUser.uid,
-                fullName: payload.fullName,
-                email: payload.emailAddress,
-                addressDetails: {
-                  homeAddress: payload.homeAddress,
-                  flatNumber: payload.flatNumber,
-                  streetAddress: payload.streetAddress,
-                  pincode: payload.pincode,
-                  mobileNumber: payload.mobileNumber,
-                  alternativeMobileNumber: payload.alternativeMobileNumber,
-                  state: payload.state,
-                },
-              },
-              'Pending',
-              grantPricing.finalPriceInr
-            );
-          }
+          const payId = `rzp_${verified.paymentId}`;
+          await setDoc(doc(db, 'payments', payId), {
+            id: payId,
+            userId: currentUser.uid,
+            studentId: currentUser.uid,
+            institutionId: 'OPENFRAME_MARKETPLACE',
+            courseId: targetCourseId,
+            courseTitle,
+            amount: grantPricing.finalPriceInr,
+            amountInr: grantPricing.finalPriceInr,
+            marketBenchmarkPrice: grantPricing.marketBenchmarkPrice,
+            discountPercent: 90,
+            gateway: 'Razorpay',
+            status: 'Paid',
+            razorpayOrderId: verified.orderId,
+            razorpayPaymentId: verified.paymentId,
+            verifiedServerSide: true,
+            createdAt: verified.verifiedAt,
+          }).catch(() => {});
         }
+
+        const catalogCourse = videoId
+          ? null
+          : await marketplaceService.getCourseById(targetCourseId).catch(() => null);
+        const targetCourse = catalogCourse || ({
+          id: targetCourseId,
+          title: courseTitle,
+          category: courseCategory,
+          categoryGroup: 'Technology',
+          level: 'Beginner',
+          duration: 'Self-Paced',
+          price: grantPricing.finalPriceInr,
+          marketBenchmarkPrice: grantPricing.marketBenchmarkPrice,
+          discountPercent: 90,
+          isFree: false,
+          courseType: videoId ? 'youtube_video' : 'standard',
+          youtubeVideoId: videoId || undefined,
+          language: preferredLanguage,
+          description: `OpenFrame certified learning workspace for ${courseTitle}.`,
+          skillsAcquired: [courseCategory],
+          status: 'Published',
+        } as any);
+        cacheYouTubeCourse(targetCourse);
+        await lmsService.enrollStudentInCourse(
+          targetCourse,
+          {
+            uid: recordUid,
+            fullName: payload.fullName,
+            email: payload.emailAddress,
+            addressDetails: {
+              homeAddress: payload.homeAddress,
+              flatNumber: payload.flatNumber,
+              streetAddress: payload.streetAddress,
+              pincode: payload.pincode,
+              mobileNumber: payload.mobileNumber,
+              alternativeMobileNumber: payload.alternativeMobileNumber,
+              state: payload.state,
+            },
+          },
+          'Paid',
+          grantPricing.finalPriceInr,
+          {
+            razorpayOrderId: verified.orderId,
+            razorpayPaymentId: verified.paymentId,
+            paymentGateway: 'Razorpay',
+            verifiedAt: verified.verifiedAt,
+          }
+        );
       } catch (firestoreErr) {
         console.warn('Firestore write fallback to local storage:', firestoreErr);
       }
 
       try {
         const stored = JSON.parse(localStorage.getItem('openframe_student_applications') || '[]');
-        stored.unshift({ id: generatedId, ...payload });
+        stored.unshift({
+          id: generatedId,
+          razorpayOrderId: verified.orderId,
+          razorpayPaymentId: verified.paymentId,
+          ...payload,
+        });
         localStorage.setItem('openframe_student_applications', JSON.stringify(stored));
       } catch (storageErr) {
         console.warn('LocalStorage error:', storageErr);
       }
 
+      setVerifiedPaymentInfo({ orderId: verified.orderId, paymentId: verified.paymentId });
       setApplicationId(generatedId);
       setSubmissionSuccess(true);
     } catch (err: any) {
-      console.error('Registration failed:', err);
-      setErrorMsg('An error occurred during submission. Please check your network or try again.');
+      if (err?.code === 'PAYMENT_CANCELLED') {
+        setErrorMsg('Razorpay checkout was closed before payment completed. Click Pay via Razorpay to retry.');
+      } else {
+        setErrorMsg(err?.message || 'Unable to launch Razorpay payment gateway. Please retry.');
+        if (err?.code === 'RAZORPAY_NOT_CONFIGURED' || err?.code === 'RAZORPAY_AUTH_FAILED') {
+          setGatewayUnavailable(true);
+          if (isSuperAdmin) {
+            setKeyPromptOpen(true);
+          }
+        }
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -301,6 +403,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   const handleResetAndClose = () => {
     setSubmissionSuccess(false);
     setErrorMsg('');
+    setVerifiedPaymentInfo(null);
     setFullName('');
     setMobileNumber('');
     setEmailAddress('');
@@ -392,12 +495,24 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   <span className="text-slate-500">Registered Contact:</span>
                   <span className="font-medium text-slate-700 tabular-nums">{mobileNumber} / {alternativeMobileNumber}</span>
                 </div>
+                {verifiedPaymentInfo && (
+                  <>
+                    <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                      <span className="text-slate-500">Razorpay Payment ID:</span>
+                      <span className="font-mono font-bold text-emerald-700">{verifiedPaymentInfo.paymentId}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Razorpay Order ID:</span>
+                      <span className="font-mono text-slate-700">{verifiedPaymentInfo.orderId}</span>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-left max-w-md mx-auto text-xs text-emerald-950 space-y-1">
                 <div className="flex items-center space-x-1.5 font-bold">
                   <Sparkles className="w-4 h-4 text-emerald-600" />
-                  <span>Instant Access Ready</span>
+                  <span>Razorpay Payment Verified · Access Unlocked</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-emerald-900">
                   Click &ldquo;Start Learning Now&rdquo; to launch your structured modules, watch curated YouTube lectures, pass the verification test (&ge;70%), and download your QR-verified OpenFrame certificate.
@@ -427,17 +542,51 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              {isSuperAdmin && (
+                <div className="p-3 bg-slate-900 text-white rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <KeyRound className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="font-semibold truncate">
+                      {razorpayConfig?.configured && razorpayConfig.keyId
+                        ? `Razorpay Key Active: ${razorpayConfig.keyId}`
+                        : 'Razorpay API Key Not Configured'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setKeyPromptOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Insert / Update Razorpay API Key</span>
+                  </button>
+                </div>
+              )}
+
               {/* 90%-Off Grant Pricing Notice */}
               <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-200 text-xs text-emerald-950 flex items-start space-x-3">
                 <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                 <div className="text-[11px] leading-relaxed">
-                  <strong className="text-emerald-950">90% OpenFrame Grant ({formatInr(grantPricing.finalPriceInr)} vs {formatInr(grantPricing.marketBenchmarkPrice)} Market Value):</strong> Structured LKG–Post-Graduation curriculum, verification quiz &amp; QR-verified certificate. Complete all 7 mandatory address &amp; mobile fields below for certificate issuance.
+                  <strong className="text-emerald-950">90% OpenFrame Grant ({formatInr(grantPricing.finalPriceInr)} vs {formatInr(grantPricing.marketBenchmarkPrice)} Market Value):</strong> Secure Razorpay payment is required to unlock your LKG–Post-Graduation curriculum, verification quiz &amp; QR-verified certificate.
                 </div>
               </div>
 
               {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-                  {errorMsg}
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{errorMsg}</span>
+                  </div>
+                  {isSuperAdmin && gatewayUnavailable && (
+                    <button
+                      type="button"
+                      onClick={() => setKeyPromptOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Insert Razorpay API Key Now</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -789,17 +938,17 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 <button
                   type="submit"
                   disabled={isSubmitting || !consentAccepted}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="px-6 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs shadow-md transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   {isSubmitting ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Completing Enrollment...</span>
+                      <span>Opening Razorpay Gateway...</span>
                     </>
                   ) : (
                     <>
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Enroll ({formatInr(grantPricing.finalPriceInr)} · 90% Off)</span>
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>Pay {formatInr(grantPricing.finalPriceInr)} via Razorpay &amp; Enroll</span>
                     </>
                   )}
                 </button>
@@ -808,6 +957,20 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
           )}
         </div>
       </div>
+
+      {isSuperAdmin && (
+        <RazorpayKeyPromptModal
+          isOpen={keyPromptOpen}
+          onClose={() => setKeyPromptOpen(false)}
+          onSaved={async () => {
+            const fresh = await fetchLiveRazorpayConfig();
+            setRazorpayConfig(fresh);
+            setGatewayUnavailable(!fresh.configured);
+            setErrorMsg('');
+            setKeyPromptOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };

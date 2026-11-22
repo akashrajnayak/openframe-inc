@@ -58,8 +58,10 @@ import {
 } from '../data/educationData';
 import { storageService } from '../services/storageService';
 import { StudentRegistrationModal } from '../components/common/StudentRegistrationModal';
+import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
+import { MarketplaceCourse } from '../types';
 
 export const EducationPage: React.FC = () => {
   const router = useRouter();
@@ -79,12 +81,36 @@ export const EducationPage: React.FC = () => {
   const [isEnquiryModalOpen, setIsEnquiryModalOpen] = useState(false);
   const [enquiryCourseName, setEnquiryCourseName] = useState('');
 
-  // Admission & YouTube Video Pop-up Modal States
+  // Admission, Paid Razorpay Enrollment & YouTube Video Pop-up Modal States
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
   const [regCourseTitle, setRegCourseTitle] = useState('OpenFrame Education Academic Programme');
+  const [enrollModalCourse, setEnrollModalCourse] = useState<MarketplaceCourse | null>(null);
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<ExtendedYouTubeVideo | null>(null);
   const [videoPlaylist, setVideoPlaylist] = useState<ExtendedYouTubeVideo[]>([]);
+
+  const openRazorpayEnrollmentForEducationItem = (item: EducationCategoryItem) => {
+    const feeMatch = String(item.officialFee || '').replace(/,/g, '').match(/\d+/);
+    const parsedPrice = feeMatch ? Math.max(50, Number(feeMatch[0])) : 300;
+    const courseObj: MarketplaceCourse = {
+      id: `OF-EDU-${item.id}`,
+      title: item.name,
+      category: item.group || 'Education',
+      categoryGroup: 'Education',
+      level: item.level || 'Beginner',
+      duration: 'Self-Paced',
+      price: parsedPrice,
+      marketBenchmarkPrice: parsedPrice * 10,
+      discountPercent: 90,
+      isFree: false,
+      language: 'English',
+      description: item.fullDesc || item.shortDesc,
+      skillsAcquired: item.modules?.slice(0, 4) || [item.group],
+      status: 'Published',
+    };
+    setSelectedCourseForModal(null);
+    setEnrollModalCourse(courseObj);
+  };
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1182,13 +1208,14 @@ export const EducationPage: React.FC = () => {
                       <span>View Syllabus</span>
                     </button>
 
-                    <Link
-                      to={`/join/student?course=${encodeURIComponent(course.name)}`}
-                      className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center justify-center space-x-1 text-center shadow"
+                    <button
+                      type="button"
+                      onClick={() => openRazorpayEnrollmentForEducationItem(course)}
+                      className="py-2.5 px-3 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-semibold transition-colors flex items-center justify-center space-x-1 text-center shadow cursor-pointer"
                     >
-                      <span>Enrol Now</span>
+                      <span>Pay &amp; Enrol</span>
                       <ArrowRight className="w-3.5 h-3.5" />
-                    </Link>
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1357,13 +1384,14 @@ export const EducationPage: React.FC = () => {
                   Quick Enquiry
                 </button>
 
-                <Link
-                  to={`/join/student?course=${encodeURIComponent(selectedCourseForModal.name)}`}
-                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center space-x-1.5 shadow"
+                <button
+                  type="button"
+                  onClick={() => openRazorpayEnrollmentForEducationItem(selectedCourseForModal)}
+                  className="px-6 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white text-xs font-bold transition-colors flex items-center space-x-1.5 shadow cursor-pointer"
                 >
-                  <span>Enrol Student for this Programme</span>
+                  <span>Pay via Razorpay &amp; Enrol</span>
                   <ArrowRight className="w-4 h-4" />
-                </Link>
+                </button>
               </div>
             </div>
           </div>
@@ -1572,6 +1600,13 @@ export const EducationPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* PAID COURSE RAZORPAY CHECKOUT MODAL */}
+      <CourseEnrollmentModal
+        isOpen={Boolean(enrollModalCourse)}
+        onClose={() => setEnrollModalCourse(null)}
+        course={enrollModalCourse}
+      />
 
       {/* STUDENT REGISTRATION POP-UP MODAL */}
       <StudentRegistrationModal

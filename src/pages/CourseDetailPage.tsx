@@ -1177,8 +1177,7 @@ export const CourseDetailPage: React.FC = () => {
         course={course}
         onEnrolled={() => {
           setHasPaidEnrollment(true);
-          setIsRegModalOpen(false);
-          setToastMessage('Payment verified! Redirecting to your Open Learning Workspace...');
+          setToastMessage('Razorpay payment verified! Your course workspace is now unlocked.');
           setTimeout(() => setToastMessage(null), 5000);
         }}
       />

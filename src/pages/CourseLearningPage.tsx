@@ -35,7 +35,8 @@ import {
   Globe,
   Timer,
   Mic,
-  MicOff
+  MicOff,
+  KeyRound,
 } from 'lucide-react';
 import { useRouter } from '../router/RouterContext';
 import { useAuth } from '../context/AuthContext';
@@ -46,6 +47,7 @@ import { lmsService } from '../services/lmsService';
 import { standaloneMockService } from '../services/standaloneMockService';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
+import { RazorpayKeyPromptModal } from '../components/common/RazorpayKeyPromptModal';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../utils/searchIntelligence';
 import {
@@ -126,7 +128,6 @@ export const CourseLearningPage: React.FC = () => {
       : seg1;
   const searchParams = new URLSearchParams(currentPath.split('?')[1] || '');
   const queryTab = searchParams.get('tab') as TabType | null;
-  const autoOpenEnroll = searchParams.get('enroll') === '1';
   const justPaidParam = searchParams.get('paid') === '1';
 
   const studentId = currentUser?.uid || '';
@@ -143,6 +144,7 @@ export const CourseLearningPage: React.FC = () => {
   const [requiresEnrollment, setRequiresEnrollment] = useState(false);
   const [adminPreviewOverride, setAdminPreviewOverride] = useState(false);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
+  const [keyPromptOpen, setKeyPromptOpen] = useState(false);
   const [workspaceNonce, setWorkspaceNonce] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>(queryTab || 'overview');
   const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -333,7 +335,30 @@ export const CourseLearningPage: React.FC = () => {
       setActiveLessonId(targetLessonId);
       const lessonTopic = firstLesson?.title || firstLesson?.topicName || found.title;
 
-      // Prefer direct module/course assigned YouTube videos (modeled courses & YouTube tracks), fallback to Quinn AI
+      // Gate ALL paid courses & departments (LKG to PG) strictly on verified Razorpay payment BEFORE loading Quinn AI
+      let verifiedPaymentStatus: 'Paid' | 'Complimentary' | 'Scholarship' | undefined = undefined;
+      const effectiveCourseFee = found.price > 0 ? Math.round(found.price) : 300;
+      const effectiveStudentUid = studentId || standaloneMockService.getActiveLearner().uid;
+      if (effectiveCourseFee > 0 && !adminPreviewOverride) {
+        const existingEnrollments = await lmsService.getStudentEnrollments(effectiveStudentUid);
+        const paidMatch = existingEnrollments.find(
+          (en) =>
+            en.courseId.toLowerCase() === found.id.toLowerCase() &&
+            lmsService.isVerifiedPaidEnrollment(en)
+        );
+        if (!paidMatch) {
+          if (active) {
+            setRequiresEnrollment(true);
+            setEnrollModalOpen(true);
+            setLoading(false);
+          }
+          return;
+        }
+        verifiedPaymentStatus = paidMatch.paymentStatus as 'Paid' | 'Complimentary' | 'Scholarship';
+      }
+      if (active) setRequiresEnrollment(false);
+
+      // Only load pre-assigned videos / Quinn AI recommendations AFTER verified Razorpay payment
       const preAssigned =
         firstLesson?.recommendedVideos && firstLesson.recommendedVideos.length > 0
           ? firstLesson.recommendedVideos
@@ -352,29 +377,6 @@ export const CourseLearningPage: React.FC = () => {
       if (!active) return;
       setRecommendedVideos(recs);
       if (recs[0]) setSelectedVideo(recs[0]);
-
-      // Gate ALL paid courses & departments (LKG to PG) strictly on verified payment first
-      let verifiedPaymentStatus: 'Paid' | 'Complimentary' | 'Scholarship' | undefined = undefined;
-      const effectiveCourseFee = found.price > 0 ? Math.round(found.price) : 300;
-      const effectiveStudentUid = studentId || standaloneMockService.getActiveLearner().uid;
-      if (effectiveCourseFee > 0 && !adminPreviewOverride) {
-        const existingEnrollments = await lmsService.getStudentEnrollments(effectiveStudentUid);
-        const paidMatch = existingEnrollments.find(
-          (en) =>
-            en.courseId.toLowerCase() === found.id.toLowerCase() &&
-            lmsService.isVerifiedPaidEnrollment(en)
-        );
-        if (!paidMatch) {
-          if (active) {
-            setRequiresEnrollment(true);
-            if (autoOpenEnroll) setEnrollModalOpen(true);
-            setLoading(false);
-          }
-          return;
-        }
-        verifiedPaymentStatus = paidMatch.paymentStatus as 'Paid' | 'Complimentary' | 'Scholarship';
-      }
-      if (active) setRequiresEnrollment(false);
 
       if (currentUser && studentId) {
         const { progress: prog } = await lmsService.enrollStudentInCourse(
@@ -1299,18 +1301,30 @@ export const CourseLearningPage: React.FC = () => {
           </div>
 
           {isEducatorOrAdmin && (
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+            <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
               <span>Admin / Faculty mode detected</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setAdminPreviewOverride(true);
-                  setRequiresEnrollment(false);
-                }}
-                className="font-semibold text-blue-600 hover:underline cursor-pointer"
-              >
-                Preview Workspace Without Paying
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setKeyPromptOpen(true)}
+                    className="inline-flex items-center gap-1 font-bold text-[#123D32] hover:underline cursor-pointer whitespace-nowrap"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Insert / Update Razorpay API Key</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminPreviewOverride(true);
+                    setRequiresEnrollment(false);
+                  }}
+                  className="font-semibold text-blue-600 hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Preview Workspace Without Paying
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1326,6 +1340,17 @@ export const CourseLearningPage: React.FC = () => {
             notify('success', 'Payment verified via Razorpay! Your Open Learning Workspace is now unlocked.');
           }}
         />
+
+        {isSuperAdmin && (
+          <RazorpayKeyPromptModal
+            isOpen={keyPromptOpen}
+            onClose={() => setKeyPromptOpen(false)}
+            onSaved={() => {
+              setKeyPromptOpen(false);
+              setEnrollModalOpen(true);
+            }}
+          />
+        )}
       </div>
     );
   }
