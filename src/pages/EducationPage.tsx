@@ -61,6 +61,7 @@ import { StudentRegistrationModal } from '../components/common/StudentRegistrati
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
 import { VideoPlayerModal } from '../components/common/VideoPlayerModal';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
+import { marketplaceService } from '../services/marketplaceService';
 import { MarketplaceCourse } from '../types';
 
 export const EducationPage: React.FC = () => {
@@ -92,22 +93,23 @@ export const EducationPage: React.FC = () => {
   const openRazorpayEnrollmentForEducationItem = (item: EducationCategoryItem) => {
     const feeMatch = String(item.officialFee || '').replace(/,/g, '').match(/\d+/);
     const parsedPrice = feeMatch ? Math.max(50, Number(feeMatch[0])) : 300;
-    const courseObj: MarketplaceCourse = {
+    const courseObj: MarketplaceCourse = marketplaceService.normalizeCoursePayload({
       id: `OF-EDU-${item.id}`,
       title: item.name,
-      category: item.group || 'Education',
-      categoryGroup: 'Education',
+      category: item.categoryGroup || 'Academic',
+      categoryGroup: item.categoryGroup || 'Academic',
       level: item.level || 'Beginner',
-      duration: 'Self-Paced',
+      duration: item.duration || 'Self-Paced',
       price: parsedPrice,
       marketBenchmarkPrice: parsedPrice * 10,
       discountPercent: 90,
       isFree: false,
       language: 'English',
+      thumbnailUrl: item.imageUrl,
       description: item.fullDesc || item.shortDesc,
-      skillsAcquired: item.modules?.slice(0, 4) || [item.group],
+      skillsAcquired: item.modules?.slice(0, 4) || [item.categoryGroup],
       status: 'Published',
-    };
+    });
     setSelectedCourseForModal(null);
     setEnrollModalCourse(courseObj);
   };

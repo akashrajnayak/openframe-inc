@@ -622,63 +622,37 @@ export async function standaloneApiFetch(input: RequestInfo | URL, init?: Reques
   const pathname = parsedUrl.pathname;
   const body = parseBody(init);
 
-  // 1. Payments (Razorpay Client-Side Mock & LocalStorage Verification)
+  // 1. Payments (Always require real server-side Razorpay API keys — never mock verification)
   if (pathname === '/api/payments/razorpay/config') {
     return jsonResponse({
-      ok: true,
+      ok: false,
       gateway: 'razorpay',
-      configured: true,
-      standalone: true,
-      keyId: 'rzp_standalone_local',
+      configured: false,
+      keyId: null,
       currency: 'INR',
-      note: 'Standalone client-side checkout active (localStorage persistence).',
-    });
+      note: 'Razorpay payment server is required for live checkout.',
+    }, 503);
   }
 
   if (pathname === '/api/payments/razorpay/order') {
-    const amountInr = Number(body.amountInr || 300);
-    if (!Number.isFinite(amountInr) || amountInr <= 0) {
-      return jsonResponse({ ok: false, error: 'Valid positive amountInr is required.' }, 400);
-    }
-    const created = standaloneMockService.createMockRazorpayOrder({
-      amountInr,
-      courseId: body.courseId,
-      institutionId: body.institutionId,
-      purpose: body.purpose,
-      receipt: body.receipt,
-      notes: body.notes,
-    });
-    return jsonResponse({ ...created, standalone: true });
+    return jsonResponse(
+      { ok: false, configured: false, error: 'Razorpay order creation requires the live payment server.' },
+      503
+    );
   }
 
   if (pathname === '/api/payments/razorpay/verify') {
-    const orderId = String(body.razorpay_order_id || '');
-    if (!orderId) {
-      return jsonResponse({ verified: false, error: 'razorpay_order_id is required.' }, 400);
-    }
-    const verified = standaloneMockService.verifyMockRazorpayPayment({
-      razorpay_order_id: orderId,
-      razorpay_payment_id: body.razorpay_payment_id,
-      razorpay_signature: body.razorpay_signature,
-      userId: body.userId,
-      studentName: body.studentName,
-      studentEmail: body.studentEmail,
-      courseId: body.courseId,
-      courseTitle: body.courseTitle,
-      amountInr: body.amountInr,
-      method: body.method,
-    });
-    return jsonResponse(verified);
+    return jsonResponse(
+      { verified: false, error: 'Razorpay payment verification requires server-side HMAC validation.' },
+      503
+    );
   }
 
   if (pathname === '/api/enrollments/verify-payment') {
-    return jsonResponse({
-      ok: true,
-      verified: true,
-      orderId: body.orderId || '',
-      paymentId: body.paymentId || '',
-      verifiedAt: body.verifiedAt || new Date().toISOString(),
-    });
+    return jsonResponse(
+      { ok: false, verified: false, error: 'Server-side Razorpay payment verification is required.' },
+      503
+    );
   }
 
   // 2. Marketplace Catalog APIs

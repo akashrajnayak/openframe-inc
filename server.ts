@@ -4627,8 +4627,8 @@ Allowed Categories: ${catChoices.join(', ')}`,
 
     const { keyId, keySecret, webhookSecret, mode, enabled } = req.body || {};
     const cleanKeyId = typeof keyId === 'string' ? keyId.trim() : '';
-    const cleanKeySecret = typeof keySecret === 'string' ? keySecret.trim() : '';
-    const cleanWebhookSecret = typeof webhookSecret === 'string' ? webhookSecret.trim() : '';
+    const submittedKeySecret = typeof keySecret === 'string' ? keySecret.trim() : '';
+    const submittedWebhookSecret = typeof webhookSecret === 'string' ? webhookSecret.trim() : '';
 
     if (!cleanKeyId || cleanKeyId.length > 120 || !RAZORPAY_KEY_ID_PATTERN.test(cleanKeyId)) {
       return res.status(400).json({
@@ -4636,6 +4636,12 @@ Allowed Categories: ${catChoices.join(', ')}`,
         error: 'Valid Razorpay Key ID is required (must start with rzp_live_ or rzp_test_).',
       });
     }
+
+    const existingCreds = await getActiveRazorpayCredentials();
+    const cleanKeySecret = submittedKeySecret || existingCreds.keySecret || '';
+    const cleanWebhookSecret =
+      typeof webhookSecret === 'string' ? submittedWebhookSecret : existingCreds.webhookSecret || '';
+
     if (!cleanKeySecret || cleanKeySecret.length < 8 || cleanKeySecret.length > 200) {
       return res.status(400).json({
         ok: false,
@@ -5212,10 +5218,10 @@ Return a JSON array of 10 objects with: questionText, subTopic, cognitiveLevel (
     });
   });
 
-  app.post('/api/payments/razorpay/webhook', (req: any, res) => {
+  app.post('/api/payments/razorpay/webhook', async (req: any, res) => {
     const signature = String(req.headers['x-razorpay-signature'] || '');
-    const webhookSecret =
-      process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET || '';
+    const creds = await getActiveRazorpayCredentials();
+    const webhookSecret = creds.webhookSecret || creds.keySecret || '';
     if (!webhookSecret) {
       return res.status(503).json({
         ok: false,

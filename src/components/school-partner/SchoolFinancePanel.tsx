@@ -96,25 +96,20 @@ export const SchoolFinancePanel: React.FC<SchoolFinancePanelProps> = ({
 
     try {
       if (gateway === 'Razorpay') {
-        const verified = gatewayStatus?.configured
-          ? await launchLiveRazorpayPayment({
-              amountInr: numericAmt,
-              userId: actor.uid,
-              customerName: stu?.fullName || institution.principalName || actor.email,
-              customerEmail: actor.email,
-              institutionId: institution.id,
-              purpose: `${category}: ${description.trim()}`,
-              description: `${institution.name || 'OpenFrame School'} — ${description.trim()}`,
-            })
-          : standaloneMockService.completeStandaloneRazorpayPayment({
-              amountInr: numericAmt,
-              userId: actor.uid,
-              studentName: stu?.fullName || institution.principalName || actor.email,
-              studentEmail: actor.email,
-              institutionId: institution.id,
-              purpose: `${category}: ${description.trim()}`,
-              method: 'UPI',
-            });
+        if (!gatewayStatus?.configured) {
+          throw new Error(
+            'Razorpay payment gateway is not configured yet. Ask the Super Admin to save Razorpay Key ID and Key Secret in Admin → Payment Gateway.'
+          );
+        }
+        const verified = await launchLiveRazorpayPayment({
+          amountInr: numericAmt,
+          userId: actor.uid,
+          customerName: stu?.fullName || institution.principalName || actor.email,
+          customerEmail: actor.email,
+          institutionId: institution.id,
+          purpose: `${category}: ${description.trim()}`,
+          description: `${institution.name || 'OpenFrame School'} — ${description.trim()}`,
+        });
 
         await schoolPartnerService.recordSchoolPayment(
           {

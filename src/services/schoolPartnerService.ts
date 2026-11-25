@@ -1333,18 +1333,13 @@ class SchoolPartnerService {
         return parsed.data;
       }
     } catch {
-      // Fall through to standalone status when server is unreachable
+      // Backend unreachable
     }
-    const resp = await standaloneApiFetch(resolveApiUrl('/api/payments/razorpay/config'));
-    const parsed = await safeParseJsonResponse<any>(resp);
-    if (!parsed.isJson || !parsed.data) {
-      return {
-        configured: false,
-        keyId: null,
-        note: parsed.errorMessage || 'Razorpay API endpoint unavailable on this host.',
-      };
-    }
-    return parsed.data;
+    return {
+      configured: false,
+      keyId: null,
+      note: 'Unable to reach live Razorpay payment server.',
+    };
   }
 
   async createRazorpayOrder(params: {

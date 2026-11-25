@@ -203,31 +203,23 @@ export async function rechargeWeeklyTokens(params: {
   const rechargeId = `rech-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   const rzpCfg = await fetchLiveRazorpayConfig();
-  const verified = rzpCfg.configured
-    ? await launchLiveRazorpayPayment({
-        amountInr: WEEKLY_RECHARGE_PRICE_INR,
-        userId: params.uid,
-        customerName: params.studentName,
-        customerEmail: params.studentEmail,
-        purpose: 'weekly_token_recharge',
-        description: `OpenFrame Self-Study Weekly Recharge (+${WEEKLY_RECHARGE_TOKENS} AI Tokens)`,
-        notes: {
-          studentId: params.uid,
-          tokensGranted: String(WEEKLY_RECHARGE_TOKENS),
-        },
-      })
-    : standaloneMockService.completeStandaloneRazorpayPayment({
-        amountInr: WEEKLY_RECHARGE_PRICE_INR,
-        userId: params.uid,
-        studentName: params.studentName,
-        studentEmail: params.studentEmail,
-        purpose: 'weekly_token_recharge',
-        method: 'UPI',
-        notes: {
-          studentId: params.uid,
-          tokensGranted: String(WEEKLY_RECHARGE_TOKENS),
-        },
-      });
+  if (!rzpCfg.configured || !rzpCfg.keyId) {
+    throw new Error(
+      'Razorpay payment gateway is not configured yet. Super Admin can insert the Razorpay Key ID and Key Secret in Admin → Payment Gateway.'
+    );
+  }
+  const verified = await launchLiveRazorpayPayment({
+    amountInr: WEEKLY_RECHARGE_PRICE_INR,
+    userId: params.uid,
+    customerName: params.studentName,
+    customerEmail: params.studentEmail,
+    purpose: 'weekly_token_recharge',
+    description: `OpenFrame Self-Study Weekly Recharge (+${WEEKLY_RECHARGE_TOKENS} AI Tokens)`,
+    notes: {
+      studentId: params.uid,
+      tokensGranted: String(WEEKLY_RECHARGE_TOKENS),
+    },
+  });
 
   const verifiedServerSide = true;
   const razorpayOrderId = verified.orderId;
