@@ -44,6 +44,47 @@ export interface LiveRazorpayPaymentResult {
   mode: 'live_razorpay';
 }
 
+export interface HostedRazorpayPaymentLink {
+  paymentLinkId: string;
+  shortUrl: string;
+  status: string;
+  amountInr: number;
+  keyId: string;
+  mode: 'live' | 'test';
+}
+
+export interface HostedRazorpayLinkStatus {
+  ok: boolean;
+  paid: boolean;
+  status: string;
+  paymentLinkId: string;
+  orderId: string;
+  paymentId: string | null;
+  verifiedAt: string | null;
+  amountPaidInr: number;
+}
+
+export function isRunningInEmbeddedIframe(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+function sanitizeCustomerEmail(raw?: string): string | undefined {
+  const email = String(raw || '').trim().slice(0, 120);
+  if (!email) return undefined;
+  if (email.toLowerCase().endsWith('.local')) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email)) return undefined;
+  return email;
+}
+
+function sanitizeIndianMobile(raw?: string): string | undefined {
+  const digits = String(raw || '').replace(/\D/g, '').slice(-10);
+  return /^[6-9]\d{9}$/.test(digits) ? digits : undefined;
+}
+
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
 let scriptLoadPromise: Promise<void> | null = null;
 
@@ -210,11 +251,18 @@ export async function launchLiveRazorpayPayment(
     throw new Error('Razorpay Checkout SDK could not be initialized.');
   }
 
-  const sanitizedPhone = String(params.customerPhone || '').replace(/\D/g, '').slice(-10);
+  const sanitizedPhone = sanitizeIndianMobile(params.customerPhone);
+  const sanitizedEmail = sanitizeCustomerEmail(params.customerEmail);
+  const sanitizedName = params.customerName ? params.customerName.trim().slice(0, 100) : undefined;
 
   // 3. Open live Razorpay Checkout modal & verify HMAC-SHA256 signature on server upon completion
   return new Promise<LiveRazorpayPaymentResult>((resolve, reject) => {
     let settled = false;
+
+    const prefill: Record<string, string> = {};
+    if (sanitizedName) prefill.name = sanitizedName;
+    if (sanitizedEmail) prefill.email = sanitizedEmail;
+    if (sanitizedPhone) prefill.contact = sanitizedPhone;
 
     const options: Record<string, any> = {
       key: orderData.keyId,
@@ -223,11 +271,7 @@ export async function launchLiveRazorpayPayment(
       name: 'OpenFrame Education',
       description: params.description.slice(0, 200),
       order_id: orderData.order.id,
-      prefill: {
-        ...(params.customerName ? { name: params.customerName.trim().slice(0, 100) } : {}),
-        ...(params.customerEmail ? { email: params.customerEmail.trim().slice(0, 120) } : {}),
-        ...(sanitizedPhone.length === 10 ? { contact: sanitizedPhone } : {}),
-      },
+      ...(Object.keys(prefill).length > 0 ? { prefill } : {}),
       notes: params.notes || {},
       theme: {
         color: '#123D32',
@@ -318,7 +362,7 @@ export async function launchLiveRazorpayPayment(
           const desc =
             failPayload?.error?.description ||
             failPayload?.error?.reason ||
-            'Razorpay payment failed. Please retry or try another payment method.';
+            'Razorpay payment failed. Please retry or use the Official Razorpay Hosted Payment Page option.';
           const failErr = new Error(desc) as Error & { code?: string };
           failErr.code = 'PAYMENT_FAILED';
           reject(failErr);
@@ -332,4 +376,104 @@ export async function launchLiveRazorpayPayment(
       }
     }
   });
+}
+
+export async function createRazorpayPaymentLink(
+  params: LiveRazorpayPaymentParams
+): Promise<HostedRazorpayPaymentLink> {
+  const amountInr = Math.max(1, Math.round(Number(params.amountInr) || 0));
+  if (!Number.isFinite(amountInr) || amountInr <= 0) {
+    throw new Error('Invalid payment amount.');
+  }
+
+  const authHeaders = await getOptionalAuthHeader();
+  const resp = await fetch('/api/payments/razorpay/payment-link', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      amountInr,
+      courseId: params.courseId,
+      institutionId: params.institutionId || 'OPENFRAME_MARKETPLACE',
+      purpose: params.purpose,
+      description: params.description,
+      customerName: params.customerName,
+      customerEmail: sanitizeCustomerEmail(params.customerEmail),
+      customerPhone: sanitizeIndianMobile(params.customerPhone),
+      notes: params.notes || {},
+    }),
+  });
+
+  const data = await safeParseJson(resp);
+  if (!resp.ok || !data?.ok || !data?.paymentLinkId || !data?.shortUrl) {
+    const err = new Error(
+      data?.error || `Unable to create Razorpay Hosted Payment Link (HTTP ${resp.status}).`
+    ) as Error & { code?: string; status?: number };
+    err.status = resp.status;
+    err.code = data?.authFailed
+      ? 'RAZORPAY_AUTH_FAILED'
+      : resp.status === 503
+      ? 'RAZORPAY_NOT_CONFIGURED'
+      : 'RAZORPAY_LINK_FAILED';
+    throw err;
+  }
+
+  const rawShortUrl = String(data.shortUrl);
+  let validatedShortUrl = '';
+  try {
+    const parsed = new URL(rawShortUrl);
+    const host = parsed.hostname.toLowerCase();
+    const isOfficialHost =
+      host === 'rzp.io' ||
+      host.endsWith('.rzp.io') ||
+      host === 'razorpay.com' ||
+      host.endsWith('.razorpay.com');
+    if (parsed.protocol === 'https:' && isOfficialHost) {
+      validatedShortUrl = parsed.toString();
+    }
+  } catch {
+    validatedShortUrl = '';
+  }
+
+  if (!validatedShortUrl) {
+    throw new Error('Razorpay returned an unexpected payment link URL.');
+  }
+
+  return {
+    paymentLinkId: String(data.paymentLinkId),
+    shortUrl: validatedShortUrl,
+    status: String(data.status || 'created'),
+    amountInr: Number(data.amountInr || amountInr),
+    keyId: String(data.keyId || ''),
+    mode: data.mode === 'test' ? 'test' : 'live',
+  };
+}
+
+export async function checkRazorpayPaymentLinkStatus(
+  paymentLinkId: string
+): Promise<HostedRazorpayLinkStatus> {
+  const resp = await fetch(
+    `/api/payments/razorpay/payment-link/${encodeURIComponent(paymentLinkId)}`,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }
+  );
+  const data = await safeParseJson(resp);
+  if (!resp.ok || !data?.ok) {
+    throw new Error(data?.error || `Unable to check payment status (HTTP ${resp.status}).`);
+  }
+  return {
+    ok: true,
+    paid: Boolean(data.paid),
+    status: String(data.status || 'created'),
+    paymentLinkId: String(data.paymentLinkId || paymentLinkId),
+    orderId: String(data.orderId || paymentLinkId),
+    paymentId: data.paymentId ? String(data.paymentId) : null,
+    verifiedAt: data.verifiedAt ? String(data.verifiedAt) : null,
+    amountPaidInr: Number(data.amountPaidInr || 0),
+  };
 }

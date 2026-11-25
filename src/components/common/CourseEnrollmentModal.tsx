@@ -11,6 +11,8 @@ import {
   AlertCircle,
   MapPin,
   KeyRound,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from '../../router/RouterContext';
@@ -39,7 +41,11 @@ import { standaloneMockService } from '../../services/standaloneMockService';
 import {
   fetchLiveRazorpayConfig,
   launchLiveRazorpayPayment,
+  createRazorpayPaymentLink,
+  checkRazorpayPaymentLinkStatus,
+  isRunningInEmbeddedIframe,
   type LiveRazorpayConfig,
+  type HostedRazorpayPaymentLink,
 } from '../../services/razorpayCheckoutService';
 import { RazorpayKeyPromptModal } from './RazorpayKeyPromptModal';
 
@@ -66,9 +72,13 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
   const [pendingEnrollment, setPendingEnrollment] = useState<CourseEnrollment | null>(null);
   const [showAddressFields, setShowAddressFields] = useState(false);
   const [continueStandalone, setContinueStandalone] = useState(false);
-  const [step, setStep] = useState<'details' | 'confirm' | 'success'>('details');
+  const [step, setStep] = useState<'details' | 'confirm' | 'hosted_link' | 'success'>('details');
   const [razorpayConfig, setRazorpayConfig] = useState<LiveRazorpayConfig | null>(null);
   const [keyPromptOpen, setKeyPromptOpen] = useState(false);
+  const [hostedLink, setHostedLink] = useState<HostedRazorpayPaymentLink | null>(null);
+  const [checkingHostedStatus, setCheckingHostedStatus] = useState(false);
+  const [creatingHostedLink, setCreatingHostedLink] = useState(false);
+  const inEmbeddedIframe = useMemo(() => isRunningInEmbeddedIframe(), []);
 
   // Core learner details
   const [fullName, setFullName] = useState('');
@@ -104,6 +114,9 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
     setStep('details');
     setErrorMsg('');
     setGatewayUnavailable(false);
+    setHostedLink(null);
+    setCheckingHostedStatus(false);
+    setCreatingHostedLink(false);
     setCompletedEnrollment(null);
     setAlreadyEnrolled(null);
     setPendingEnrollment(null);
@@ -171,6 +184,33 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
     }
     return age < 18;
   }, [dob]);
+
+  // Automatic background polling while Hosted Razorpay Payment Link is open
+  useEffect(() => {
+    if (!isOpen || step !== 'hosted_link' || !hostedLink?.paymentLinkId || !course) return;
+    let cancelled = false;
+    const interval = window.setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const status = await checkRazorpayPaymentLinkStatus(hostedLink.paymentLinkId);
+        if (!cancelled && status.paid && status.paymentId) {
+          window.clearInterval(interval);
+          await recordVerifiedPaymentAndFinalize({
+            orderId: status.orderId,
+            paymentId: status.paymentId,
+            verifiedAt: status.verifiedAt || new Date().toISOString(),
+          });
+        }
+      } catch {
+        // Silent retry on next poll tick
+      }
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, step, hostedLink?.paymentLinkId, course?.id]);
 
   if (!isOpen || !course) return null;
 
@@ -346,6 +386,123 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
     if (onEnrolled) onEnrolled(enrollment);
   };
 
+  const recordVerifiedPaymentAndFinalize = async (verified: {
+    orderId: string;
+    paymentId: string;
+    verifiedAt: string;
+  }) => {
+    // Best-effort mirror to Firestore when signed in
+    if (currentUser?.uid) {
+      const payId = `rzp_${verified.paymentId}`;
+      await setDoc(doc(db, 'payments', payId), {
+        id: payId,
+        userId: currentUser.uid,
+        studentId: currentUser.uid,
+        institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
+        courseId: course.id,
+        courseTitle: course.title,
+        amount: priceInr,
+        amountInr: priceInr,
+        marketBenchmarkPrice: marketPriceInr,
+        discountPercent: 90,
+        gateway: 'Razorpay',
+        status: 'Paid',
+        razorpayOrderId: verified.orderId,
+        razorpayPaymentId: verified.paymentId,
+        verifiedServerSide: true,
+        createdAt: verified.verifiedAt,
+      }).catch(() => {});
+    }
+
+    await finalizeCourseEnrollment('Paid', priceInr, {
+      razorpayOrderId: verified.orderId,
+      razorpayPaymentId: verified.paymentId,
+      paymentGateway: 'Razorpay',
+      verifiedAt: verified.verifiedAt,
+    });
+  };
+
+  const handleLaunchHostedRazorpayLink = async () => {
+    setErrorMsg('');
+    if (!fullName.trim() || !email.trim()) {
+      setErrorMsg('Please enter your full name and email address first.');
+      return;
+    }
+    if (!consentAccepted) {
+      setErrorMsg('Please confirm the learner data & DPDP consent policy to continue.');
+      return;
+    }
+    setGatewayUnavailable(false);
+    setCreatingHostedLink(true);
+    try {
+      const cfg = await fetchLiveRazorpayConfig();
+      setRazorpayConfig(cfg);
+      if (!cfg.configured || !cfg.keyId) {
+        setGatewayUnavailable(true);
+        setErrorMsg(
+          isSuperAdmin
+            ? 'Razorpay API keys are not configured yet. Insert your Razorpay Key ID and Key Secret in the prompt to enable payment checkout.'
+            : 'Razorpay payment gateway is currently being configured by the administrator. Please try again shortly.'
+        );
+        if (isSuperAdmin) setKeyPromptOpen(true);
+        return;
+      }
+
+      const link = await createRazorpayPaymentLink({
+        amountInr: priceInr,
+        courseId: course.id,
+        courseTitle: course.title,
+        institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
+        purpose: `90%-Off OpenFrame Grant Enrollment: ${course.title}`,
+        description: `${course.title} (${course.id})`,
+        customerName: fullName.trim() || currentUser?.displayName || 'OpenFrame Learner',
+        customerEmail: email.trim() || currentUser?.email || undefined,
+        customerPhone: addressDetails.mobileNumber || undefined,
+        userId: activeLearnerUid,
+        notes: {
+          studentName: (fullName.trim() || 'OpenFrame Learner').slice(0, 120),
+          courseTitle: course.title.slice(0, 120),
+          marketBenchmarkPrice: String(marketPriceInr),
+          discountPercent: '90',
+        },
+      });
+      setHostedLink(link);
+      setStep('hosted_link');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to generate Official Razorpay Hosted Payment Page.');
+      if (err?.code === 'RAZORPAY_NOT_CONFIGURED' || err?.code === 'RAZORPAY_AUTH_FAILED') {
+        setGatewayUnavailable(true);
+        if (isSuperAdmin) setKeyPromptOpen(true);
+      }
+    } finally {
+      setCreatingHostedLink(false);
+    }
+  };
+
+  const handleVerifyHostedLinkPayment = async () => {
+    if (!hostedLink?.paymentLinkId) return;
+    setErrorMsg('');
+    setCheckingHostedStatus(true);
+    try {
+      const status = await checkRazorpayPaymentLinkStatus(hostedLink.paymentLinkId);
+      if (status.paid && status.paymentId) {
+        await recordVerifiedPaymentAndFinalize({
+          orderId: status.orderId,
+          paymentId: status.paymentId,
+          verifiedAt: status.verifiedAt || new Date().toISOString(),
+        });
+      } else {
+        setErrorMsg(
+          `Payment status on Razorpay is currently "${status.status}". Please finish paying on the Razorpay page and click Verify again.`
+        );
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to check payment status on Razorpay right now.');
+    } finally {
+      setCheckingHostedStatus(false);
+    }
+  };
+
   const handleConfirmRazorpayCheckout = async () => {
     setErrorMsg('');
     setGatewayUnavailable(false);
@@ -375,7 +532,7 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
         purpose: `90%-Off OpenFrame Grant Enrollment: ${course.title}`,
         description: `${course.title} (${course.id})`,
         customerName: fullName.trim() || currentUser?.displayName || 'OpenFrame Learner',
-        customerEmail: email.trim() || currentUser?.email || 'learner@openframe.local',
+        customerEmail: email.trim() || currentUser?.email || undefined,
         customerPhone: addressDetails.mobileNumber || undefined,
         userId: activeLearnerUid,
         notes: {
@@ -388,40 +545,20 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
         },
       });
 
-      // Best-effort mirror to Firestore when signed in
-      if (currentUser?.uid) {
-        const payId = `rzp_${verified.paymentId}`;
-        await setDoc(doc(db, 'payments', payId), {
-          id: payId,
-          userId: currentUser.uid,
-          studentId: currentUser.uid,
-          institutionId: lmsUser?.institutionId || 'OPENFRAME_MARKETPLACE',
-          courseId: course.id,
-          courseTitle: course.title,
-          amount: priceInr,
-          amountInr: priceInr,
-          marketBenchmarkPrice: marketPriceInr,
-          discountPercent: 90,
-          gateway: 'Razorpay',
-          status: 'Paid',
-          razorpayOrderId: verified.orderId,
-          razorpayPaymentId: verified.paymentId,
-          verifiedServerSide: true,
-          createdAt: verified.verifiedAt,
-        }).catch(() => {});
-      }
-
-      await finalizeCourseEnrollment('Paid', priceInr, {
-        razorpayOrderId: verified.orderId,
-        razorpayPaymentId: verified.paymentId,
-        paymentGateway: 'Razorpay',
+      await recordVerifiedPaymentAndFinalize({
+        orderId: verified.orderId,
+        paymentId: verified.paymentId,
         verifiedAt: verified.verifiedAt,
       });
     } catch (err: any) {
       if (err?.code === 'PAYMENT_CANCELLED') {
-        setErrorMsg('Razorpay checkout was closed before payment completed. Click Pay via Razorpay to retry.');
+        setErrorMsg(
+          'Razorpay popup was closed before payment completed. You can retry the popup or use "Pay on Razorpay Hosted Page" below.'
+        );
       } else {
-        setErrorMsg(err?.message || 'Unable to launch Razorpay checkout. Please retry.');
+        setErrorMsg(
+          `${err?.message || 'Unable to launch Razorpay popup checkout.'} Tip: Try "Pay on Razorpay Hosted Page" below for guaranteed UPI, Card & NetBanking support.`
+        );
         if (err?.code === 'RAZORPAY_NOT_CONFIGURED' || err?.code === 'RAZORPAY_AUTH_FAILED') {
           setGatewayUnavailable(true);
           if (isSuperAdmin) {
@@ -874,16 +1011,118 @@ export const CourseEnrollmentModal: React.FC<CourseEnrollmentModalProps> = ({
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
+                    type="button"
+                    onClick={handleLaunchHostedRazorpayLink}
+                    disabled={processing || creatingHostedLink}
+                    className={`inline-flex items-center gap-2 px-5 py-3 text-sm font-bold rounded-xl transition-colors disabled:opacity-60 cursor-pointer shadow-sm whitespace-nowrap ${
+                      inEmbeddedIframe
+                        ? 'bg-[#123D32] text-white hover:bg-[#0D2E25]'
+                        : 'bg-[#2563EB] text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>
+                      {creatingHostedLink
+                        ? 'Generating Razorpay Link...'
+                        : `Pay ${formatInr(priceInr)} on Razorpay Page`}
+                    </span>
+                  </button>
+                  <button
                     type="submit"
-                    disabled={processing}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-[#123D32] text-white text-sm font-bold rounded-xl hover:bg-[#0D2E25] transition-colors disabled:opacity-60 cursor-pointer shadow-sm whitespace-nowrap"
+                    disabled={processing || creatingHostedLink}
+                    className={`inline-flex items-center gap-2 px-5 py-3 text-sm font-bold rounded-xl transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap ${
+                      inEmbeddedIframe
+                        ? 'border border-[#123D32] bg-white text-[#123D32] hover:bg-emerald-50'
+                        : 'bg-[#123D32] text-white hover:bg-[#0D2E25] shadow-sm'
+                    }`}
                   >
                     <CreditCard className="w-4 h-4" />
-                    <span>{processing ? 'Opening Razorpay Gateway...' : `Pay ${formatInr(priceInr)} via Razorpay`}</span>
+                    <span>{processing ? 'Opening Razorpay Popup...' : 'Razorpay Popup Checkout'}</span>
                   </button>
                 </div>
               </div>
             </form>
+          ) : step === 'hosted_link' && hostedLink ? (
+            <div className="bg-white border border-[#123D32]/30 rounded-2xl p-6 space-y-5">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                    <ShieldCheck className="w-4 h-4" />
+                    Official Razorpay Hosted Payment Page ({hostedLink.mode.toUpperCase()})
+                  </span>
+                  <h3 className="font-heading text-lg font-bold text-[#18221F] mt-1">
+                    Complete {formatInr(hostedLink.amountInr)} Payment on Razorpay
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Open Razorpay in a secure new tab to pay via UPI QR, Google Pay, PhonePe, Paytm, Cards, or NetBanking. Your course unlocks automatically once payment completes.
+                  </p>
+                </div>
+                <div className="text-right shrink-0 tabular-nums">
+                  <div className="text-xs text-slate-500">Payable</div>
+                  <div className="text-2xl font-extrabold text-[#123D32]">{formatInr(hostedLink.amountInr)}</div>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Razorpay Payment Link ID</span>
+                  <span className="font-mono font-semibold text-slate-800">{hostedLink.paymentLinkId}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Official Razorpay URL</span>
+                  <a
+                    href={hostedLink.shortUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono font-semibold text-[#2563EB] hover:underline truncate max-w-[260px]"
+                  >
+                    {hostedLink.shortUrl}
+                  </a>
+                </div>
+                <div className="flex items-center gap-2 text-emerald-700 font-medium pt-1">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span>Auto-verifying payment status with Razorpay every 4 seconds...</span>
+                </div>
+              </div>
+
+              {errorMsg && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-medium text-amber-900 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <a
+                  href={hostedLink.shortUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#123D32] hover:bg-[#0D2E25] text-white text-sm font-bold rounded-xl transition-colors shadow-sm whitespace-nowrap"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Open Official Razorpay Page ({formatInr(hostedLink.amountInr)})</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={handleVerifyHostedLinkPayment}
+                  disabled={checkingHostedStatus}
+                  className="inline-flex items-center gap-2 px-5 py-3 bg-[#2563EB] hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60 cursor-pointer whitespace-nowrap"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{checkingHostedStatus ? 'Checking Razorpay...' : "I've Paid — Verify & Unlock"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('details');
+                    setErrorMsg('');
+                  }}
+                  className="px-4 py-3 border border-slate-300 bg-white text-xs font-semibold text-slate-700 rounded-xl hover:bg-slate-50 cursor-pointer whitespace-nowrap"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
           ) : step === 'confirm' ? (
             <div className="space-y-4">
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
