@@ -1416,6 +1416,66 @@ export interface CourseApprovalQueueItem {
   enrollment?: CourseEnrollment;
 }
 
+export type LearningAbilityTier =
+  | 'Advanced Mastery'
+  | 'Strong Progress'
+  | 'Steady Learner'
+  | 'Early Stage'
+  | 'Not Assessed Yet';
+
+export interface AdminStudentRecord {
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  registrationNumber?: string;
+  enrolledCoursesCount: number;
+  enrolledCourseTitles: string[];
+  latestCourseId?: string;
+  latestCourseTitle?: string;
+  enrolledAmountInr: number;
+  projectsSubmitted: number;
+  projectsApproved: number;
+  averageQuizScore: number | null;
+  bestQuizScore: number | null;
+  quizAttemptsCount: number;
+  overallProgressPercent: number;
+  iqEqSqScore: number | null;
+  learningAbilityScore: number | null;
+  learningAbilityTier: LearningAbilityTier;
+  learningAbilityBasis: string;
+  certificateStatus: 'Approved' | 'Pending Admin Approval' | 'Revision Requested' | 'In Progress';
+  lastActivityAt: string;
+}
+
+export interface AdminStudentNotification {
+  id: string;
+  kind: 'enrollment' | 'registration' | 'project' | 'approval';
+  studentName: string;
+  studentEmail?: string;
+  courseTitle?: string;
+  amountInr?: number;
+  summary: string;
+  timestamp: string;
+  actionPath: string;
+}
+
+export interface AdminStudentIntelligenceReport {
+  students: AdminStudentRecord[];
+  notifications: AdminStudentNotification[];
+  totals: {
+    registeredStudents: number;
+    enrolledStudents: number;
+    totalEnrollments: number;
+    totalAmountEnrolledInr: number;
+    totalProjectsSubmitted: number;
+    totalProjectsApproved: number;
+    averageScoreAchieved: number;
+    averageLearningAbility: number;
+    pendingCourseApprovals: number;
+  };
+  fetchedAt: string;
+}
+
 export interface CertificateVerificationLog {
   id: string;
   certificateId: string;

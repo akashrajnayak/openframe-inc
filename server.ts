@@ -24,6 +24,10 @@ import {
 } from './server/youtubeDiscoveryEngine';
 import { registerGeminiStudioRoutes } from './server/geminiStudioRouter.ts';
 import {
+  registerAdminAuthRoutes,
+  verifyAdminBearerToken,
+} from './server/adminAuthRouter.ts';
+import {
   getActiveRazorpayCredentials,
   saveRazorpayGatewaySettings,
   clearRazorpayGatewaySettings,
@@ -4600,14 +4604,35 @@ Allowed Categories: ${catChoices.join(', ')}`,
     updatedByEmail: creds.updatedByEmail,
   });
 
-  app.get('/api/admin/payment-settings', async (req, res) => {
+  const resolveSuperAdminRequest = async (
+    req: express.Request
+  ): Promise<
+    | { ok: true; uid: string; email: string }
+    | { ok: false; status: 401 | 403; error: string }
+  > => {
+    const adminCred = verifyAdminBearerToken(req.headers.authorization);
+    if (adminCred && adminCred.role === 'Super Admin') {
+      return { ok: true, uid: adminCred.sub, email: adminCred.email };
+    }
     const caller = await verifyFirebaseBearerToken(req);
     if (!caller) {
-      return res.status(401).json({ ok: false, error: 'Authentication required.' });
+      return { ok: false, status: 401, error: 'Authentication required.' };
     }
     const allowed = await isVerifiedSuperAdmin(caller);
     if (!allowed) {
-      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+      return { ok: false, status: 403, error: 'Super Admin access required.' };
+    }
+    return {
+      ok: true,
+      uid: caller.uid,
+      email: caller.email || 'superadmin@openframeitsolutions.com',
+    };
+  };
+
+  app.get('/api/admin/payment-settings', async (req, res) => {
+    const authCheck = await resolveSuperAdminRequest(req);
+    if (!authCheck.ok) {
+      return res.status(authCheck.status).json({ ok: false, error: authCheck.error });
     }
     const creds = await getActiveRazorpayCredentials();
     return res.json({
@@ -4617,13 +4642,9 @@ Allowed Categories: ${catChoices.join(', ')}`,
   });
 
   app.put('/api/admin/payment-settings', async (req, res) => {
-    const caller = await verifyFirebaseBearerToken(req);
-    if (!caller) {
-      return res.status(401).json({ ok: false, error: 'Authentication required.' });
-    }
-    const allowed = await isVerifiedSuperAdmin(caller);
-    if (!allowed) {
-      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    const authCheck = await resolveSuperAdminRequest(req);
+    if (!authCheck.ok) {
+      return res.status(authCheck.status).json({ ok: false, error: authCheck.error });
     }
 
     const { keyId, keySecret, webhookSecret, mode, enabled } = req.body || {};
@@ -4664,8 +4685,8 @@ Allowed Categories: ${catChoices.join(', ')}`,
         webhookSecret: cleanWebhookSecret,
         mode: resolvedMode,
         enabled: enabled !== false,
-        updatedByUid: caller.uid,
-        updatedByEmail: caller.email || 'superadmin@openframeitsolutions.com',
+        updatedByUid: authCheck.uid,
+        updatedByEmail: authCheck.email,
       });
       return res.json({
         ok: true,
@@ -4680,13 +4701,9 @@ Allowed Categories: ${catChoices.join(', ')}`,
   });
 
   app.delete('/api/admin/payment-settings', async (req, res) => {
-    const caller = await verifyFirebaseBearerToken(req);
-    if (!caller) {
-      return res.status(401).json({ ok: false, error: 'Authentication required.' });
-    }
-    const allowed = await isVerifiedSuperAdmin(caller);
-    if (!allowed) {
-      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    const authCheck = await resolveSuperAdminRequest(req);
+    if (!authCheck.ok) {
+      return res.status(authCheck.status).json({ ok: false, error: authCheck.error });
     }
     try {
       const fallback = await clearRazorpayGatewaySettings();
@@ -4703,13 +4720,9 @@ Allowed Categories: ${catChoices.join(', ')}`,
   });
 
   app.post('/api/admin/payment-settings/test', async (req, res) => {
-    const caller = await verifyFirebaseBearerToken(req);
-    if (!caller) {
-      return res.status(401).json({ ok: false, error: 'Authentication required.' });
-    }
-    const allowed = await isVerifiedSuperAdmin(caller);
-    if (!allowed) {
-      return res.status(403).json({ ok: false, error: 'Super Admin access required.' });
+    const authCheck = await resolveSuperAdminRequest(req);
+    if (!authCheck.ok) {
+      return res.status(authCheck.status).json({ ok: false, error: authCheck.error });
     }
 
     const active = await getActiveRazorpayCredentials();
@@ -6551,6 +6564,7 @@ ${JSON.stringify({
   });
 
   registerGeminiStudioRoutes(app);
+  registerAdminAuthRoutes(app);
 
   // Ensure unmatched /api/* endpoints always return JSON rather than HTML/plain-text fallbacks
   app.all('/api/*', (_req, res) => {

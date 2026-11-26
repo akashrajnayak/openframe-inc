@@ -46,9 +46,20 @@ export function getAuthorizedDashboardPath(role: LmsUserRole): string {
   }
 }
 
+export interface AdminCredentialSession {
+  username: string;
+  displayName: string;
+  email: string;
+  role: AdminRole;
+  expiresAt?: string;
+}
+
 interface AuthContextType {
   currentUser: User | null;
   adminProfile: AdminUser | null;
+  adminCredentialSession: AdminCredentialSession | null;
+  adminBearerToken: string | null;
+  isAdminSession: boolean;
   lmsUser: LmsUserProfile | null;
   studentProfile: StudentProfile | null;
   schoolEnrollment: SchoolStudentEnrollment | null;
@@ -64,6 +75,8 @@ interface AuthContextType {
   hasRoleAccess: (requiredRole: AdminRole) => boolean;
   loginGoogle: (rememberMe?: boolean) => Promise<void>;
   loginEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
+  loginAdminCredentials: (username: string, password: string) => Promise<AdminCredentialSession>;
+  bootstrapAdminCredentials: (username: string, password: string) => Promise<AdminCredentialSession>;
   loginPortalGoogle: (expectedRole?: LmsUserRole, rememberMe?: boolean) => Promise<LmsUserProfile>;
   loginPortalEmail: (email: string, pass: string, expectedRole?: LmsUserRole, rememberMe?: boolean) => Promise<LmsUserProfile>;
   registerPortalEmail: (
@@ -88,6 +101,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [adminProfile, setAdminProfile] = useState<AdminUser | null>(null);
+  const [adminCredentialSession, setAdminCredentialSession] = useState<AdminCredentialSession | null>(null);
+  const [adminBearerToken, setAdminBearerToken] = useState<string | null>(null);
   const [lmsUser, setLmsUser] = useState<LmsUserProfile | null>(null);
   const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(null);
   const [schoolEnrollment, setSchoolEnrollment] = useState<SchoolStudentEnrollment | null>(null);
@@ -214,6 +229,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginAdminCredentials = async (
+    username: string,
+    password: string
+  ): Promise<AdminCredentialSession> => {
+    setAuthError(null);
+    const res = await fetch('/api/admin/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username.trim(), password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok || !data?.token || !data?.admin) {
+      const msg = data?.error || 'Invalid administrator username or password.';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+    const session: AdminCredentialSession = {
+      username: data.admin.username,
+      displayName: data.admin.displayName || `Admin (${data.admin.username})`,
+      email: data.admin.email || `${data.admin.username}@openframeitsolutions.com`,
+      role: (data.admin.role as AdminRole) || 'Super Admin',
+      expiresAt: data.admin.expiresAt,
+    };
+    setAdminBearerToken(data.token);
+    setAdminCredentialSession(session);
+    return session;
+  };
+
+  const bootstrapAdminCredentials = async (
+    username: string,
+    password: string
+  ): Promise<AdminCredentialSession> => {
+    setAuthError(null);
+    const res = await fetch('/api/admin/auth/bootstrap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username.trim(), password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok || !data?.token || !data?.admin) {
+      const msg = data?.error || 'Could not configure administrator credentials.';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+    const session: AdminCredentialSession = {
+      username: data.admin.username,
+      displayName: data.admin.displayName || `Admin (${data.admin.username})`,
+      email: data.admin.email || `${data.admin.username}@openframeitsolutions.com`,
+      role: (data.admin.role as AdminRole) || 'Super Admin',
+      expiresAt: data.admin.expiresAt,
+    };
+    setAdminBearerToken(data.token);
+    setAdminCredentialSession(session);
+    return session;
+  };
+
   const loginPortalGoogle = async (expectedRole?: LmsUserRole, rememberMe = true): Promise<LmsUserProfile> => {
     setAuthError(null);
     manualAuthDepthRef.current += 1;
@@ -328,13 +399,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     setAuthError(null);
+    const activeToken = adminBearerToken;
+    setAdminBearerToken(null);
+    setAdminCredentialSession(null);
+    if (activeToken) {
+      fetch('/api/admin/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${activeToken}` },
+      }).catch(() => {});
+    }
     try {
       localStorage.removeItem('openframe_student_active_route');
       localStorage.removeItem('openframe_student_active_uid');
     } catch {
       // ignore storage errors
     }
-    await logoutAdmin();
+    await logoutAdmin().catch(() => {});
     setCurrentUser(null);
     setAdminProfile(null);
     setLmsUser(null);
@@ -350,9 +430,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isSuperAdmin = Boolean(
     adminProfile?.role === 'Super Admin' ||
+      adminCredentialSession?.role === 'Super Admin' ||
       lmsUser?.role === 'admin' ||
       currentUser?.email?.toLowerCase() === 'akashrajnayak@gmail.com' ||
       currentUser?.email?.toLowerCase() === 'admin@openframeitsolutions.com'
+  );
+
+  const isAdminSession = Boolean(
+    adminCredentialSession ||
+      (currentUser && (adminProfile?.isActive || isSuperAdmin))
   );
 
   const hasRoleAccess = (requiredRole: AdminRole): boolean => {
@@ -361,7 +447,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return adminProfile.role === requiredRole;
   };
 
-  const activeRole = lmsUser?.role || portalRole;
+  const activeRole = isAdminSession ? 'admin' : (lmsUser?.role || portalRole);
   const isSchoolStudent = Boolean(
     activeRole === 'student' &&
       (schoolEnrollment || isSchoolQualificationLabel(studentProfile?.qualification))
@@ -377,6 +463,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         currentUser,
         adminProfile,
+        adminCredentialSession,
+        adminBearerToken,
+        isAdminSession,
         lmsUser,
         studentProfile,
         schoolEnrollment,
@@ -387,11 +476,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         authError,
         clearAuthError,
-        role: adminProfile?.role || null,
+        role: adminProfile?.role || adminCredentialSession?.role || null,
         isSuperAdmin,
         hasRoleAccess,
         loginGoogle,
         loginEmail,
+        loginAdminCredentials,
+        bootstrapAdminCredentials,
         loginPortalGoogle,
         loginPortalEmail,
         registerPortalEmail,

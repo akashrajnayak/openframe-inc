@@ -48,6 +48,11 @@ import {
   ApiUsageTelemetry,
   QaSavedRecord,
   RecommendationAnalyticsEvent,
+  AdminStudentRecord,
+  AdminStudentNotification,
+  AdminStudentIntelligenceReport,
+  LearningAbilityTier,
+  StudentRegistration,
 } from '../types';
 import { quinnAiService } from './quinnAiService';
 import { aiPathToMarketplaceCourse, cacheModeledCourse } from './marketplaceService';
@@ -3455,6 +3460,405 @@ export class LmsService {
       popularDegrees: sortMap(degreeMap),
       topRequestedSkills: sortMap(skillMap),
       recentEvents: events.slice(0, 20),
+    };
+  }
+
+  /**
+   * Admin Student Intelligence & Registered Student Notifications aggregation.
+   * Pulls live Firestore enrollments, registrations, projects, quiz attempts,
+   * progress records, certificates, and IQ/EQ/SQ assessments for authorized admins.
+   */
+  async getAdminStudentIntelligence(): Promise<AdminStudentIntelligenceReport> {
+    const [
+      enrollSnap,
+      regSnap,
+      profileSnap,
+      progressSnap,
+      projectSnap,
+      quizSnap,
+      certSnap,
+      iqSnap,
+    ] = await Promise.all([
+      getDocs(query(collection(db, 'course_enrollments'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'student_registrations'), limit(300))).catch(() => null),
+      getDocs(query(collection(db, 'student_profiles'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'student_progress'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'project_submissions'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'quiz_attempts'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'certificates'), limit(500))).catch(() => null),
+      getDocs(query(collection(db, 'iq_eq_sq_assessments'), limit(300))).catch(() => null),
+    ]);
+
+    const enrollments = enrollSnap
+      ? enrollSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as CourseEnrollment))
+      : [];
+    const registrations = regSnap
+      ? regSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as StudentRegistration))
+      : [];
+    const profiles = profileSnap
+      ? profileSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as StudentProfile))
+      : [];
+    const progressDocs = progressSnap
+      ? progressSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as StudentProgressRecord))
+      : [];
+    const projectDocs = projectSnap
+      ? projectSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProjectSubmission))
+      : [];
+    const quizDocs = quizSnap
+      ? quizSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as QuizAttempt))
+      : [];
+    const certDocs = certSnap
+      ? certSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as IssuedCertificate))
+      : [];
+    const iqDocs = iqSnap
+      ? iqSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
+      : [];
+
+    type MutableBucket = {
+      studentId: string;
+      studentName: string;
+      studentEmail: string;
+      registrationNumber?: string;
+      courseTitles: Set<string>;
+      latestCourseId?: string;
+      latestCourseTitle?: string;
+      latestCourseAt: string;
+      enrolledAmountInr: number;
+      projectsSubmitted: number;
+      projectsApproved: number;
+      quizScores: number[];
+      progressPercents: number[];
+      iqScores: number[];
+      certificateStatus: AdminStudentRecord['certificateStatus'];
+      lastActivityAt: string;
+    };
+
+    const buckets = new Map<string, MutableBucket>();
+    const emailToKey = new Map<string, string>();
+
+    const ensureBucket = (
+      rawId: string,
+      name?: string,
+      email?: string,
+      regNo?: string
+    ): MutableBucket => {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      let key = rawId ? rawId.trim() : '';
+      if (!key && cleanEmail && emailToKey.has(cleanEmail)) {
+        key = emailToKey.get(cleanEmail)!;
+      }
+      if (!key) {
+        key = cleanEmail || `stu_${buckets.size + 1}`;
+      }
+      if (!buckets.has(key) && cleanEmail && emailToKey.has(cleanEmail)) {
+        key = emailToKey.get(cleanEmail)!;
+      }
+      let b = buckets.get(key);
+      if (!b) {
+        b = {
+          studentId: key,
+          studentName: name?.trim() || 'Registered Student',
+          studentEmail: email?.trim() || '',
+          registrationNumber: regNo,
+          courseTitles: new Set<string>(),
+          latestCourseAt: '',
+          enrolledAmountInr: 0,
+          projectsSubmitted: 0,
+          projectsApproved: 0,
+          quizScores: [],
+          progressPercents: [],
+          iqScores: [],
+          certificateStatus: 'In Progress',
+          lastActivityAt: '',
+        };
+        buckets.set(key, b);
+      } else {
+        if (name && (b.studentName === 'Registered Student' || !b.studentName)) {
+          b.studentName = name.trim();
+        }
+        if (email && !b.studentEmail) {
+          b.studentEmail = email.trim();
+        }
+        if (regNo && !b.registrationNumber) {
+          b.registrationNumber = regNo;
+        }
+      }
+      if (cleanEmail) {
+        emailToKey.set(cleanEmail, b.studentId);
+      }
+      return b;
+    };
+
+    const bumpActivity = (b: MutableBucket, ts?: string) => {
+      if (ts && ts > b.lastActivityAt) b.lastActivityAt = ts;
+    };
+
+    profiles.forEach((p) => {
+      const b = ensureBucket(p.uid || p.id, p.fullName, p.email, p.registrationNumber);
+      bumpActivity(b, p.updatedAt || p.createdAt);
+    });
+
+    registrations.forEach((r) => {
+      const b = ensureBucket(
+        r.emailAddress ? emailToKey.get(r.emailAddress.toLowerCase()) || `reg_${r.id}` : `reg_${r.id}`,
+        r.fullName,
+        r.emailAddress
+      );
+      if (r.interestedCourse) {
+        b.courseTitles.add(r.interestedCourse);
+        if (!b.latestCourseTitle) b.latestCourseTitle = r.interestedCourse;
+      }
+      bumpActivity(b, r.registeredAt);
+    });
+
+    enrollments.forEach((en) => {
+      const b = ensureBucket(en.studentId, en.studentName, en.studentEmail, en.registrationNumber);
+      const title = en.courseTitle || en.courseId;
+      if (title) b.courseTitles.add(title);
+      const enAt = en.enrolledAt || en.updatedAt || '';
+      if (enAt >= b.latestCourseAt) {
+        b.latestCourseAt = enAt;
+        b.latestCourseId = en.courseId;
+        b.latestCourseTitle = title;
+      }
+      const fee = typeof en.feeAmount === 'number' && !Number.isNaN(en.feeAmount) ? en.feeAmount : 0;
+      b.enrolledAmountInr += Math.max(0, fee);
+      if (en.certificateApprovalStatus === 'Approved') {
+        b.certificateStatus = 'Approved';
+      } else if (en.certificateApprovalStatus === 'Pending Admin Approval' && b.certificateStatus !== 'Approved') {
+        b.certificateStatus = 'Pending Admin Approval';
+      } else if (en.certificateApprovalStatus === 'Revision Requested' && b.certificateStatus === 'In Progress') {
+        b.certificateStatus = 'Revision Requested';
+      }
+      bumpActivity(b, en.updatedAt || en.enrolledAt);
+    });
+
+    progressDocs.forEach((pr) => {
+      const b = ensureBucket(pr.studentId, pr.studentName, undefined);
+      if (pr.courseTitle) b.courseTitles.add(pr.courseTitle);
+      if (typeof pr.overallProgressPercent === 'number') {
+        b.progressPercents.push(Math.min(100, Math.max(0, pr.overallProgressPercent)));
+      }
+      if (typeof pr.quizAveragePercent === 'number' && pr.quizAveragePercent > 0 && b.quizScores.length === 0) {
+        b.quizScores.push(pr.quizAveragePercent);
+      }
+      if (pr.certificateIssued) {
+        b.certificateStatus = 'Approved';
+      }
+      bumpActivity(b, pr.lastActiveAt || pr.updatedAt);
+    });
+
+    projectDocs.forEach((pj) => {
+      const b = ensureBucket(pj.studentId, pj.studentName, undefined);
+      b.projectsSubmitted += 1;
+      if (pj.status === 'Approved' || String(pj.status).toUpperCase() === 'APPROVED') {
+        b.projectsApproved += 1;
+      }
+      bumpActivity(b, pj.submittedAt);
+    });
+
+    quizDocs.forEach((q) => {
+      const b = ensureBucket(q.studentId, q.studentName, undefined);
+      if (typeof q.percentageScore === 'number' && !Number.isNaN(q.percentageScore)) {
+        b.quizScores.push(Math.min(100, Math.max(0, q.percentageScore)));
+      }
+      bumpActivity(b, q.submittedAt);
+    });
+
+    certDocs.forEach((c) => {
+      const b = ensureBucket(c.studentId, c.studentName, c.studentEmail);
+      if (c.courseTitle) b.courseTitles.add(c.courseTitle);
+      if (c.status === 'Issued' || c.status === 'VERIFIED') {
+        b.certificateStatus = 'Approved';
+      } else if (c.status === 'Pending Admin Approval' && b.certificateStatus !== 'Approved') {
+        b.certificateStatus = 'Pending Admin Approval';
+      } else if (c.status === 'Revision Requested' && b.certificateStatus === 'In Progress') {
+        b.certificateStatus = 'Revision Requested';
+      }
+      bumpActivity(b, c.reviewedAt || c.submittedForApprovalAt || c.issuedAt);
+    });
+
+    iqDocs.forEach((iq: any) => {
+      if (!iq.studentId) return;
+      const b = ensureBucket(iq.studentId, iq.studentName, iq.studentEmail);
+      if (typeof iq.percentage === 'number' && !Number.isNaN(iq.percentage)) {
+        b.iqScores.push(Math.min(100, Math.max(0, iq.percentage)));
+      }
+      bumpActivity(b, iq.completedAt || iq.createdAt);
+    });
+
+    const students: AdminStudentRecord[] = Array.from(buckets.values()).map((b) => {
+      const avgQuiz =
+        b.quizScores.length > 0
+          ? Math.round(b.quizScores.reduce((s, v) => s + v, 0) / b.quizScores.length)
+          : null;
+      const bestQuiz = b.quizScores.length > 0 ? Math.round(Math.max(...b.quizScores)) : null;
+      const avgProgress =
+        b.progressPercents.length > 0
+          ? Math.round(b.progressPercents.reduce((s, v) => s + v, 0) / b.progressPercents.length)
+          : 0;
+      const avgIq =
+        b.iqScores.length > 0
+          ? Math.round(b.iqScores.reduce((s, v) => s + v, 0) / b.iqScores.length)
+          : null;
+
+      // Transparent learning ability score computed exclusively from real recorded signals
+      const weightedSignals: Array<{ weight: number; value: number; label: string }> = [];
+      if (avgQuiz !== null) {
+        weightedSignals.push({ weight: 0.4, value: avgQuiz, label: `Quiz ${avgQuiz}%` });
+      }
+      if (avgProgress > 0) {
+        weightedSignals.push({ weight: 0.3, value: avgProgress, label: `Progress ${avgProgress}%` });
+      }
+      if (b.projectsSubmitted > 0) {
+        const projScore = Math.min(100, b.projectsApproved > 0 ? 100 : 75);
+        weightedSignals.push({
+          weight: 0.15,
+          value: projScore,
+          label: `Projects ${b.projectsApproved}/${b.projectsSubmitted}`,
+        });
+      }
+      if (avgIq !== null) {
+        weightedSignals.push({ weight: 0.15, value: avgIq, label: `IQ/EQ/SQ ${avgIq}%` });
+      }
+
+      let learningAbilityScore: number | null = null;
+      let learningAbilityTier: LearningAbilityTier = 'Not Assessed Yet';
+      let learningAbilityBasis = 'Awaiting first quiz, project, or module progress';
+
+      if (weightedSignals.length > 0) {
+        const totalWeight = weightedSignals.reduce((s, x) => s + x.weight, 0);
+        learningAbilityScore = Math.round(
+          weightedSignals.reduce((s, x) => s + x.value * (x.weight / totalWeight), 0)
+        );
+        if (learningAbilityScore >= 85) learningAbilityTier = 'Advanced Mastery';
+        else if (learningAbilityScore >= 70) learningAbilityTier = 'Strong Progress';
+        else if (learningAbilityScore >= 50) learningAbilityTier = 'Steady Learner';
+        else learningAbilityTier = 'Early Stage';
+        learningAbilityBasis = weightedSignals.map((w) => w.label).join(' · ');
+      }
+
+      const courseTitles = Array.from(b.courseTitles);
+      return {
+        studentId: b.studentId,
+        studentName: b.studentName,
+        studentEmail: b.studentEmail,
+        registrationNumber: b.registrationNumber,
+        enrolledCoursesCount: courseTitles.length,
+        enrolledCourseTitles: courseTitles,
+        latestCourseId: b.latestCourseId,
+        latestCourseTitle: b.latestCourseTitle || courseTitles[0],
+        enrolledAmountInr: Math.round(b.enrolledAmountInr),
+        projectsSubmitted: b.projectsSubmitted,
+        projectsApproved: b.projectsApproved,
+        averageQuizScore: avgQuiz,
+        bestQuizScore: bestQuiz,
+        quizAttemptsCount: b.quizScores.length,
+        overallProgressPercent: avgProgress,
+        iqEqSqScore: avgIq,
+        learningAbilityScore,
+        learningAbilityTier,
+        learningAbilityBasis,
+        certificateStatus: b.certificateStatus,
+        lastActivityAt: b.lastActivityAt || new Date().toISOString(),
+      };
+    });
+
+    students.sort((a, b) => (b.lastActivityAt || '').localeCompare(a.lastActivityAt || ''));
+
+    // Build chronological registered student notification stream
+    const notifications: AdminStudentNotification[] = [];
+
+    enrollments.forEach((en) => {
+      notifications.push({
+        id: `enr_${en.id}`,
+        kind: 'enrollment',
+        studentName: en.studentName || 'Student',
+        studentEmail: en.studentEmail,
+        courseTitle: en.courseTitle || en.courseId,
+        amountInr: typeof en.feeAmount === 'number' ? Math.round(en.feeAmount) : 0,
+        summary: `Enrolled in ${en.courseTitle || en.courseId}${
+          en.feeAmount && en.feeAmount > 0 ? ` (₹${Math.round(en.feeAmount).toLocaleString('en-IN')})` : ' (Direct Enrollment)'
+        }`,
+        timestamp: en.enrolledAt || en.updatedAt || '',
+        actionPath: '/admin/dashboard',
+      });
+    });
+
+    registrations.forEach((r) => {
+      notifications.push({
+        id: `reg_${r.id}`,
+        kind: 'registration',
+        studentName: r.fullName || 'New Student',
+        studentEmail: r.emailAddress,
+        courseTitle: r.interestedCourse,
+        summary: `Registered for ${r.interestedCourse || 'OpenFrame Academy'}`,
+        timestamp: r.registeredAt || '',
+        actionPath: '/admin/dashboard',
+      });
+    });
+
+    projectDocs.forEach((pj) => {
+      notifications.push({
+        id: `proj_${pj.id}`,
+        kind: 'project',
+        studentName: pj.studentName || 'Student',
+        courseTitle: pj.projectTitle || pj.courseId,
+        summary: `Submitted project "${pj.projectTitle || 'Capstone Project'}" (${pj.status})`,
+        timestamp: pj.submittedAt || '',
+        actionPath: '/admin/dashboard',
+      });
+    });
+
+    certDocs
+      .filter((c) => c.status === 'Pending Admin Approval')
+      .forEach((c) => {
+        notifications.push({
+          id: `cert_${c.certificateId || c.id}`,
+          kind: 'approval',
+          studentName: c.studentName || 'Student',
+          studentEmail: c.studentEmail,
+          courseTitle: c.courseTitle,
+          summary: `Requested Admin Course Approval for ${c.courseTitle}`,
+          timestamp: c.submittedForApprovalAt || c.issuedAt || '',
+          actionPath: '/admin/course-approvals',
+        });
+      });
+
+    notifications.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+    const scoredStudents = students.filter((s) => s.averageQuizScore !== null);
+    const assessedAbility = students.filter((s) => s.learningAbilityScore !== null);
+
+    return {
+      students,
+      notifications: notifications.slice(0, 25),
+      totals: {
+        registeredStudents: students.length,
+        enrolledStudents: students.filter((s) => s.enrolledCoursesCount > 0).length,
+        totalEnrollments: enrollments.length,
+        totalAmountEnrolledInr: students.reduce((s, st) => s + st.enrolledAmountInr, 0),
+        totalProjectsSubmitted: projectDocs.length,
+        totalProjectsApproved: projectDocs.filter(
+          (p) => p.status === 'Approved' || String(p.status).toUpperCase() === 'APPROVED'
+        ).length,
+        averageScoreAchieved:
+          scoredStudents.length > 0
+            ? Math.round(
+                scoredStudents.reduce((s, st) => s + (st.averageQuizScore || 0), 0) /
+                  scoredStudents.length
+              )
+            : 0,
+        averageLearningAbility:
+          assessedAbility.length > 0
+            ? Math.round(
+                assessedAbility.reduce((s, st) => s + (st.learningAbilityScore || 0), 0) /
+                  assessedAbility.length
+              )
+            : 0,
+        pendingCourseApprovals: certDocs.filter((c) => c.status === 'Pending Admin Approval').length,
+      },
+      fetchedAt: new Date().toISOString(),
     };
   }
 }

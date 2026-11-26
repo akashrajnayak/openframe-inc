@@ -33,6 +33,7 @@ import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { GitHubYouTubeCourseHub } from '../components/marketplace/GitHubYouTubeCourseHub';
 import { CourseCatalogExplorerModal } from '../components/marketplace/CourseCatalogExplorerModal';
 import { HomepageSchoolSection } from '../components/school/HomepageSchoolSection';
+import { HomeAdminStudentPanel } from '../components/admin/HomeAdminStudentPanel';
 import { useAuth } from '../context/AuthContext';
 import { youtubeVideoService, ExtendedYouTubeVideo } from '../services/youtubeVideoService';
 import { marketplaceService } from '../services/marketplaceService';
@@ -399,6 +400,9 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-[#18221F] flex flex-col">
+      {/* ADMIN-ONLY LIVE REGISTERED STUDENTS & ENROLLMENT INTELLIGENCE PANEL */}
+      <HomeAdminStudentPanel />
+
       {/* ========================================================= */}
       {/* B. HERO SECTION + SMART AI SEARCH ENGINE                  */}
       {/* ========================================================= */}

@@ -162,7 +162,8 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
       items: [
         { key: 'admin_users', label: '20. Admin User Management', icon: ShieldCheck, countKey: 'admin_users', badgeColor: 'bg-purple-500' },
         { key: 'activity_logs', label: '21. Activity Logs', icon: ClipboardList, countKey: 'activity_logs' },
-        { key: 'settings', label: '22. Website Settings', icon: Settings }
+        { key: 'settings', label: '22. Website Settings', icon: Settings },
+        { key: 'payment_settings', label: '23. Payment Gateway (Razorpay)', icon: CreditCard }
       ]
     }
   ];

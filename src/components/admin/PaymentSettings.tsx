@@ -25,6 +25,7 @@ import {
   handleFirestoreError,
   OperationType,
 } from '../../services/firebase';
+import { useAuth } from '../../context/AuthContext';
 
 export interface PaymentSettingsProps {
   isSuperAdmin: boolean;
@@ -70,6 +71,7 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
   isSuperAdmin,
   showToast,
 }) => {
+  const { adminBearerToken } = useAuth();
   const [keyId, setKeyId] = useState('');
   const [keySecret, setKeySecret] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
@@ -101,17 +103,20 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     paymentLinksApiOk?: boolean;
   } | null>(null);
 
-  const getAuthToken = async (forceRefresh = false): Promise<string | null> => {
+  const getAuthToken = useCallback(async (forceRefresh = false): Promise<string | null> => {
     const user = auth.currentUser;
-    if (!user) return null;
-    try {
-      return await user.getIdToken(forceRefresh);
-    } catch {
-      return null;
+    if (user) {
+      try {
+        const idToken = await user.getIdToken(forceRefresh);
+        if (idToken) return idToken;
+      } catch {
+        // fall through to admin credential Bearer token
+      }
     }
-  };
+    return adminBearerToken || null;
+  }, [adminBearerToken]);
 
-  const fetchAdminApiWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
+  const fetchAdminApiWithRetry = useCallback(async (url: string, init: RequestInit): Promise<Response> => {
     let token = await getAuthToken(false);
     if (!token) {
       throw new Error('Super Admin authentication token required. Please sign in again.');
@@ -136,7 +141,7 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
       }
     }
     return resp;
-  };
+  }, [getAuthToken]);
 
   const loadSettings = useCallback(async () => {
     if (!isSuperAdmin) {
@@ -147,31 +152,33 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     setLoadError(null);
 
     let fsDocData: FirestorePaymentSettingsDoc | null = null;
-    try {
-      const snap = await getDoc(doc(db, 'payment_settings', 'razorpay'));
-      if (snap.exists()) {
-        fsDocData = snap.data() as FirestorePaymentSettingsDoc;
-        setKeyId(fsDocData.keyId || '');
-        setKeySecret(fsDocData.keySecret || '');
-        setWebhookSecret(fsDocData.webhookSecret || '');
-        setMode(detectModeFromKeyId(fsDocData.keyId || '', fsDocData.mode || 'live'));
-        setEnabled(fsDocData.enabled !== false);
-        setFirestoreRecordMeta({
-          exists: true,
-          updatedAt: fsDocData.updatedAt || null,
-          updatedByEmail: fsDocData.updatedByEmail || null,
-        });
-      } else {
-        setFirestoreRecordMeta({ exists: false, updatedAt: null, updatedByEmail: null });
-      }
-    } catch (err) {
+    if (auth.currentUser) {
       try {
-        handleFirestoreError(err, OperationType.GET, RAZORPAY_DOC_PATH);
-      } catch (structuredErr: any) {
-        setLoadError(
-          'Unable to load Razorpay settings from Firestore. Ensure your Super Admin account has verified email access.'
-        );
+        const snap = await getDoc(doc(db, 'payment_settings', 'razorpay'));
+        if (snap.exists()) {
+          fsDocData = snap.data() as FirestorePaymentSettingsDoc;
+          setKeyId(fsDocData.keyId || '');
+          setKeySecret(fsDocData.keySecret || '');
+          setWebhookSecret(fsDocData.webhookSecret || '');
+          setMode(detectModeFromKeyId(fsDocData.keyId || '', fsDocData.mode || 'live'));
+          setEnabled(fsDocData.enabled !== false);
+          setFirestoreRecordMeta({
+            exists: true,
+            updatedAt: fsDocData.updatedAt || null,
+            updatedByEmail: fsDocData.updatedByEmail || null,
+          });
+        } else {
+          setFirestoreRecordMeta({ exists: false, updatedAt: null, updatedByEmail: null });
+        }
+      } catch (err) {
+        try {
+          handleFirestoreError(err, OperationType.GET, RAZORPAY_DOC_PATH);
+        } catch {
+          // Non-blocking: live server settings endpoint below is authoritative
+        }
       }
+    } else {
+      setFirestoreRecordMeta({ exists: false, updatedAt: null, updatedByEmail: null });
     }
 
     try {
@@ -189,13 +196,16 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
             setEnabled(s.enabled);
           }
         }
+      } else {
+        const errData = await resp.json().catch(() => ({}));
+        setLoadError(errData?.error || 'Unable to load Razorpay gateway status from the server.');
       }
-    } catch {
-      // Server status check is advisory; Firestore form remains usable
+    } catch (err: any) {
+      setLoadError(err?.message || 'Unable to reach Razorpay server settings endpoint.');
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, fetchAdminApiWithRetry]);
 
   useEffect(() => {
     loadSettings();
@@ -239,7 +249,7 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     }
 
     const currentUser = auth.currentUser;
-    if (!currentUser) {
+    if (!currentUser && !adminBearerToken) {
       showToast('You must be signed in as Super Admin to save Razorpay keys.', 'error');
       return;
     }
@@ -275,9 +285,9 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
         setServerStatus(data.settings);
       }
 
-      // 2. Mirror to Firestore when a secret is present (non-blocking if Firestore is offline)
+      // 2. Mirror to Firestore when signed in via Firebase Super Admin (non-blocking)
       let firestoreSynced = false;
-      if (cleanKeySecret) {
+      if (cleanKeySecret && currentUser) {
         const firestorePayload: FirestorePaymentSettingsDoc = {
           provider: 'razorpay',
           keyId: cleanKeyId,
@@ -302,12 +312,14 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
         }
       }
 
-      await logActivity(
-        'Updated Razorpay Gateway Credentials',
-        'payment_settings',
-        'razorpay',
-        `Mode: ${resolvedMode.toUpperCase()} | Enabled: ${enabled ? 'Yes' : 'No'} | Key ID: ${cleanKeyId.slice(0, 14)}…`
-      );
+      if (currentUser) {
+        await logActivity(
+          'Updated Razorpay Gateway Credentials',
+          'payment_settings',
+          'razorpay',
+          `Mode: ${resolvedMode.toUpperCase()} | Enabled: ${enabled ? 'Yes' : 'No'} | Key ID: ${cleanKeyId.slice(0, 14)}…`
+        ).catch(() => {});
+      }
 
       showToast(
         enabled
@@ -384,40 +396,44 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     setTestResult(null);
 
     try {
-      try {
-        await deleteDoc(doc(db, 'payment_settings', 'razorpay'));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, RAZORPAY_DOC_PATH);
-      }
-
-      const token = await getAuthToken();
-      if (token) {
-        const resp = await fetch('/api/admin/payment-settings', {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (resp.ok && data.settings) {
-          setServerStatus(data.settings);
+      if (auth.currentUser) {
+        try {
+          await deleteDoc(doc(db, 'payment_settings', 'razorpay'));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, RAZORPAY_DOC_PATH);
         }
       }
 
-      setKeyId('');
+      const resp = await fetchAdminApiWithRetry('/api/admin/payment-settings', {
+        method: 'DELETE',
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.settings) {
+        setServerStatus(data.settings);
+        setKeyId(data.settings.keyId || '');
+        setMode(data.settings.mode || 'live');
+        setEnabled(Boolean(data.settings.enabled));
+      } else {
+        setKeyId('');
+        setEnabled(true);
+        setMode('live');
+      }
+
       setKeySecret('');
       setWebhookSecret('');
-      setEnabled(true);
-      setMode('live');
       setConfirmClear(false);
       setFirestoreRecordMeta({ exists: false, updatedAt: null, updatedByEmail: null });
 
-      await logActivity(
-        'Cleared Razorpay Gateway Override',
-        'payment_settings',
-        'razorpay',
-        'Removed custom Firestore/server Razorpay credentials'
-      );
+      if (auth.currentUser) {
+        await logActivity(
+          'Cleared Razorpay Gateway Override',
+          'payment_settings',
+          'razorpay',
+          'Removed custom Firestore/server Razorpay credentials'
+        ).catch(() => {});
+      }
 
-      showToast('Saved Razorpay credentials cleared.');
+      showToast('Saved Razorpay override cleared.');
     } catch (err: any) {
       showToast(err?.message || 'Failed to clear Razorpay credentials.', 'error');
     } finally {
@@ -512,12 +528,18 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              Firestore Binding
+              Active Credential Source
             </div>
             <div className="mt-1.5 flex items-center gap-2">
               <Lock className="w-4 h-4 text-blue-600 shrink-0" />
               <span className="text-xs font-bold text-slate-800 truncate">
-                {firestoreRecordMeta.exists ? 'payment_settings/razorpay' : 'Not saved yet'}
+                {serverStatus?.source === 'super_admin' || serverStatus?.source === 'super_admin_disabled'
+                  ? 'Admin Database Override'
+                  : serverStatus?.source === 'environment'
+                  ? 'Server Environment Secrets'
+                  : firestoreRecordMeta.exists
+                  ? 'payment_settings/razorpay'
+                  : 'Not configured yet'}
               </span>
             </div>
           </div>
@@ -761,7 +783,9 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
               </button>
             </div>
 
-            {firestoreRecordMeta.exists && (
+            {(firestoreRecordMeta.exists ||
+              serverStatus?.source === 'super_admin' ||
+              serverStatus?.source === 'super_admin_disabled') && (
               <div className="flex items-center gap-2">
                 {!confirmClear ? (
                   <button

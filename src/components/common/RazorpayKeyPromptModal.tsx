@@ -20,6 +20,7 @@ import {
   handleFirestoreError,
   OperationType,
 } from '../../services/firebase';
+import { useAuth } from '../../context/AuthContext';
 
 interface RazorpayKeyPromptModalProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
   onClose,
   onSaved,
 }) => {
+  const { adminBearerToken } = useAuth();
   const [keyId, setKeyId] = useState('');
   const [keySecret, setKeySecret] = useState('');
   const [showSecret, setShowSecret] = useState(false);
@@ -76,10 +78,18 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
 
   const fetchAdminWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
     const user = auth.currentUser;
-    if (!user) {
+    let token: string | null = null;
+    if (user) {
+      try {
+        token = await user.getIdToken(false);
+      } catch {
+        token = null;
+      }
+    }
+    if (!token) token = adminBearerToken || null;
+    if (!token) {
       throw new Error('Please sign in with your Super Admin account first.');
     }
-    let token = await user.getIdToken(false);
     let resp = await fetch(url, {
       ...init,
       headers: {
@@ -87,7 +97,7 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
         Authorization: `Bearer ${token}`,
       },
     });
-    if (resp.status === 401) {
+    if (resp.status === 401 && user) {
       token = await user.getIdToken(true);
       resp = await fetch(url, {
         ...init,
@@ -153,7 +163,7 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
     }
 
     const currentUser = auth.currentUser;
-    if (!currentUser) {
+    if (!currentUser && !adminBearerToken) {
       setErrorMsg('Super Admin sign-in is required to update Razorpay keys.');
       return;
     }
@@ -179,28 +189,30 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
         throw new Error(data.error || 'Failed to link Razorpay credentials to checkout server.');
       }
 
-      // 2. Mirror to Firestore (non-blocking if Firestore rules/network delay)
-      try {
-        await setDoc(doc(db, 'payment_settings', 'razorpay'), {
-          provider: 'razorpay',
-          keyId: cleanId,
-          keySecret: cleanSecret,
-          mode: resolvedMode,
-          enabled: true,
-          updatedByUid: currentUser.uid,
-          updatedByEmail: currentUser.email || 'superadmin@openframeitsolutions.com',
-          updatedAt: nowIso,
-        });
-      } catch {
-        // Live checkout server is already active
-      }
+      // 2. Mirror to Firestore when signed in via Firebase Super Admin
+      if (currentUser) {
+        try {
+          await setDoc(doc(db, 'payment_settings', 'razorpay'), {
+            provider: 'razorpay',
+            keyId: cleanId,
+            keySecret: cleanSecret,
+            mode: resolvedMode,
+            enabled: true,
+            updatedByUid: currentUser.uid,
+            updatedByEmail: currentUser.email || 'superadmin@openframeitsolutions.com',
+            updatedAt: nowIso,
+          });
+        } catch {
+          // Live checkout server is already active
+        }
 
-      await logActivity(
-        'Configured Razorpay API Keys (Checkout Prompt)',
-        'payment_settings',
-        'razorpay',
-        `Mode: ${resolvedMode.toUpperCase()} | Key ID: ${cleanId.slice(0, 14)}…`
-      );
+        await logActivity(
+          'Configured Razorpay API Keys (Checkout Prompt)',
+          'payment_settings',
+          'razorpay',
+          `Mode: ${resolvedMode.toUpperCase()} | Key ID: ${cleanId.slice(0, 14)}…`
+        ).catch(() => {});
+      }
 
       setStatusMsg(`Razorpay ${resolvedMode.toUpperCase()} keys saved & linked! Ready for payment.`);
       if (onSaved) onSaved({ keyId: cleanId, mode: resolvedMode });

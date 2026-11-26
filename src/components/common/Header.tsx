@@ -9,13 +9,14 @@ import {
   Sparkles,
   User as UserIcon,
   ShieldCheck,
+  Shield,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GoogleSignInButton } from './GoogleSignInButton';
 
 export const Header: React.FC = () => {
   const { currentPath, navigate } = useRouter();
-  const { currentUser, lmsUser, authorizedDashboardPath, logout } = useAuth();
+  const { currentUser, lmsUser, isAdminSession, authorizedDashboardPath, logout } = useAuth();
   const cleanPath = currentPath.split('?')[0] || '/';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [programsOpen, setProgramsOpen] = useState(false);
@@ -206,25 +207,40 @@ export const Header: React.FC = () => {
             })}
           </nav>
 
-          {/* Right: Auth Actions & Mobile Trigger */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            {currentUser && lmsUser ? (
+          {/* Right: Auth Actions, Admin Button & Mobile Trigger */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              to={isAdminSession ? '/admin/dashboard' : '/admin/login'}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 border ${
+                isAdminSession
+                  ? 'bg-[#0F172A] text-white border-[#0F172A] hover:bg-slate-800'
+                  : 'bg-white text-[#0F172A] border-slate-300 hover:bg-slate-100'
+              }`}
+              title={isAdminSession ? 'Open Admin Console' : 'Admin Login'}
+            >
+              <Shield className="w-3.5 h-3.5 text-[#123D32] shrink-0" style={isAdminSession ? { color: '#6ee7b7' } : undefined} />
+              <span>{isAdminSession ? 'Admin Console' : 'Admin'}</span>
+            </Link>
+
+            {(currentUser && lmsUser) || isAdminSession ? (
               <div className="hidden sm:flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate(authorizedDashboardPath)}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
-                >
-                  <span className="w-5 h-5 rounded-full bg-white/20 text-[11px] font-bold flex items-center justify-center">
-                    {userInitial}
-                  </span>
-                  <span>My Workspace</span>
-                </button>
+                {currentUser && lmsUser && !isAdminSession && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(authorizedDashboardPath)}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#123D32] hover:bg-[#0e3027] text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <span className="w-5 h-5 rounded-full bg-white/20 text-[11px] font-bold flex items-center justify-center">
+                      {userInitial}
+                    </span>
+                    <span>My Workspace</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => logout()}
                   title="Sign Out"
-                  className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                  className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer shrink-0"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -240,13 +256,13 @@ export const Header: React.FC = () => {
                 />
                 <Link
                   to="/portal"
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-[#18221F] hover:bg-black/5 border border-slate-300/80 bg-white/80 transition-colors whitespace-nowrap"
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-[#18221F] hover:bg-black/5 border border-slate-300/80 bg-white/80 transition-colors whitespace-nowrap shrink-0"
                 >
                   Portals
                 </Link>
                 <Link
                   to="/portal?mode=register"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-700 shadow-sm transition-colors whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-700 shadow-sm transition-colors whitespace-nowrap shrink-0"
                 >
                   <span>Get Started</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -302,16 +318,26 @@ export const Header: React.FC = () => {
           </div>
 
           <div className="pt-3 border-t border-slate-200 flex flex-col gap-2">
-            {currentUser && lmsUser ? (
+            <Link
+              to={isAdminSession ? '/admin/dashboard' : '/admin/login'}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#0F172A] text-white font-semibold text-sm flex items-center justify-center gap-2"
+            >
+              <Shield className="w-4 h-4 text-emerald-300" />
+              <span>{isAdminSession ? 'Open Admin Console' : 'Admin Login'}</span>
+            </Link>
+
+            {(currentUser && lmsUser) || isAdminSession ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => navigate(authorizedDashboardPath)}
-                  className="w-full py-2.5 px-4 rounded-xl bg-[#123D32] text-white font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <UserIcon className="w-4 h-4" />
-                  <span>Open My Workspace</span>
-                </button>
+                {currentUser && lmsUser && !isAdminSession && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(authorizedDashboardPath)}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#123D32] text-white font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <UserIcon className="w-4 h-4" />
+                    <span>Open My Workspace</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => logout()}

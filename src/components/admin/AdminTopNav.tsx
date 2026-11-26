@@ -67,7 +67,7 @@ const moduleTitles: Record<AdminModuleKey, { title: string; category: string }> 
   lms_management: { title: 'Quinn AI & LMS Control Center', category: 'Academic & Education' },
   course_approvals: { title: 'Course Approval & Certification Queue', category: 'Academic & Education' },
   school_management: { title: 'School Education Management (LKG – 12th Std)', category: 'Academic & Education' },
-  payment_settings: { title: 'Billing & Legacy Payment Settings', category: 'System & Governance' },
+  payment_settings: { title: 'Payment Gateway (Razorpay)', category: 'System & Governance' },
   settings: { title: 'Website Configuration & Meta Settings', category: 'System & Governance' }
 };
 
@@ -249,11 +249,11 @@ export const AdminTopNav: React.FC<AdminTopNavProps> = ({
 
               <Link
                 to="/"
-                target="_blank"
+                onClick={() => setShowProfileMenu(false)}
                 className="flex items-center gap-2.5 px-3.5 py-2 text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open Public Website</span>
+                <span>Home Page Admin Panel</span>
               </Link>
 
               <button

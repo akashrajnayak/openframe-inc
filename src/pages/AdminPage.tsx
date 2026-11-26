@@ -114,6 +114,8 @@ export const AdminPage: React.FC = () => {
   const {
     currentUser,
     adminProfile,
+    adminCredentialSession,
+    isAdminSession,
     isSuperAdmin,
     logout,
     loading: authLoading,
@@ -211,7 +213,7 @@ export const AdminPage: React.FC = () => {
   };
 
   const effectiveRole: AdminRole =
-    adminProfile?.role || (isSuperAdmin ? 'Super Admin' : 'Sales Admin');
+    adminProfile?.role || adminCredentialSession?.role || (isSuperAdmin ? 'Super Admin' : 'Sales Admin');
 
   // Load all data
   const loadData = () => {
@@ -977,7 +979,7 @@ export const AdminPage: React.FC = () => {
     showToast(`Branch "${payload.name}" saved.`);
   };
 
-  if (!authLoading && (!currentUser || !(adminProfile?.isActive || isSuperAdmin))) {
+  if (!authLoading && !isAdminSession) {
     return <AdminLoginPage />;
   }
 
@@ -1000,7 +1002,7 @@ export const AdminPage: React.FC = () => {
           activeModule={activeModule}
           onSelectModule={setActiveModule}
           onToggleMobileSidebar={() => setSidebarOpen((p) => !p)}
-          userEmail={currentUser?.email || null}
+          userEmail={currentUser?.email || adminCredentialSession?.email || adminCredentialSession?.username || null}
           role={effectiveRole}
           isSuperAdmin={isSuperAdmin}
           onLogout={() => logout().then(() => navigate('/admin/login'))}
