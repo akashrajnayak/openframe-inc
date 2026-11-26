@@ -172,22 +172,11 @@ export async function saveRazorpayGatewaySettings(
   };
 
   if (isSqlConfigured()) {
-    await db
-      .insert(paymentGatewaySettings)
-      .values({
-        provider: 'razorpay',
-        keyId: cleanKeyId,
-        keySecret: cleanKeySecret,
-        webhookSecret: cleanWebhookSecret || null,
-        mode: resolvedMode,
-        enabled: Boolean(input.enabled),
-        updatedByUid: input.updatedByUid,
-        updatedByEmail: input.updatedByEmail,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: paymentGatewaySettings.provider,
-        set: {
+    try {
+      await db
+        .insert(paymentGatewaySettings)
+        .values({
+          provider: 'razorpay',
           keyId: cleanKeyId,
           keySecret: cleanKeySecret,
           webhookSecret: cleanWebhookSecret || null,
@@ -196,8 +185,26 @@ export async function saveRazorpayGatewaySettings(
           updatedByUid: input.updatedByUid,
           updatedByEmail: input.updatedByEmail,
           updatedAt: now,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: paymentGatewaySettings.provider,
+          set: {
+            keyId: cleanKeyId,
+            keySecret: cleanKeySecret,
+            webhookSecret: cleanWebhookSecret || null,
+            mode: resolvedMode,
+            enabled: Boolean(input.enabled),
+            updatedByUid: input.updatedByUid,
+            updatedByEmail: input.updatedByEmail,
+            updatedAt: now,
+          },
+        });
+    } catch (sqlErr: any) {
+      console.warn(
+        '[RazorpaySettings] Cloud SQL persistence warning (active in-memory override preserved):',
+        sqlErr?.message || sqlErr
+      );
+    }
   }
 
   const saved: ActiveRazorpayCredentials = {
@@ -211,6 +218,7 @@ export async function saveRazorpayGatewaySettings(
     updatedAt: now.toISOString(),
     updatedByEmail: input.updatedByEmail,
   };
+  invalidateRazorpayCache();
   cachedCredentials = { fetchedAt: Date.now(), value: saved };
   return saved;
 }
@@ -220,9 +228,16 @@ export async function clearRazorpayGatewaySettings(): Promise<ActiveRazorpayCred
   invalidateRazorpayCache();
 
   if (isSqlConfigured()) {
-    await db
-      .delete(paymentGatewaySettings)
-      .where(eq(paymentGatewaySettings.provider, 'razorpay'));
+    try {
+      await db
+        .delete(paymentGatewaySettings)
+        .where(eq(paymentGatewaySettings.provider, 'razorpay'));
+    } catch (sqlErr: any) {
+      console.warn(
+        '[RazorpaySettings] Cloud SQL clear warning (in-memory override cleared):',
+        sqlErr?.message || sqlErr
+      );
+    }
   }
 
   return getActiveRazorpayCredentials();

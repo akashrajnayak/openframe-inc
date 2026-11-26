@@ -47,7 +47,6 @@ import { lmsService } from '../services/lmsService';
 import { standaloneMockService } from '../services/standaloneMockService';
 import { CourseThumbnail } from '../components/common/CourseThumbnail';
 import { CourseEnrollmentModal } from '../components/common/CourseEnrollmentModal';
-import { RazorpayKeyPromptModal } from '../components/common/RazorpayKeyPromptModal';
 import { GoogleSignInButton } from '../components/common/GoogleSignInButton';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../utils/searchIntelligence';
 import {
@@ -283,7 +282,7 @@ export const CourseLearningPage: React.FC = () => {
 
   useEffect(() => {
     if (justPaidParam) {
-      notify('success', 'Payment verified via Razorpay! Your course modules, quiz, projects, and certificate track are now unlocked.');
+      notify('success', 'Enrollment confirmed! Your course modules, quiz, projects, and Admin-approved certificate track are now unlocked.');
     }
   }, [justPaidParam]);
 
@@ -335,7 +334,7 @@ export const CourseLearningPage: React.FC = () => {
       setActiveLessonId(targetLessonId);
       const lessonTopic = firstLesson?.title || firstLesson?.topicName || found.title;
 
-      // Gate ALL paid courses & departments (LKG to PG) strictly on verified Razorpay payment BEFORE loading Quinn AI
+      // Require active course enrollment BEFORE loading Quinn AI and workspace lessons
       let verifiedPaymentStatus: 'Paid' | 'Complimentary' | 'Scholarship' | undefined = undefined;
       const effectiveCourseFee = found.price > 0 ? Math.round(found.price) : 300;
       const effectiveStudentUid = studentId || standaloneMockService.getActiveLearner().uid;
@@ -358,7 +357,7 @@ export const CourseLearningPage: React.FC = () => {
       }
       if (active) setRequiresEnrollment(false);
 
-      // Only load pre-assigned videos / Quinn AI recommendations AFTER verified Razorpay payment
+      // Load pre-assigned videos / Quinn AI recommendations once enrollment is confirmed
       const preAssigned =
         firstLesson?.recommendedVideos && firstLesson.recommendedVideos.length > 0
           ? firstLesson.recommendedVideos
@@ -1212,47 +1211,36 @@ export const CourseLearningPage: React.FC = () => {
   }
 
   if (requiresEnrollment) {
-    const gatePricing = compute90PercentCoursePricing({
-      category: course.category,
-      title: course.title,
-      level: course.level,
-      educationLevels: course.educationLevels,
-      existingPrice: course.price,
-    });
-    const exactFeeInr = course.price > 0 ? Math.round(course.price) : gatePricing.finalPriceInr;
     return (
       <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-6">
         <div className="max-w-lg w-full bg-white border border-slate-200 rounded-2xl p-7 shadow-lg text-left space-y-5">
-          {/* 2-Step Banner: Step 1 Pay First -> Step 2 Open Learning Workspace */}
+          {/* 2-Step Banner: Step 1 Enroll -> Step 2 Complete & Submit for Admin Approval */}
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             <div className="rounded-xl bg-[#123D32] text-white px-3 py-2 font-bold flex items-center gap-2">
               <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center shrink-0">1</span>
-              <span>Pay {formatInr(exactFeeInr)} First</span>
+              <span>Enroll &amp; Learn Free</span>
             </div>
-            <div className="rounded-xl bg-slate-100 text-slate-500 px-3 py-2 font-semibold flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0">2</span>
-              <span>Open Learning Workspace</span>
+            <div className="rounded-xl bg-slate-100 text-slate-600 px-3 py-2 font-semibold flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center shrink-0">2</span>
+              <span>Admin Cert Approval</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
-              <Lock className="w-5 h-5 text-[#123D32]" />
+              <BookOpen className="w-5 h-5 text-[#123D32]" />
             </div>
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wider text-[#123D32]">
-                Step 1: Register &amp; Complete Razorpay Payment
+                Step 1: Enroll for Instant Learning Access
               </div>
               <h1 className="text-lg font-bold text-[#18221F]">{course.title}</h1>
             </div>
           </div>
 
           <p className="text-xs text-slate-600 leading-relaxed">
-            First complete your registration and payment of{' '}
-            <strong className="text-[#123D32] tabular-nums">{formatInr(exactFeeInr)}</strong>{' '}
-            via Razorpay for <strong>{course.title}</strong> ({course.id}). Immediately after payment verification, you will be redirected into the{' '}
-            <strong>Open Learning Workspace</strong> (all {modules.length} modules, YouTube lectures, quiz, projects, score &amp; certificate) and{' '}
-            <strong>My Learning</strong>.
+            Enroll directly in <strong>{course.title}</strong> ({course.id}) to unlock all{' '}
+            <strong>{modules.length} modules</strong>, curated lectures, Quinn AI mentorship, verification quiz, and practical projects. After completing the course, submit your record for <strong>Admin Course Approval</strong> to unlock your official QR-verified certificate.
           </p>
 
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
@@ -1260,23 +1248,20 @@ export const CourseLearningPage: React.FC = () => {
               <div className="font-semibold text-slate-900">{course.category} · {course.level}</div>
               <div className="text-slate-500 mt-0.5">{course.duration} · {course.language || 'English'}</div>
             </div>
-            <div className="text-right tabular-nums">
-              <div className="text-lg font-extrabold text-[#123D32]">{formatInr(exactFeeInr)}</div>
-              <div className="text-[11px] text-slate-500">
-                <span className="line-through mr-1">{formatInr(Math.max(gatePricing.marketBenchmarkPriceInr, exactFeeInr * 10))}</span>
-                <span className="text-emerald-700 font-bold">90% Off</span>
-              </div>
+            <div className="text-right">
+              <div className="text-sm font-extrabold text-[#123D32]">Open Access</div>
+              <div className="text-[11px] text-emerald-700 font-semibold">Admin-Approved Cert</div>
             </div>
           </div>
 
           {!currentUser && (
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
               <div className="text-xs font-semibold text-slate-800">
-                Sign in with Google to register and pay via Razorpay
+                Sign in with Google to save progress &amp; request certification
               </div>
               <GoogleSignInButton
                 role="student"
-                label="Continue with Google to Pay & Enroll"
+                label="Continue with Google to Enroll"
                 variant="dark"
                 onSuccess={() => setEnrollModalOpen(true)}
               />
@@ -1289,7 +1274,7 @@ export const CourseLearningPage: React.FC = () => {
               onClick={() => setEnrollModalOpen(true)}
               className="flex-1 py-3 px-4 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs text-center transition-colors cursor-pointer whitespace-nowrap shadow-sm"
             >
-              Pay {formatInr(exactFeeInr)} Now (Razorpay) &rarr; Open Workspace
+              Enroll Now &rarr; Open Learning Workspace
             </button>
             <button
               type="button"
@@ -1303,28 +1288,16 @@ export const CourseLearningPage: React.FC = () => {
           {isEducatorOrAdmin && (
             <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
               <span>Admin / Faculty mode detected</span>
-              <div className="flex flex-wrap items-center gap-3">
-                {isSuperAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setKeyPromptOpen(true)}
-                    className="inline-flex items-center gap-1 font-bold text-[#123D32] hover:underline cursor-pointer whitespace-nowrap"
-                  >
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>Insert / Update Razorpay API Key</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAdminPreviewOverride(true);
-                    setRequiresEnrollment(false);
-                  }}
-                  className="font-semibold text-blue-600 hover:underline cursor-pointer whitespace-nowrap"
-                >
-                  Preview Workspace Without Paying
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminPreviewOverride(true);
+                  setRequiresEnrollment(false);
+                }}
+                className="font-semibold text-blue-600 hover:underline cursor-pointer whitespace-nowrap"
+              >
+                Preview Workspace Directly
+              </button>
             </div>
           )}
         </div>
@@ -1337,20 +1310,9 @@ export const CourseLearningPage: React.FC = () => {
             setEnrollModalOpen(false);
             setRequiresEnrollment(false);
             setWorkspaceNonce((n) => n + 1);
-            notify('success', 'Payment verified via Razorpay! Your Open Learning Workspace is now unlocked.');
+            notify('success', 'Enrollment confirmed! Your Open Learning Workspace is now unlocked.');
           }}
         />
-
-        {isSuperAdmin && (
-          <RazorpayKeyPromptModal
-            isOpen={keyPromptOpen}
-            onClose={() => setKeyPromptOpen(false)}
-            onSaved={() => {
-              setKeyPromptOpen(false);
-              setEnrollModalOpen(true);
-            }}
-          />
-        )}
       </div>
     );
   }
@@ -1425,12 +1387,20 @@ export const CourseLearningPage: React.FC = () => {
           quizAveragePercent: Math.max(effectiveProgress.quizAveragePercent || 0, bestQuizScore >= 70 ? bestQuizScore : quizPassed ? 75 : 0),
         },
         addressDetails: validation.cleaned,
+        existingCertificateId:
+          certificate?.status === 'Revision Requested' ? certificate.certificateId : undefined,
       });
       setCertificate(result.certificate);
       setProgress(result.progress);
-      notify('success', `Official QR-verified certificate issued (${result.certificate.certificateId})! You can download your PDF now.`);
+      notify(
+        'success',
+        `Completed course submitted for Admin Course Approval (${result.certificate.certificateId})! Your official QR-verified PDF certificate will unlock here once an administrator approves it.`
+      );
     } catch (err: any) {
-      setCertAddressError(err?.message || 'Unable to issue certificate yet. Ensure modules are completed and Verification Quiz is passed (≥70%).');
+      setCertAddressError(
+        err?.message ||
+          'Unable to submit for Admin certification approval yet. Ensure modules are completed and Verification Quiz is passed (≥70%).'
+      );
     } finally {
       setCertClaiming(false);
     }
@@ -2950,18 +2920,18 @@ export const CourseLearningPage: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 8: CERTIFICATE GENERATION & MANDATORY 7-FIELD VERIFICATION (MODULE 8) */}
+          {/* TAB 8: CERTIFICATE GENERATION & ADMIN COURSE APPROVAL WORKFLOW */}
           {activeTab === 'certificate' && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 text-xs">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Certificate Issuance &amp; Mandatory Address Verification</h2>
+                <h2 className="text-lg font-bold text-slate-900">Course Completion &amp; Admin Certification Approval</h2>
                 <p className="text-slate-500 mt-1">
-                  Complete your course modules, pass the Verification Test (≥{quizConfig?.passingScorePercent ?? 70}%), and submit all 7 mandatory residential address &amp; contact details below to claim your QR-verified OpenFrame Certificate.
+                  Complete your course modules, pass the Verification Test (&ge;{quizConfig?.passingScorePercent ?? 70}%), and submit all 7 mandatory dispatch &amp; contact details below for OpenFrame Admin Approval. Once reviewed and approved by an administrator, your official QR-verified certificate PDF unlocks here.
                 </p>
               </div>
 
-              {/* Direct Verification Track (Modules -> Test -> 7-Field Address -> Certificate) */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* 4-Step Verification Track */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div
                   className={`p-4 rounded-2xl border flex items-start justify-between gap-2 ${
                     completedModulesCount > 0 || eligibility.allMandatoryLessonsCompleted
@@ -3018,33 +2988,73 @@ export const CourseLearningPage: React.FC = () => {
 
                 <div
                   className={`p-4 rounded-2xl border flex items-start justify-between gap-2 ${
-                    validateCertificateAddressDetails(certAddressForm).valid
+                    validateCertificateAddressDetails(certAddressForm).valid || Boolean(certificate?.addressVerifiedAt)
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
                       : 'bg-amber-50/70 border-amber-200 text-amber-950'
                   }`}
                 >
                   <div>
-                    <div className="font-bold">Step 3 · 7-Field Address Details</div>
+                    <div className="font-bold">Step 3 · 7-Field Address</div>
                     <div className="text-[11px] mt-0.5">
-                      {validateCertificateAddressDetails(certAddressForm).valid
-                        ? 'All 7 mandatory fields verified'
+                      {validateCertificateAddressDetails(certAddressForm).valid || Boolean(certificate?.addressVerifiedAt)
+                        ? 'Dispatch details verified'
                         : 'Home, Flat, Street, Pin, 2 Mobiles & State'}
                     </div>
                   </div>
-                  {validateCertificateAddressDetails(certAddressForm).valid ? (
+                  {validateCertificateAddressDetails(certAddressForm).valid || Boolean(certificate?.addressVerifiedAt) ? (
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   ) : (
                     <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   )}
                 </div>
+
+                <div
+                  className={`p-4 rounded-2xl border flex items-start justify-between gap-2 ${
+                    certificate?.status === 'Issued' || certificate?.status === 'VERIFIED'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                      : certificate?.status === 'Pending Admin Approval'
+                      ? 'bg-amber-50 border-amber-200 text-amber-950'
+                      : certificate?.status === 'Revision Requested' || certificate?.status === 'Revoked'
+                      ? 'bg-rose-50 border-rose-200 text-rose-950'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold">Step 4 · Admin Approval</div>
+                    <div className="text-[11px] mt-0.5">
+                      {certificate?.status === 'Issued' || certificate?.status === 'VERIFIED'
+                        ? 'Approved & Certified'
+                        : certificate?.status === 'Pending Admin Approval'
+                        ? 'Under Admin Review'
+                        : certificate?.status === 'Revision Requested'
+                        ? 'Revision Needed'
+                        : certificate?.status === 'Revoked'
+                        ? 'Revoked'
+                        : 'Awaiting submission'}
+                    </div>
+                  </div>
+                  {certificate?.status === 'Issued' || certificate?.status === 'VERIFIED' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <Award className="w-4 h-4 text-amber-600 shrink-0" />
+                  )}
+                </div>
               </div>
 
-              {certificate ? (
+              {certificate && (
                 <div className="p-6 sm:p-8 border border-slate-200 rounded-3xl bg-slate-50/50 space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-emerald-700 font-semibold">
+                        <span
+                          className={`font-bold ${
+                            certificate.status === 'Issued' || certificate.status === 'VERIFIED'
+                              ? 'text-emerald-700'
+                              : certificate.status === 'Pending Admin Approval'
+                              ? 'text-amber-700'
+                              : 'text-rose-700'
+                          }`}
+                        >
                           Status: {certificate.status} · Serial: {certificate.certificateId}
                         </span>
                         <span className="px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-800 text-[11px] font-semibold">
@@ -3053,15 +3063,20 @@ export const CourseLearningPage: React.FC = () => {
                       </div>
                       <h3 className="text-xl font-bold text-slate-900 mt-1">{certificate.courseTitle}</h3>
                       <p className="text-slate-600 mt-0.5 tabular-nums">
-                        Awarded to {certificate.studentName} · Grade {certificate.grade} ({certificate.score ?? certificate.finalScore}/100)
+                        Learner: {certificate.studentName} · Grade {certificate.grade} ({certificate.score ?? certificate.finalScore}/100)
                       </p>
                       {certificate.state && certificate.pincode && (
                         <p className="text-[11px] text-slate-500 mt-1">
                           Verified Dispatch Record: {[certificate.flatNumber, certificate.homeAddress, certificate.streetAddress, certificate.state, certificate.pincode].filter(Boolean).join(', ')}
                         </p>
                       )}
+                      {certificate.adminApproverEmail && (certificate.status === 'Issued' || certificate.status === 'VERIFIED') && (
+                        <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+                          Approved by OpenFrame Admin ({certificate.adminApproverEmail})
+                        </p>
+                      )}
                     </div>
-                    {certificate.qrCodeUrl && (
+                    {(certificate.status === 'Issued' || certificate.status === 'VERIFIED') && certificate.qrCodeUrl && (
                       <img
                         src={certificate.qrCodeUrl}
                         alt="Certificate QR Code"
@@ -3071,8 +3086,25 @@ export const CourseLearningPage: React.FC = () => {
                   </div>
 
                   {certificate.status === 'Pending Admin Approval' ? (
-                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900">
-                      Your faculty evaluation is approved! Final download unlocks once an administrator applies the institutional seal.
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-950 space-y-1">
+                      <div className="font-bold">Submitted for Admin Course Approval</div>
+                      <p className="text-[11px] leading-relaxed">
+                        Your completed course and verification quiz score are now in the OpenFrame Admin Dashboard review queue. Once an administrator manually approves your course, your official PDF download and public QR verification link will automatically unlock here.
+                      </p>
+                    </div>
+                  ) : certificate.status === 'Revision Requested' ? (
+                    <div className="p-4 bg-orange-50 border border-orange-200 rounded-2xl text-orange-950 space-y-1">
+                      <div className="font-bold">Admin Requested Revision Before Approval</div>
+                      <p className="text-[11px] leading-relaxed">
+                        <strong>Reviewer Note:</strong> {certificate.adminReviewNote || 'Please review your course modules and resubmit below.'}
+                      </p>
+                    </div>
+                  ) : certificate.status === 'Revoked' ? (
+                    <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-900 space-y-1">
+                      <div className="font-bold">Certificate Revoked by Administrator</div>
+                      <p className="text-[11px]">
+                        {certificate.adminReviewNote || 'Please contact OpenFrame Academic Administration for further assistance.'}
+                      </p>
                     </div>
                   ) : (
                     <div className="flex flex-wrap gap-3">
@@ -3095,17 +3127,21 @@ export const CourseLearningPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-              ) : (
+              )}
+
+              {(!certificate || certificate.status === 'Revision Requested') && (
                 <form
                   onSubmit={handleClaimVerifiedCertificate}
                   className="p-5 sm:p-6 rounded-2xl border border-emerald-200 bg-[#FAF7F2] space-y-4"
                 >
                   <div>
                     <h3 className="text-sm font-bold text-[#18221F]">
-                      Mandatory Certificate Issuance &amp; Dispatch Details (All 7 Fields Required)
+                      {certificate?.status === 'Revision Requested'
+                        ? 'Update Dispatch Details & Resubmit for Admin Approval'
+                        : 'Submit Completed Course for Admin Certification Approval (All 7 Fields Required)'}
                     </h3>
                     <p className="text-[11px] text-slate-600 mt-0.5">
-                      Required before issuing your QR-verified certificate. Your address &amp; contact numbers are stored privately on your learner record and are never exposed on the public QR verification page.
+                      Required before submitting your completed course to the OpenFrame Admin Dashboard for certification approval. Your residential address &amp; contact numbers remain private and are never shown on public QR verification pages.
                     </p>
                   </div>
 
@@ -3225,10 +3261,10 @@ export const CourseLearningPage: React.FC = () => {
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                     <div className="text-[11px] text-slate-600">
                       {!quizPassed
-                        ? 'Pass the Verification Quiz (≥70%) in Tab 4 to activate certificate issuance.'
+                        ? 'Pass the Verification Quiz (≥70%) in Tab 4 before submitting for Admin approval.'
                         : completedModulesCount === 0
-                        ? 'Mark at least 1 module completed in Step 1 above before claiming.'
-                        : 'All academic steps satisfied — click to verify address and issue your QR Certificate.'}
+                        ? 'Mark at least 1 module completed in Step 1 above before submitting.'
+                        : 'All academic steps satisfied — submit your completed course for Admin Certification Approval.'}
                     </div>
                     <button
                       type="submit"
@@ -3236,7 +3272,13 @@ export const CourseLearningPage: React.FC = () => {
                       className="px-5 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Award className="w-4 h-4" />
-                      <span>{certClaiming ? 'Issuing Verified Certificate...' : 'Claim & Issue Official QR Certificate'}</span>
+                      <span>
+                        {certClaiming
+                          ? 'Submitting for Admin Approval...'
+                          : certificate?.status === 'Revision Requested'
+                          ? 'Resubmit for Admin Approval'
+                          : 'Submit Completed Course for Admin Approval'}
+                      </span>
                     </button>
                   </div>
                 </form>

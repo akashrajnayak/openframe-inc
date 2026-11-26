@@ -56,6 +56,7 @@ export type AdminModuleKey =
   | 'admin_users'
   | 'activity_logs'
   | 'lms_management'
+  | 'course_approvals'
   | 'school_management'
   | 'payment_settings'
   | 'settings';
@@ -115,6 +116,7 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
     {
       groupName: 'Academic & Education',
       items: [
+        { key: 'course_approvals', label: 'Course Approval & Certs', icon: Award, countKey: 'pending_course_approvals', badgeColor: 'bg-amber-500' },
         { key: 'students', label: '6. Student Management', icon: GraduationCap, countKey: 'students', badgeColor: 'bg-emerald-500' },
         { key: 'teachers', label: '7. Teacher Management', icon: School, countKey: 'teachers' },
         { key: 'courses', label: '14. Course Management', icon: BookOpen, countKey: 'courses' },
@@ -160,8 +162,7 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
       items: [
         { key: 'admin_users', label: '20. Admin User Management', icon: ShieldCheck, countKey: 'admin_users', badgeColor: 'bg-purple-500' },
         { key: 'activity_logs', label: '21. Activity Logs', icon: ClipboardList, countKey: 'activity_logs' },
-        { key: 'settings', label: '22. Website Settings', icon: Settings },
-        { key: 'payment_settings', label: '23. Payment Gateway (Razorpay)', icon: CreditCard, badgeColor: 'bg-emerald-600' }
+        { key: 'settings', label: '22. Website Settings', icon: Settings }
       ]
     }
   ];

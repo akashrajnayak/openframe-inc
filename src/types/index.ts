@@ -906,6 +906,11 @@ export interface CourseEnrollment {
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   verifiedServerSide?: boolean;
+  certificateApprovalStatus?: 'Not Requested' | 'Pending Admin Approval' | 'Approved' | 'Revision Requested' | 'Revoked';
+  certificateId?: string;
+  adminApprovedBy?: string;
+  adminApprovedAt?: string;
+  adminReviewNote?: string;
   auditHistory?: CourseEnrollmentAuditEntry[];
   enrolledAt: string;
   updatedAt: string;
@@ -1344,6 +1349,7 @@ export interface IssuedCertificate {
   certificateType?: CertificateType;
   studentId: string;
   studentName: string;
+  studentEmail?: string;
   registrationNumber?: string;
   courseId: string;
   courseName?: string;
@@ -1359,6 +1365,13 @@ export interface IssuedCertificate {
   teacherRole?: string;
   approvedByAdmin?: boolean;
   adminApproverEmail?: string;
+  adminReviewNote?: string;
+  reviewedAt?: string;
+  submittedForApprovalAt?: string;
+  lessonsCompleted?: number;
+  totalLessons?: number;
+  overallProgressPercent?: number;
+  quizAveragePercent?: number;
   templateId?: string;
   verificationUrl?: string;
   qrVerificationUrl?: string;
@@ -1373,8 +1386,34 @@ export interface IssuedCertificate {
   alternativeMobileNumber?: string;
   state?: string;
   addressVerifiedAt?: string;
-  status: 'Issued' | 'Pending Admin Approval' | 'Revoked' | 'VERIFIED';
+  status: 'Issued' | 'Pending Admin Approval' | 'Revision Requested' | 'Revoked' | 'VERIFIED';
   issuedAt?: string;
+}
+
+export interface CourseApprovalQueueItem {
+  key: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  registrationNumber?: string;
+  courseId: string;
+  courseTitle: string;
+  courseDuration?: string;
+  approvalState: 'Pending Admin Approval' | 'Ready for Approval' | 'Issued' | 'Revision Requested' | 'Revoked';
+  lessonsCompleted: number;
+  totalLessons: number;
+  overallProgressPercent: number;
+  quizAveragePercent: number;
+  quizzesPassed: number;
+  addressVerified: boolean;
+  addressSummary?: string;
+  submittedAt: string;
+  reviewedAt?: string;
+  adminApproverEmail?: string;
+  adminReviewNote?: string;
+  certificate?: IssuedCertificate;
+  progress?: StudentProgressRecord;
+  enrollment?: CourseEnrollment;
 }
 
 export interface CertificateVerificationLog {

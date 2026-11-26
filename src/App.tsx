@@ -426,6 +426,9 @@ function AppContent() {
         return <AdminLoginPage />;
       case '/admin':
       case '/admin/dashboard':
+      case '/admin/course-approvals':
+      case '/admin/payment-settings':
+      case '/admin/razorpay':
       case '/super-admin/dashboard':
         return <AdminPage />;
       default:

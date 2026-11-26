@@ -62,6 +62,17 @@ export interface HostedRazorpayLinkStatus {
   paymentId: string | null;
   verifiedAt: string | null;
   amountPaidInr: number;
+  enrollmentVerificationToken?: string | null;
+}
+
+export interface LiveRazorpayOrderStatus {
+  ok: boolean;
+  paid: boolean;
+  status: string;
+  orderId: string;
+  amountInr: number;
+  amountPaidInr: number;
+  attempts: number;
 }
 
 export function isRunningInEmbeddedIframe(): boolean {
@@ -455,11 +466,12 @@ export async function createRazorpayPaymentLink(
 export async function checkRazorpayPaymentLinkStatus(
   paymentLinkId: string
 ): Promise<HostedRazorpayLinkStatus> {
+  const authHeaders = await getOptionalAuthHeader();
   const resp = await fetch(
     `/api/payments/razorpay/payment-link/${encodeURIComponent(paymentLinkId)}`,
     {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...authHeaders },
     }
   );
   const data = await safeParseJson(resp);
@@ -475,5 +487,33 @@ export async function checkRazorpayPaymentLinkStatus(
     paymentId: data.paymentId ? String(data.paymentId) : null,
     verifiedAt: data.verifiedAt ? String(data.verifiedAt) : null,
     amountPaidInr: Number(data.amountPaidInr || 0),
+    enrollmentVerificationToken: data.enrollmentVerificationToken
+      ? String(data.enrollmentVerificationToken)
+      : null,
+  };
+}
+
+export async function checkRazorpayOrderStatus(
+  orderId: string
+): Promise<LiveRazorpayOrderStatus> {
+  const resp = await fetch(
+    `/api/payments/razorpay/order/${encodeURIComponent(orderId)}`,
+    {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    }
+  );
+  const data = await safeParseJson(resp);
+  if (!resp.ok || !data?.ok) {
+    throw new Error(data?.error || `Unable to verify Razorpay order status (HTTP ${resp.status}).`);
+  }
+  return {
+    ok: true,
+    paid: Boolean(data.paid),
+    status: String(data.status || 'created'),
+    orderId: String(data.orderId || orderId),
+    amountInr: Number(data.amountInr || 0),
+    amountPaidInr: Number(data.amountPaidInr || 0),
+    attempts: Number(data.attempts || 0),
   };
 }

@@ -426,6 +426,12 @@ service cloud.firestore {
         (!('mobileNumber' in incoming()) || (incoming().mobileNumber is string && incoming().mobileNumber.size() <= 20)) &&
         (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
         (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80)) &&
+        (isLmsEducatorOrAdmin() || (
+          !('adminApprovedBy' in incoming()) &&
+          !('adminApprovedAt' in incoming()) &&
+          !('adminReviewNote' in incoming()) &&
+          (!('certificateApprovalStatus' in incoming()) || incoming().certificateApprovalStatus in ['Not Requested', 'Pending Admin Approval'])
+        )) &&
         (!('paymentStatus' in incoming()) || incoming().paymentStatus != 'Paid' || isSuperAdmin() || (
           incoming().razorpayPaymentId is string &&
           incoming().razorpayPaymentId.size() >= 6 &&
@@ -434,8 +440,18 @@ service cloud.firestore {
       allow update: if isValidId(id) && (
         isSuperAdmin() ||
         (
-          (isLmsEducatorOrAdmin() || (isSignedIn() && existing().studentId == request.auth.uid)) &&
+          isLmsEducatorOrAdmin() &&
           !incoming().diff(existing()).affectedKeys().hasAny(['paymentStatus', 'feeAmount', 'razorpayOrderId', 'razorpayPaymentId', 'verifiedServerSide']) &&
+          incoming().studentId == existing().studentId &&
+          incoming().courseId == existing().courseId &&
+          (!('certificateApprovalStatus' in incoming()) || incoming().certificateApprovalStatus in ['Not Requested', 'Pending Admin Approval', 'Approved', 'Revision Requested', 'Revoked']) &&
+          (!('adminReviewNote' in incoming()) || (incoming().adminReviewNote is string && incoming().adminReviewNote.size() <= 600))
+        ) ||
+        (
+          isSignedIn() &&
+          existing().studentId == request.auth.uid &&
+          !incoming().diff(existing()).affectedKeys().hasAny(['paymentStatus', 'feeAmount', 'razorpayOrderId', 'razorpayPaymentId', 'verifiedServerSide', 'adminApprovedBy', 'adminApprovedAt', 'adminReviewNote']) &&
+          (!('certificateApprovalStatus' in incoming()) || incoming().certificateApprovalStatus in ['Not Requested', 'Pending Admin Approval'] || ('certificateApprovalStatus' in existing() && incoming().certificateApprovalStatus == existing().certificateApprovalStatus)) &&
           incoming().studentId == existing().studentId &&
           incoming().courseId == existing().courseId &&
           (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
@@ -566,7 +582,11 @@ service cloud.firestore {
           incoming().studentId == request.auth.uid &&
           incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
           incoming().courseId is string && incoming().courseId.size() <= 128 &&
-          incoming().status in ['Issued', 'VERIFIED'] &&
+          incoming().status == 'Pending Admin Approval' &&
+          (!('approvedByAdmin' in incoming()) || incoming().approvedByAdmin == false) &&
+          !('adminApproverEmail' in incoming()) &&
+          !('adminReviewNote' in incoming()) &&
+          !('reviewedAt' in incoming()) &&
           (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
           (!('flatNumber' in incoming()) || (incoming().flatNumber is string && incoming().flatNumber.size() <= 60)) &&
           (!('streetAddress' in incoming()) || (incoming().streetAddress is string && incoming().streetAddress.size() <= 240)) &&
@@ -575,9 +595,29 @@ service cloud.firestore {
           (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
           (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80)))
       );
-      allow update: if isValidId(certId) && isLmsEducatorOrAdmin() &&
-        incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
-        incoming().studentId is string && incoming().studentId.size() <= 128;
+      allow update: if isValidId(certId) && (
+        (isLmsEducatorOrAdmin() &&
+          incoming().certificateId is string && incoming().certificateId.size() <= 80 &&
+          incoming().studentId is string && incoming().studentId.size() <= 128 &&
+          incoming().status in ['Pending Admin Approval', 'Issued', 'Revision Requested', 'Revoked', 'VERIFIED'] &&
+          (!('adminReviewNote' in incoming()) || (incoming().adminReviewNote is string && incoming().adminReviewNote.size() <= 600))) ||
+        (isSignedIn() &&
+          existing().studentId == request.auth.uid &&
+          existing().status in ['Pending Admin Approval', 'Revision Requested'] &&
+          incoming().studentId == existing().studentId &&
+          incoming().courseId == existing().courseId &&
+          incoming().certificateId == existing().certificateId &&
+          incoming().status == 'Pending Admin Approval' &&
+          (!('approvedByAdmin' in incoming()) || incoming().approvedByAdmin == false) &&
+          !incoming().diff(existing()).affectedKeys().hasAny(['adminApproverEmail', 'adminReviewNote', 'reviewedAt']) &&
+          (!('homeAddress' in incoming()) || (incoming().homeAddress is string && incoming().homeAddress.size() <= 300)) &&
+          (!('flatNumber' in incoming()) || (incoming().flatNumber is string && incoming().flatNumber.size() <= 60)) &&
+          (!('streetAddress' in incoming()) || (incoming().streetAddress is string && incoming().streetAddress.size() <= 240)) &&
+          (!('pincode' in incoming()) || (incoming().pincode is string && incoming().pincode.size() <= 12)) &&
+          (!('mobileNumber' in incoming()) || (incoming().mobileNumber is string && incoming().mobileNumber.size() <= 20)) &&
+          (!('alternativeMobileNumber' in incoming()) || (incoming().alternativeMobileNumber is string && incoming().alternativeMobileNumber.size() <= 20)) &&
+          (!('state' in incoming()) || (incoming().state is string && incoming().state.size() <= 80)))
+      );
       allow delete: if isValidId(certId) && isAdmin();
     }
 
@@ -588,7 +628,8 @@ service cloud.firestore {
     }
 
     match /certificate_verification/{certId} {
-      // Minimal public QR verification lookup; zero private residential or contact PII allowed
+      // Minimal public QR verification lookup; zero private residential or contact PII allowed.
+      // Only authorized admins, educators, or approved institution owners may publish or revoke public credentials.
       allow get: if isValidId(certId);
       allow list: if isLmsEducatorOrAdmin() || isEducationAdmin() || isAdmin();
       allow create, update: if isValidId(certId) &&
@@ -607,8 +648,7 @@ service cloud.firestore {
           isLmsEducatorOrAdmin() ||
           isEducationAdmin() ||
           isAdmin() ||
-          (isSignedIn() && incoming().institutionId is string && isApprovedInstitutionOwner(incoming().institutionId)) ||
-          (isSignedIn() && incoming().studentId == request.auth.uid && incoming().courseId is string)
+          (isSignedIn() && incoming().institutionId is string && isApprovedInstitutionOwner(incoming().institutionId))
         );
       allow delete: if isValidId(certId) && isAdmin();
     }

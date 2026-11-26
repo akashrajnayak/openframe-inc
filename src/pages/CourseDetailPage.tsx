@@ -900,41 +900,31 @@ export const CourseDetailPage: React.FC = () => {
                 );
               })()}
 
-              {/* Payment-First -> Open Learning Workspace Action Buttons */}
-              {(() => {
-                const detailPricing = compute90PercentCoursePricing({
-                  category: course.category,
-                  title: course.title,
-                  level: course.level,
-                  educationLevels: course.educationLevels,
-                  existingPrice: course.price,
-                });
-                const exactCourseFee = course.price > 0 ? Math.round(course.price) : detailPricing.finalPriceInr;
-                return (
-                  <div className="space-y-2.5 pt-1">
-                    {!hasPaidEnrollment ? (
-                      <>
-                        {/* Step 1: Pay First via Razorpay */}
-                        <button
-                          type="button"
-                          onClick={() => setIsRegModalOpen(true)}
-                          className="w-full py-3.5 px-4 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md cursor-pointer tabular-nums"
-                        >
-                          <GraduationCap className="w-4 h-4 text-emerald-300" />
-                          <span>1. Pay {formatInr(exactCourseFee)} First (Razorpay) &amp; Register</span>
-                        </button>
+              {/* Direct Enrollment -> Open Learning Workspace Action Buttons */}
+              <div className="space-y-2.5 pt-1">
+                {!hasPaidEnrollment ? (
+                  <>
+                    {/* Step 1: Direct Enrollment */}
+                    <button
+                      type="button"
+                      onClick={() => setIsRegModalOpen(true)}
+                      className="w-full py-3.5 px-4 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md cursor-pointer"
+                    >
+                      <GraduationCap className="w-4 h-4 text-emerald-300" />
+                      <span>1. Enroll Now &amp; Unlock Course Workspace</span>
+                    </button>
 
-                        {/* Step 2: Open Learning Workspace (triggers payment first if unpaid) */}
-                        <button
-                          type="button"
-                          onClick={() => setIsRegModalOpen(true)}
-                          className="w-full py-2.5 px-4 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
-                        >
-                          <Lock className="w-3.5 h-3.5 text-blue-700" />
-                          <span>2. Open Learning Workspace (After Payment)</span>
-                        </button>
-                      </>
-                    ) : (
+                    {/* Step 2: Admin Certification Track info */}
+                    <button
+                      type="button"
+                      onClick={() => setIsRegModalOpen(true)}
+                      className="w-full py-2.5 px-4 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <Award className="w-3.5 h-3.5 text-blue-700" />
+                      <span>2. Complete Course &rarr; Admin Certification Approval</span>
+                    </button>
+                  </>
+                ) : (
                       <>
                         {/* Paid & Unlocked -> Direct Redirect to Open Learning Workspace & Go to My Learning */}
                         <Link
@@ -995,7 +985,7 @@ export const CourseDetailPage: React.FC = () => {
                         className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-900 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
                       >
                         <Lock className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Assessment Quiz (Pay First to Unlock)</span>
+                        <span>Assessment Quiz (Enroll to Unlock)</span>
                       </button>
                     )}
 
@@ -1008,7 +998,7 @@ export const CourseDetailPage: React.FC = () => {
                       <span>Ask AI Tutor (Quinn AI)</span>
                     </button>
 
-                    {earnedCert ? (
+                    {earnedCert && (earnedCert.status === 'Issued' || earnedCert.status === 'VERIFIED') ? (
                       <button
                         type="button"
                         onClick={() => lmsService.downloadCertificatePdf(earnedCert)}
@@ -1016,6 +1006,24 @@ export const CourseDetailPage: React.FC = () => {
                       >
                         <Download className="w-3.5 h-3.5" />
                         <span>Download Certificate ({earnedCert.certificateId})</span>
+                      </button>
+                    ) : earnedCert && earnedCert.status === 'Pending Admin Approval' ? (
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(`/learn/${encodeURIComponent(course.id)}?tab=certificate`)}
+                        className="w-full py-2.5 px-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <Award className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Pending Admin Approval ({earnedCert.certificateId})</span>
+                      </button>
+                    ) : earnedCert && earnedCert.status === 'Revision Requested' ? (
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(`/learn/${encodeURIComponent(course.id)}?tab=certificate`)}
+                        className="w-full py-2.5 px-4 rounded-xl bg-orange-50 border border-orange-300 text-orange-900 hover:bg-orange-100 font-bold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                      >
+                        <Award className="w-3.5 h-3.5 text-orange-600" />
+                        <span>Revision Requested — View Feedback</span>
                       </button>
                     ) : (
                       <button
@@ -1029,8 +1037,8 @@ export const CourseDetailPage: React.FC = () => {
                         }}
                         className="w-full py-2 px-4 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 font-semibold text-xs text-center flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
                       >
-                        <Lock className="w-3.5 h-3.5" />
-                        <span>Certificate Status ({hasPaidEnrollment ? 'Check Eligibility' : 'Unlocks After Payment'})</span>
+                        <Award className="w-3.5 h-3.5" />
+                        <span>Certificate ({hasPaidEnrollment ? 'Check Approval Status' : 'Admin-Approved Upon Completion'})</span>
                       </button>
                     )}
 
@@ -1078,9 +1086,7 @@ export const CourseDetailPage: React.FC = () => {
                     onSuccess={() => showToast('Signed in with Google! You can now enroll or save this course.')}
                   />
                 )}
-                  </div>
-                );
-              })()}
+              </div>
 
               <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
                 Free public YouTube educational videos play via official YouTube embed players. OpenFrame never charges to watch free public YouTube videos; fees apply strictly to structured assessments, mentorship &amp; OpenFrame certification.
@@ -1170,14 +1176,14 @@ export const CourseDetailPage: React.FC = () => {
         )}
       </main>
 
-      {/* COMPLETE COURSE ENROLLMENT & PAYMENT MODAL */}
+      {/* COMPLETE COURSE ENROLLMENT MODAL */}
       <CourseEnrollmentModal
         isOpen={isRegModalOpen}
         onClose={() => setIsRegModalOpen(false)}
         course={course}
         onEnrolled={() => {
           setHasPaidEnrollment(true);
-          setToastMessage('Razorpay payment verified! Your course workspace is now unlocked.');
+          setToastMessage('Enrollment confirmed! Your course workspace is unlocked — complete your modules and submit for Admin Certification Approval.');
           setTimeout(() => setToastMessage(null), 5000);
         }}
       />

@@ -595,13 +595,21 @@
             "Suspended"
           ]
         },
-        "paymentStatus": { "type": "string", "enum": ["Paid", "Pending", "Scholarship", "Failed"] },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Pending", "Scholarship", "Complimentary", "Failed"] },
         "feeAmount": { "type": "number" },
         "marketBenchmarkPrice": { "type": "number" },
         "discountPercent": { "type": "number" },
         "razorpayOrderId": { "type": "string", "maxLength": 120 },
         "razorpayPaymentId": { "type": "string", "maxLength": 120 },
         "verifiedServerSide": { "type": "boolean" },
+        "certificateApprovalStatus": {
+          "type": "string",
+          "enum": ["Not Requested", "Pending Admin Approval", "Approved", "Revision Requested", "Revoked"]
+        },
+        "certificateId": { "type": "string", "maxLength": 80 },
+        "adminApprovedBy": { "type": "string", "maxLength": 120 },
+        "adminApprovedAt": { "type": "string", "maxLength": 50 },
+        "adminReviewNote": { "type": "string", "maxLength": 600 },
         "assignedCoordinator": { "type": "string", "maxLength": 120 },
         "enrolledAt": { "type": "string", "maxLength": 50 }
       },
@@ -698,16 +706,29 @@
     },
     "IssuedCertificate": {
       "title": "IssuedCertificate",
-      "description": "OpenFrame credential gated by module completion, verification assessment, and mandatory 7-field residential address verification (private contact PII isolated from public certificate_verification lookup).",
+      "description": "OpenFrame credential gated by module completion, verification assessment, mandatory 7-field residential address verification, and manual Admin Course Approval (private contact PII isolated from public certificate_verification lookup).",
       "type": "object",
       "properties": {
         "certificateId": { "type": "string", "maxLength": 80 },
         "studentId": { "type": "string", "maxLength": 128 },
         "studentName": { "type": "string", "maxLength": 120 },
+        "studentEmail": { "type": "string", "maxLength": 120 },
         "courseId": { "type": "string", "maxLength": 128 },
         "courseTitle": { "type": "string", "maxLength": 200 },
         "grade": { "type": "string", "maxLength": 60 },
-        "status": { "type": "string", "maxLength": 60 },
+        "status": {
+          "type": "string",
+          "enum": ["Pending Admin Approval", "Issued", "Revision Requested", "Revoked", "VERIFIED"]
+        },
+        "approvedByAdmin": { "type": "boolean" },
+        "adminApproverEmail": { "type": "string", "maxLength": 120 },
+        "adminReviewNote": { "type": "string", "maxLength": 600 },
+        "reviewedAt": { "type": "string", "maxLength": 50 },
+        "submittedForApprovalAt": { "type": "string", "maxLength": 50 },
+        "lessonsCompleted": { "type": "number" },
+        "totalLessons": { "type": "number" },
+        "overallProgressPercent": { "type": "number" },
+        "quizAveragePercent": { "type": "number" },
         "homeAddress": { "type": "string", "maxLength": 300 },
         "flatNumber": { "type": "string", "maxLength": 60 },
         "streetAddress": { "type": "string", "maxLength": 240 },

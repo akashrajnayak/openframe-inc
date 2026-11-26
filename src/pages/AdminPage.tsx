@@ -107,6 +107,7 @@ import { AdminLmsControlPanel } from '../components/admin/AdminLmsControlPanel';
 import { AdminCourseMarketplaceManager } from '../components/admin/AdminCourseMarketplaceManager';
 import { AdminCorporateTrainingLibrary } from '../components/admin/AdminCorporateTrainingLibrary';
 import { AdminSchoolManagement } from '../components/admin/AdminSchoolManagement';
+import { AdminCourseApprovalPanel } from '../components/admin/AdminCourseApprovalPanel';
 
 export const AdminPage: React.FC = () => {
   const { navigate } = useRouter();
@@ -119,7 +120,26 @@ export const AdminPage: React.FC = () => {
   } = useAuth();
 
   // Navigation & UI States
-  const [activeModule, setActiveModule] = useState<AdminModuleKey>('dashboard');
+  const [activeModule, setActiveModule] = useState<AdminModuleKey>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      if (
+        p.includes('/course-approvals') ||
+        params.get('module') === 'course_approvals'
+      ) {
+        return 'course_approvals';
+      }
+      if (
+        p.includes('/payment-settings') ||
+        p.includes('/razorpay') ||
+        params.get('module') === 'payment_settings'
+      ) {
+        return 'payment_settings';
+      }
+    }
+    return 'dashboard';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -172,6 +192,7 @@ export const AdminPage: React.FC = () => {
   const [coursesActiveTab, setCoursesActiveTab] = useState<'marketplace' | 'foundation' | 'brochures'>('marketplace');
   const [mpTotalAvailable, setMpTotalAvailable] = useState<number | null>(null);
   const [lmsTelemetry, setLmsTelemetry] = useState<AdminLmsTelemetry | undefined>(undefined);
+  const [pendingCourseApprovalsCount, setPendingCourseApprovalsCount] = useState<number>(0);
   const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -289,11 +310,17 @@ export const AdminPage: React.FC = () => {
 
   const refreshMarketplaceCount = async () => {
     try {
-      const [c, an, tel] = await Promise.all([
+      const [c, an, tel, approvalQueue] = await Promise.all([
         marketplaceService.getLiveMarketplaceCounters(true),
         lmsService.getLmsAnalytics().catch(() => null),
         lmsService.getSystemTelemetry().catch(() => null),
+        lmsService.getCourseApprovalQueue().catch(() => null),
       ]);
+      if (approvalQueue) {
+        setPendingCourseApprovalsCount(
+          approvalQueue.counts.pending + approvalQueue.counts.readyToApprove
+        );
+      }
       setMpTotalAvailable(c.totalCoursesAvailable);
       setLmsTelemetry({
         totalCatalogCourses: c.totalCoursesAvailable,
@@ -336,6 +363,7 @@ export const AdminPage: React.FC = () => {
       case 'business_enquiries':
       case 'product_enquiries':
         return effectiveRole === 'Sales Admin';
+      case 'course_approvals':
       case 'students':
       case 'teachers':
       case 'courses':
@@ -417,6 +445,7 @@ export const AdminPage: React.FC = () => {
     software_enquiries: softwareEnquiries.length,
     business_enquiries: businessEnquiries.length,
     product_enquiries: productEnquiries.length,
+    pending_course_approvals: pendingCourseApprovalsCount,
     students: studentRegistrations.length,
     teachers: teacherRegistrations.length,
     courses: courses.length,
@@ -1939,6 +1968,19 @@ export const AdminPage: React.FC = () => {
             </div>
           )}
 
+          {/* COURSE APPROVAL & CERTIFICATION WORKFLOW MODULE */}
+          {activeModule === 'course_approvals' && (
+            <AdminCourseApprovalPanel
+              adminEmail={currentUser?.email || 'admin@openframeitsolutions.com'}
+              onNotify={showToast}
+              onLogActivity={async (action, coll, recId, details) => {
+                await logActivity(action, coll, recId, details);
+                await refreshMarketplaceCount();
+              }}
+              onQueueUpdated={(pendingTotal) => setPendingCourseApprovalsCount(pendingTotal)}
+            />
+          )}
+
           {/* QUINN AI & LMS MANAGEMENT MODULE */}
           {activeModule === 'lms_management' && (
             <AdminLmsControlPanel onNotify={showToast} />
@@ -2680,28 +2722,28 @@ export const AdminPage: React.FC = () => {
                 </div>
               </form>
 
-              {(isSuperAdmin || effectiveRole === 'Super Admin') && (
+              {(isSuperAdmin || effectiveRole === 'Super Admin' || effectiveRole === 'Education Admin') && (
                 <div className="pt-6 border-t border-slate-100">
-                  <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
-                        <CreditCard className="w-5 h-5" />
+                      <div className="w-10 h-10 rounded-xl bg-[#123D32] text-white flex items-center justify-center shrink-0">
+                        <ShieldCheck className="w-5 h-5" />
                       </div>
                       <div>
                         <h3 className="text-sm font-bold text-slate-900">
-                          Razorpay Payment Gateway Keys
+                          Course Approval &amp; Certification Queue
                         </h3>
                         <p className="text-xs text-slate-600 mt-0.5">
-                          Manage Razorpay Key ID and Key Secret bound to Firestore and linked to live checkout.
+                          Review completed student courses and manually approve them to issue official QR-verified OpenFrame certificates.
                         </p>
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setActiveModule('payment_settings')}
-                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs whitespace-nowrap shrink-0 transition-colors"
+                      onClick={() => setActiveModule('course_approvals')}
+                      className="px-4 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs whitespace-nowrap shrink-0 transition-colors cursor-pointer"
                     >
-                      Configure Razorpay &rarr;
+                      Open Course Approvals &rarr;
                     </button>
                   </div>
                 </div>

@@ -1251,7 +1251,8 @@ async function startServer() {
       const expectedAud = firebaseAppletCfg.projectId;
       if (!expectedAud || payload.aud !== expectedAud) return null;
       if (payload.iss !== `https://securetoken.google.com/${expectedAud}`) return null;
-      if (typeof payload.exp !== 'number' || payload.exp <= nowSec) return null;
+      // Allow 60s clock-skew tolerance between container clock and Google Secure Token servers
+      if (typeof payload.exp !== 'number' || payload.exp + 60 <= nowSec) return null;
       if (typeof payload.sub !== 'string' || !payload.sub) return null;
 
       return {
@@ -4735,37 +4736,54 @@ Allowed Categories: ${catChoices.join(', ')}`,
 
     try {
       const authBasic = Buffer.from(`${testKeyId}:${testSecret}`).toString('base64');
-      const rzpResp = await fetch('https://api.razorpay.com/v1/orders?count=1', {
-        method: 'GET',
-        headers: {
-          Authorization: `Basic ${authBasic}`,
-        },
-        signal: AbortSignal.timeout(10000),
-      });
+      const [ordersResp, linksResp] = await Promise.all([
+        fetch('https://api.razorpay.com/v1/orders?count=1', {
+          method: 'GET',
+          headers: { Authorization: `Basic ${authBasic}` },
+          signal: AbortSignal.timeout(10000),
+        }),
+        fetch('https://api.razorpay.com/v1/payment_links?count=1', {
+          method: 'GET',
+          headers: { Authorization: `Basic ${authBasic}` },
+          signal: AbortSignal.timeout(10000),
+        }).catch(() => null),
+      ]);
+
       const testMode = inferRazorpayMode(testKeyId, 'live');
-      if (rzpResp.ok) {
+      const ordersApiOk = ordersResp.ok;
+      const paymentLinksApiOk = Boolean(linksResp && linksResp.ok);
+
+      if (ordersApiOk) {
         return res.json({
           ok: true,
           verified: true,
           mode: testMode,
+          ordersApiOk,
+          paymentLinksApiOk,
           keyIdPrefix: testKeyId.slice(0, 14),
-          message: `Razorpay ${testMode.toUpperCase()} API credentials authenticated successfully.`,
+          message: paymentLinksApiOk
+            ? `Razorpay ${testMode.toUpperCase()} Orders API & Hosted Payment Links API authenticated successfully.`
+            : `Razorpay ${testMode.toUpperCase()} Orders API verified (Hosted Payment Links API not enabled on merchant account).`,
         });
       }
-      const errBody = await rzpResp.json().catch(() => ({}));
-      const isAuthErr = rzpResp.status === 401;
+      const errBody = await ordersResp.json().catch(() => ({}));
+      const isAuthErr = ordersResp.status === 401;
       return res.status(isAuthErr ? 401 : 502).json({
         ok: false,
         verified: false,
+        ordersApiOk: false,
+        paymentLinksApiOk,
         mode: testMode,
         error: isAuthErr
           ? 'Razorpay rejected these credentials (401 Unauthorized). Check that your Key ID and Key Secret match.'
-          : errBody?.error?.description || `Razorpay API returned HTTP ${rzpResp.status}.`,
+          : errBody?.error?.description || `Razorpay API returned HTTP ${ordersResp.status}.`,
       });
     } catch (err: any) {
       return res.status(502).json({
         ok: false,
         verified: false,
+        ordersApiOk: false,
+        paymentLinksApiOk: false,
         error: err?.message || 'Unable to connect to Razorpay API.',
       });
     }
@@ -4879,6 +4897,59 @@ Allowed Categories: ${catChoices.join(', ')}`,
       return res.status(502).json({
         ok: false,
         error: err?.message || 'Razorpay gateway request failed.',
+      });
+    }
+  });
+
+  app.get('/api/payments/razorpay/order/:orderId', async (req, res) => {
+    const orderId = String(req.params.orderId || '').trim();
+    if (!/^order_[a-zA-Z0-9]+$/.test(orderId)) {
+      return res.status(400).json({ ok: false, paid: false, error: 'Invalid Razorpay order ID.' });
+    }
+
+    const creds = await getActiveRazorpayCredentials();
+    if (!creds.configured || !creds.keyId || !creds.keySecret) {
+      return res.status(503).json({
+        ok: false,
+        paid: false,
+        error: 'Razorpay credentials are not configured on the server.',
+      });
+    }
+
+    try {
+      const authBasic = Buffer.from(`${creds.keyId}:${creds.keySecret}`).toString('base64');
+      const rzpResp = await fetch(
+        `https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Basic ${authBasic}` },
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      const data: any = await rzpResp.json().catch(() => null);
+      if (!rzpResp.ok || !data?.id) {
+        return res.status(rzpResp.status || 502).json({
+          ok: false,
+          paid: false,
+          error: data?.error?.description || 'Unable to fetch Razorpay order status.',
+        });
+      }
+
+      const isPaid = String(data.status || '').toLowerCase() === 'paid';
+      return res.json({
+        ok: true,
+        paid: isPaid,
+        status: String(data.status || 'created'),
+        orderId: String(data.id),
+        amountInr: typeof data.amount === 'number' ? Math.round(data.amount / 100) : 0,
+        amountPaidInr: typeof data.amount_paid === 'number' ? Math.round(data.amount_paid / 100) : 0,
+        attempts: Number(data.attempts || 0),
+      });
+    } catch (err: any) {
+      return res.status(502).json({
+        ok: false,
+        paid: false,
+        error: err?.message || 'Unable to verify Razorpay order status.',
       });
     }
   });
@@ -5007,10 +5078,12 @@ Allowed Categories: ${catChoices.join(', ')}`,
       if (ck && cv) sanitizedNotes[ck] = cv;
     }
 
+    const expireByUnix = Math.floor(Date.now() / 1000) + 30 * 60;
     const payload: Record<string, any> = {
       amount: Math.round(numAmount * 100),
       currency: 'INR',
       accept_partial: false,
+      expire_by: expireByUnix,
       reference_id: `OFPL_${Date.now()}_${Math.random().toString(36).slice(2, 6).toUpperCase()}`.slice(0, 40),
       description: String(description || purpose || 'OpenFrame Education Course Enrollment').slice(0, 200),
       notes: sanitizedNotes,
@@ -5104,6 +5177,15 @@ Allowed Categories: ${catChoices.join(', ')}`,
       const paymentId = String(capturedPayment?.payment_id || (isPaid ? `pay_${linkId.replace(/^plink_/, '')}` : ''));
       const orderId = String(data.order_id || linkId);
       const verifiedAt = new Date().toISOString();
+      const authHeader = String(req.headers.authorization || '').trim();
+      const caller = authHeader ? await verifyFirebaseBearerToken(req).catch(() => null) : null;
+      const effectiveUid = caller?.uid || String(data?.notes?.requestedByUid || 'guest_learner');
+      const enrollmentVerificationToken = isPaid
+        ? crypto
+            .createHmac('sha256', creds.keySecret)
+            .update(`${orderId}|${paymentId}|${effectiveUid}|${verifiedAt}`)
+            .digest('hex')
+        : null;
 
       return res.json({
         ok: true,
@@ -5115,6 +5197,7 @@ Allowed Categories: ${catChoices.join(', ')}`,
         paymentId: isPaid ? paymentId : null,
         amountPaidInr: typeof data.amount_paid === 'number' ? Math.round(data.amount_paid / 100) : 0,
         verifiedAt: isPaid ? verifiedAt : null,
+        enrollmentVerificationToken,
       });
     } catch (err: any) {
       return res.status(502).json({

@@ -38,6 +38,7 @@ import {
   MarketplaceCourse,
   LearningStage,
   CertificateType,
+  CourseApprovalQueueItem,
   StudentLessonNote,
   StudentLessonBookmark,
   SearchHistoryEntry,
@@ -72,7 +73,7 @@ const DEFAULT_GLOBAL_SETTINGS: LmsGlobalSettings = {
   youtubePreferredChannels: 'MIT OpenCourseWare, Stanford Online, freeCodeCamp.org, DeepLearning.AI, Harvard CS50, 3Blue1Brown',
   youtubeMaxRecommendations: 3,
   youtubeSafeSearch: 'strict',
-  requireAdminCertApproval: false,
+  requireAdminCertApproval: true,
   updatedAt: new Date().toISOString(),
 };
 
@@ -83,7 +84,7 @@ const DEFAULT_CERT_TEMPLATE: CertificateTemplate = {
   credentialTitle: 'Certificate of Applied Mastery',
   authorizedSignatoryName: 'Academic Director & CTO',
   authorizedSignatoryTitle: 'OpenFrame Education Council',
-  requireAdminApprovalBeforeIssue: false,
+  requireAdminApprovalBeforeIssue: true,
   accentColor: '#1d4ed8',
   updatedAt: new Date().toISOString(),
 };
@@ -419,21 +420,20 @@ export class LmsService {
 
   public isVerifiedPaidEnrollment(enrollment?: CourseEnrollment | null): boolean {
     if (!enrollment) return false;
-    if (enrollment.paymentStatus === 'Scholarship') return true;
-    if (enrollment.paymentStatus !== 'Paid') return false;
-    const payId = String((enrollment as any).razorpayPaymentId || '').trim();
-    const orderId = String((enrollment as any).razorpayOrderId || '').trim();
-    if (!payId || !payId.startsWith('pay_')) return false;
-    // Reject legacy local/mock payment IDs so paid courses strictly enforce live Razorpay checkout
-    if (
-      payId.startsWith('pay_OF') ||
-      payId.startsWith('pay_mock') ||
-      payId.startsWith('pay_local') ||
-      orderId.startsWith('order_OF')
-    ) {
-      return false;
-    }
-    return Boolean((enrollment as any).verifiedServerSide !== false);
+    const blockedStatuses = ['Suspended', 'Rejected', 'Cancelled'];
+    if (blockedStatuses.includes(String(enrollment.status || ''))) return false;
+    // Direct enrollment grants full learning access; certification is gated by Admin Course Approval.
+    return Boolean(
+      enrollment.paymentStatus === 'Complimentary' ||
+        enrollment.paymentStatus === 'Paid' ||
+        enrollment.paymentStatus === 'Scholarship' ||
+        enrollment.paymentStatus === 'Pending' ||
+        enrollment.status === 'Active' ||
+        enrollment.status === 'Approved' ||
+        enrollment.status === 'Completed' ||
+        enrollment.status === 'Verified' ||
+        enrollment.status === 'Payment Completed'
+    );
   }
 
   async getAllStudentProgress(studentUid: string): Promise<StudentProgressRecord[]> {
@@ -1597,24 +1597,35 @@ export class LmsService {
   }
 
   async issueCertificate(params: {
+    certificateId?: string;
     courseId: string;
     courseTitle: string;
     courseDuration?: string;
     studentId: string;
     studentName: string;
+    studentEmail?: string;
     registrationNumber?: string;
     score: number;
     teacherId?: string;
     teacherName?: string;
     approvedByAdmin?: boolean;
     adminApproverEmail?: string;
+    adminReviewNote?: string;
+    reviewedAt?: string;
+    submittedForApprovalAt?: string;
+    lessonsCompleted?: number;
+    totalLessons?: number;
+    overallProgressPercent?: number;
+    quizAveragePercent?: number;
     certificateType?: CertificateType;
     status?: IssuedCertificate['status'];
     addressDetails?: CertificateAddressDetails;
   }): Promise<IssuedCertificate> {
     const year = new Date().getFullYear();
     const uniqueSuffix = `${Date.now().toString(36).toUpperCase().slice(-4)}${Math.floor(100 + Math.random() * 900)}`;
-    const certificateId = `OF-CERT-${year}-${uniqueSuffix}`.slice(0, 80);
+    const certificateId = params.certificateId
+      ? sanitizeId(params.certificateId).slice(0, 80)
+      : `OF-CERT-${year}-${uniqueSuffix}`.slice(0, 80);
     const now = new Date().toISOString();
 
     let grade = 'B (Pass)';
@@ -1637,6 +1648,8 @@ export class LmsService {
 
     const template = (await this.getCertificateTemplates())[0] || DEFAULT_CERT_TEMPLATE;
     const ad = params.addressDetails;
+    const resolvedStatus: IssuedCertificate['status'] = params.status || 'Pending Admin Approval';
+    const isOfficiallyIssued = resolvedStatus === 'Issued' || resolvedStatus === 'VERIFIED';
 
     const cert: IssuedCertificate = stripUndefinedDeep({
       id: certificateId,
@@ -1644,6 +1657,7 @@ export class LmsService {
       certificateType: params.certificateType || 'Course Completion Certificate',
       studentId: params.studentId,
       studentName: params.studentName,
+      studentEmail: params.studentEmail,
       registrationNumber: params.registrationNumber || `OF-STU-${params.studentId.slice(0, 6).toUpperCase()}`,
       courseId: params.courseId,
       courseName: params.courseTitle,
@@ -1658,8 +1672,15 @@ export class LmsService {
       teacherId: params.teacherId || 'FACULTY-BOARD',
       teacherName: params.teacherName || 'OpenFrame Academic Evaluator',
       teacherRole: 'Lead Faculty Evaluator',
-      approvedByAdmin: params.approvedByAdmin ?? true,
+      approvedByAdmin: isOfficiallyIssued ? (params.approvedByAdmin ?? true) : false,
       adminApproverEmail: params.adminApproverEmail,
+      adminReviewNote: params.adminReviewNote,
+      reviewedAt: params.reviewedAt,
+      submittedForApprovalAt: params.submittedForApprovalAt || now,
+      lessonsCompleted: params.lessonsCompleted,
+      totalLessons: params.totalLessons,
+      overallProgressPercent: params.overallProgressPercent,
+      quizAveragePercent: params.quizAveragePercent,
       templateId: template.id,
       verificationUrl,
       qrVerificationUrl: verificationUrl,
@@ -1674,30 +1695,33 @@ export class LmsService {
       alternativeMobileNumber: ad?.alternativeMobileNumber,
       state: ad?.state,
       addressVerifiedAt: ad ? now : undefined,
-      status: params.status || 'Issued',
+      status: resolvedStatus,
     });
 
     try {
       await setDoc(doc(db, 'certificates', certificateId), cert, { merge: true });
-      // Write strictly PII-free public QR verification record (never includes address/phone)
-      await setDoc(
-        doc(db, 'certificate_verification', certificateId),
-        stripUndefinedDeep({
-          id: certificateId,
-          certificateId,
-          studentId: params.studentId,
-          studentName: params.studentName,
-          courseId: params.courseId,
-          courseTitle: params.courseTitle,
-          grade,
-          score: params.score,
-          issueDate: cert.issuedDate,
-          issuerName: cert.authorizedSignatory,
-          status: cert.status === 'Issued' ? 'Issued' : cert.status,
-          verifiedAt: now,
-        }),
-        { merge: true }
-      ).catch(() => {});
+      // Only publish PII-free public QR verification records AFTER Admin approval / official issuance
+      if (isOfficiallyIssued) {
+        await setDoc(
+          doc(db, 'certificate_verification', certificateId),
+          stripUndefinedDeep({
+            id: certificateId,
+            certificateId,
+            studentId: params.studentId,
+            studentName: params.studentName,
+            courseId: params.courseId,
+            courseTitle: params.courseTitle,
+            certificateType: cert.certificateType,
+            grade,
+            score: params.score,
+            issueDate: cert.issuedDate,
+            issuerName: cert.authorizedSignatory,
+            status: 'Issued',
+            verifiedAt: now,
+          }),
+          { merge: true }
+        ).catch(() => {});
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `certificates/${certificateId}`);
     }
@@ -1706,9 +1730,9 @@ export class LmsService {
   }
 
   /**
-   * Direct Assessment & Module Completion Certificate Claim (with Mandatory 7-Field Address Gate).
-   * Enables learners who completed modules, passed the Verification Quiz (>=70%),
-   * and verified all 7 address/contact details to claim their official QR-verified certificate.
+   * Submits a completed student course (modules completed, Verification Quiz >=70%,
+   * and mandatory 7-field address verified) for Admin Course Approval & Certification.
+   * Certificates remain 'Pending Admin Approval' until manually approved by an Admin.
    */
   async claimVerifiedAssessmentCertificate(params: {
     course: MarketplaceCourse;
@@ -1718,6 +1742,7 @@ export class LmsService {
     registrationNumber?: string;
     progress: StudentProgressRecord;
     addressDetails: CertificateAddressDetails;
+    existingCertificateId?: string;
   }): Promise<{ certificate: IssuedCertificate; progress: StudentProgressRecord }> {
     const validation = validateCertificateAddressDetails(params.addressDetails);
     if (!validation.valid) {
@@ -1728,17 +1753,16 @@ export class LmsService {
       (params.progress.completedLessonIds?.length || 0) >= 1 ||
       params.progress.completedStages.includes('VIDEO_LEARNING');
     if (!lessonsDone) {
-      throw new Error('Please mark at least one module/lesson complete before claiming your certificate.');
+      throw new Error('Please mark at least one module/lesson complete before submitting for Admin certification approval.');
     }
 
     const quizPassed =
       (params.progress.quizAveragePercent || 0) >= 70 ||
       params.progress.completedStages.includes('QUIZ_COMPLETION');
     if (!quizPassed) {
-      throw new Error('Please pass the Verification Quiz (>= 70%) before issuing your certificate.');
+      throw new Error('Please pass the Verification Quiz (>= 70%) before submitting for Admin certification approval.');
     }
 
-    // Persist verified 7-field details to student profile & enrollment
     const now = new Date().toISOString();
     const cleaned = validation.cleaned;
     await this.updateStudentProfile(params.studentId, {
@@ -1752,6 +1776,36 @@ export class LmsService {
       state: cleaned.state,
     });
 
+    const finalScore = Math.max(
+      params.progress.teacherEvaluation?.totalScore || 0,
+      params.progress.quizAveragePercent || 75
+    );
+
+    const lessonsCompletedCount = params.progress.completedLessonIds?.length || 1;
+    const totalLessonsCount = Math.max(lessonsCompletedCount, params.progress.totalMandatoryLessons || lessonsCompletedCount);
+
+    const certificate = await this.issueCertificate({
+      certificateId: params.existingCertificateId,
+      courseId: params.course.id,
+      courseTitle: params.course.title,
+      courseDuration: params.course.duration || 'Self-Paced',
+      studentId: params.studentId,
+      studentName: params.studentName,
+      studentEmail: params.studentEmail,
+      registrationNumber: params.registrationNumber || params.progress.registrationNumber,
+      score: finalScore,
+      teacherName: params.progress.assignedTeacherName || 'OpenFrame Assessment Board',
+      approvedByAdmin: false,
+      submittedForApprovalAt: now,
+      lessonsCompleted: lessonsCompletedCount,
+      totalLessons: totalLessonsCount,
+      overallProgressPercent: Math.max(95, params.progress.overallProgressPercent || 95),
+      quizAveragePercent: params.progress.quizAveragePercent || finalScore,
+      certificateType: 'Course Completion Certificate',
+      status: 'Pending Admin Approval',
+      addressDetails: cleaned,
+    });
+
     const enrollmentId = sanitizeId(`${params.studentId}_${params.course.id}`);
     try {
       await setDoc(
@@ -1763,6 +1817,8 @@ export class LmsService {
           studentEmail: params.studentEmail,
           courseId: params.course.id,
           courseTitle: params.course.title,
+          certificateApprovalStatus: 'Pending Admin Approval',
+          certificateId: certificate.certificateId,
           homeAddress: cleaned.homeAddress,
           flatNumber: cleaned.flatNumber,
           streetAddress: cleaned.streetAddress,
@@ -1778,50 +1834,26 @@ export class LmsService {
       // ignore non-blocking merge error
     }
 
-    const finalScore = Math.max(
-      params.progress.teacherEvaluation?.totalScore || 0,
-      params.progress.quizAveragePercent || 75
-    );
-
-    const certificate = await this.issueCertificate({
-      courseId: params.course.id,
-      courseTitle: params.course.title,
-      courseDuration: params.course.duration || 'Self-Paced',
-      studentId: params.studentId,
-      studentName: params.studentName,
-      registrationNumber: params.registrationNumber || params.progress.registrationNumber,
-      score: finalScore,
-      teacherName: params.progress.assignedTeacherName || 'OpenFrame Assessment Board',
-      approvedByAdmin: true,
-      certificateType: 'Course Completion Certificate',
-      status: 'Issued',
-      addressDetails: params.addressDetails,
-    });
-
+    // Do NOT mutate admin-locked fields (adminCertificateApproved / certificateIssued / teacherApproved) from student context
     const updatedProgress: StudentProgressRecord = {
       ...params.progress,
-      completedStages: Array.from(
-        new Set<LearningStage>([...(params.progress.completedStages || []), 'CERTIFICATE'])
-      ),
-      currentStage: 'CERTIFICATE',
-      overallProgressPercent: 100,
+      overallProgressPercent: Math.max(95, params.progress.overallProgressPercent || 95),
       certificate,
       certificateId: certificate.certificateId,
-      certificateIssued: true,
       certificateEligible: true,
     };
 
     await this.saveStudentProgress(updatedProgress, true);
 
     await this.createNotification({
-      id: `notif_${Date.now()}_cert_issued`,
+      id: `notif_${Date.now()}_cert_submitted`,
       recipientId: params.studentId,
       recipientEmail: params.studentEmail,
       recipientRole: 'STUDENT',
       type: 'certificate_ready',
-      title: `Official Certificate Issued (${certificate.certificateId})`,
-      message: `Your verified OpenFrame certificate for ${params.course.title} is ready for download.`,
-      actionUrl: `/verify-certificate/${certificate.certificateId}`,
+      title: `Course Submitted for Admin Approval (${certificate.certificateId})`,
+      message: `Your completed course "${params.course.title}" has been sent to the OpenFrame Admin Council for certification approval.`,
+      actionUrl: `/learn/${encodeURIComponent(params.course.id)}?tab=certificate`,
       createdAt: now,
       read: false,
     });
@@ -1829,56 +1861,570 @@ export class LmsService {
     return { certificate, progress: updatedProgress };
   }
 
-  async approveCertificateByAdmin(certificateId: string, adminEmail: string): Promise<void> {
+  async approveCertificateByAdmin(
+    certificateId: string,
+    adminEmail: string,
+    options?: { reviewNote?: string; certificateType?: CertificateType }
+  ): Promise<IssuedCertificate> {
+    const cleanCertId = sanitizeId(certificateId);
+    const now = new Date().toISOString();
+    const formattedDate = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
     try {
-      const ref = doc(db, 'certificates', sanitizeId(certificateId));
+      const ref = doc(db, 'certificates', cleanCertId);
       const snap = await getDoc(ref);
-      if (!snap.exists()) throw new Error('Certificate not found.');
+      if (!snap.exists()) throw new Error('Certificate record not found.');
       const cert = snap.data() as IssuedCertificate;
-      await updateDoc(ref, {
+
+      const updatedCert: IssuedCertificate = stripUndefinedDeep({
+        ...cert,
+        certificateType: options?.certificateType || cert.certificateType || 'Course Completion Certificate',
         status: 'Issued',
         approvedByAdmin: true,
         adminApproverEmail: adminEmail,
+        adminReviewNote: options?.reviewNote?.trim() || cert.adminReviewNote || 'Approved by OpenFrame Admin Council.',
+        reviewedAt: now,
+        issuedAt: now,
+        issuedDate: formattedDate,
       });
 
-      const progress = await this.getStudentProgress(cert.courseId, cert.studentId);
+      await updateDoc(
+        ref,
+        stripUndefinedDeep({
+          certificateType: updatedCert.certificateType,
+          status: 'Issued',
+          approvedByAdmin: true,
+          adminApproverEmail: adminEmail,
+          adminReviewNote: updatedCert.adminReviewNote,
+          reviewedAt: now,
+          issuedAt: now,
+          issuedDate: formattedDate,
+        })
+      );
+
+      // Publish strictly PII-free public QR verification record
+      await setDoc(
+        doc(db, 'certificate_verification', cleanCertId),
+        stripUndefinedDeep({
+          id: cleanCertId,
+          certificateId: cert.certificateId || cleanCertId,
+          studentId: cert.studentId,
+          studentName: cert.studentName,
+          courseId: cert.courseId,
+          courseTitle: cert.courseTitle || cert.courseName || 'OpenFrame Certified Course',
+          certificateType: updatedCert.certificateType,
+          grade: cert.grade || 'Verified',
+          score: cert.score ?? cert.finalScore ?? 85,
+          issueDate: formattedDate,
+          issuerName: cert.authorizedSignatory || 'OpenFrame Education Council',
+          status: 'Issued',
+          verifiedAt: now,
+        }),
+        { merge: true }
+      );
+
+      // Update student_progress record
+      const progress = await this.getStudentProgress(cert.courseId, cert.studentId, {
+        fullName: cert.studentName,
+        email: cert.studentEmail,
+        registrationNumber: cert.registrationNumber,
+        courseTitle: cert.courseTitle || cert.courseName,
+        courseDuration: cert.courseDuration,
+      });
       progress.adminCertificateApproved = true;
       progress.certificateIssued = true;
+      progress.certificateId = cert.certificateId || cleanCertId;
       progress.currentStage = 'CERTIFICATE';
       if (!progress.completedStages.includes('CERTIFICATE')) {
         progress.completedStages = [...progress.completedStages, 'CERTIFICATE'];
       }
       progress.overallProgressPercent = 100;
-      if (progress.certificate) {
-        progress.certificate = { ...progress.certificate, status: 'Issued', approvedByAdmin: true };
-      }
+      progress.certificate = updatedCert;
       await this.saveStudentProgress(progress, true);
+
+      // Update course_enrollments status to Completed & Approved
+      const enrollmentId = sanitizeId(`${cert.studentId}_${cert.courseId}`);
+      await setDoc(
+        doc(db, 'course_enrollments', enrollmentId),
+        stripUndefinedDeep({
+          id: enrollmentId,
+          studentId: cert.studentId,
+          studentName: cert.studentName,
+          studentEmail: cert.studentEmail || progress.studentEmail || '',
+          courseId: cert.courseId,
+          courseTitle: cert.courseTitle || cert.courseName || '',
+          status: 'Completed',
+          certificateApprovalStatus: 'Approved',
+          certificateId: cert.certificateId || cleanCertId,
+          adminApprovedBy: adminEmail,
+          adminApprovedAt: now,
+          adminReviewNote: updatedCert.adminReviewNote,
+          updatedAt: now,
+        }),
+        { merge: true }
+      ).catch(() => {});
 
       await this.createNotification({
         id: `notif_${Date.now()}_cert_admin`,
         recipientId: cert.studentId,
-        recipientEmail: progress.studentEmail,
+        recipientEmail: cert.studentEmail || progress.studentEmail,
         recipientRole: 'STUDENT',
         type: 'certificate_ready',
-        title: `Official Certificate Approved (${cert.certificateId})`,
-        message: `Admin seal applied for ${cert.courseTitle}. Your verified certificate is now live.`,
-        actionUrl: `/verify-certificate/${cert.certificateId}`,
-        createdAt: new Date().toISOString(),
+        title: `Course Approved & Certificate Issued (${cert.certificateId})`,
+        message: `Admin approval granted for "${cert.courseTitle || cert.courseName}". Your official QR-verified PDF certificate is now unlocked for download.`,
+        actionUrl: `/learn/${encodeURIComponent(cert.courseId)}?tab=certificate`,
+        createdAt: now,
+        read: false,
+      });
+
+      return updatedCert;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `certificates/${certificateId}`);
+      throw err;
+    }
+  }
+
+  async requestCertificateRevisionByAdmin(
+    certificateId: string,
+    adminEmail: string,
+    reviewNote: string
+  ): Promise<void> {
+    const cleanCertId = sanitizeId(certificateId);
+    const now = new Date().toISOString();
+    const note = reviewNote.trim() || 'Please complete remaining course requirements and resubmit for certification approval.';
+
+    try {
+      const ref = doc(db, 'certificates', cleanCertId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new Error('Certificate record not found.');
+      const cert = snap.data() as IssuedCertificate;
+
+      await updateDoc(ref, {
+        status: 'Revision Requested',
+        approvedByAdmin: false,
+        adminApproverEmail: adminEmail,
+        adminReviewNote: note,
+        reviewedAt: now,
+      });
+
+      const progress = await this.getStudentProgress(cert.courseId, cert.studentId);
+      progress.adminCertificateApproved = false;
+      progress.certificateIssued = false;
+      if (progress.certificate) {
+        progress.certificate = {
+          ...progress.certificate,
+          status: 'Revision Requested',
+          approvedByAdmin: false,
+          adminApproverEmail: adminEmail,
+          adminReviewNote: note,
+          reviewedAt: now,
+        };
+      }
+      await this.saveStudentProgress(progress, true);
+
+      const enrollmentId = sanitizeId(`${cert.studentId}_${cert.courseId}`);
+      await setDoc(
+        doc(db, 'course_enrollments', enrollmentId),
+        stripUndefinedDeep({
+          id: enrollmentId,
+          studentId: cert.studentId,
+          courseId: cert.courseId,
+          certificateApprovalStatus: 'Revision Requested',
+          adminReviewNote: note,
+          updatedAt: now,
+        }),
+        { merge: true }
+      ).catch(() => {});
+
+      await this.createNotification({
+        id: `notif_${Date.now()}_cert_revision`,
+        recipientId: cert.studentId,
+        recipientEmail: cert.studentEmail || progress.studentEmail,
+        recipientRole: 'STUDENT',
+        type: 'certificate_ready',
+        title: `Action Needed for Certificate (${cert.courseTitle || cert.courseId})`,
+        message: `Admin reviewer note: ${note}`,
+        actionUrl: `/learn/${encodeURIComponent(cert.courseId)}?tab=certificate`,
+        createdAt: now,
         read: false,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `certificates/${certificateId}`);
+      throw err;
     }
   }
 
-  async revokeCertificate(certificateId: string, adminEmail: string): Promise<void> {
+  async revokeCertificate(certificateId: string, adminEmail: string, reason?: string): Promise<void> {
+    const cleanCertId = sanitizeId(certificateId);
+    const now = new Date().toISOString();
+    const note = reason?.trim() || 'Certificate revoked by administrator.';
+
     try {
-      await updateDoc(doc(db, 'certificates', sanitizeId(certificateId)), {
+      const ref = doc(db, 'certificates', cleanCertId);
+      const snap = await getDoc(ref);
+      const cert = snap.exists() ? (snap.data() as IssuedCertificate) : null;
+
+      await updateDoc(ref, {
         status: 'Revoked',
+        approvedByAdmin: false,
         adminApproverEmail: adminEmail,
+        adminReviewNote: note,
+        reviewedAt: now,
       });
+
+      await setDoc(
+        doc(db, 'certificate_verification', cleanCertId),
+        {
+          id: cleanCertId,
+          certificateId: cert?.certificateId || cleanCertId,
+          status: 'Revoked',
+          revocationReason: note,
+          verifiedAt: now,
+        },
+        { merge: true }
+      ).catch(() => {});
+
+      if (cert) {
+        const progress = await this.getStudentProgress(cert.courseId, cert.studentId);
+        progress.adminCertificateApproved = false;
+        progress.certificateIssued = false;
+        if (progress.certificate) {
+          progress.certificate = {
+            ...progress.certificate,
+            status: 'Revoked',
+            approvedByAdmin: false,
+            adminApproverEmail: adminEmail,
+            adminReviewNote: note,
+            reviewedAt: now,
+          };
+        }
+        await this.saveStudentProgress(progress, true);
+
+        const enrollmentId = sanitizeId(`${cert.studentId}_${cert.courseId}`);
+        await setDoc(
+          doc(db, 'course_enrollments', enrollmentId),
+          stripUndefinedDeep({
+            id: enrollmentId,
+            studentId: cert.studentId,
+            courseId: cert.courseId,
+            certificateApprovalStatus: 'Revoked',
+            adminReviewNote: note,
+            updatedAt: now,
+          }),
+          { merge: true }
+        ).catch(() => {});
+
+        await this.createNotification({
+          id: `notif_${Date.now()}_cert_revoked`,
+          recipientId: cert.studentId,
+          recipientEmail: cert.studentEmail || progress.studentEmail,
+          recipientRole: 'STUDENT',
+          type: 'certificate_ready',
+          title: `Certificate Status Updated (${cert.certificateId})`,
+          message: `Your certificate for "${cert.courseTitle || cert.courseName}" was revoked by an administrator. Note: ${note}`,
+          actionUrl: `/learn/${encodeURIComponent(cert.courseId)}?tab=certificate`,
+          createdAt: now,
+          read: false,
+        });
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `certificates/${certificateId}`);
+      throw err;
+    }
+  }
+
+  /**
+   * Allows an Admin to review any student who has completed course progress/quiz
+   * and directly approve & issue an official QR-verified certificate in one click.
+   */
+  async approveCompletedCourseProgressDirectly(params: {
+    progress: StudentProgressRecord;
+    enrollment?: CourseEnrollment;
+    adminEmail: string;
+    reviewNote?: string;
+    certificateType?: CertificateType;
+  }): Promise<IssuedCertificate> {
+    const now = new Date().toISOString();
+    const p = params.progress;
+    const enr = params.enrollment;
+    const score = Math.max(
+      p.teacherEvaluation?.totalScore || 0,
+      p.quizAveragePercent || 0,
+      p.overallProgressPercent || 80
+    );
+
+    const hasAddress = Boolean(
+      enr?.homeAddress && enr?.flatNumber && enr?.streetAddress && enr?.pincode && enr?.mobileNumber && enr?.alternativeMobileNumber && enr?.state
+    );
+
+    const cert = await this.issueCertificate({
+      courseId: p.courseId,
+      courseTitle: p.courseTitle || enr?.courseTitle || p.courseId,
+      courseDuration: p.courseDuration || 'Self-Paced',
+      studentId: p.studentId,
+      studentName: p.studentName || enr?.studentName || 'OpenFrame Learner',
+      studentEmail: p.studentEmail || enr?.studentEmail,
+      registrationNumber: p.registrationNumber || enr?.registrationNumber,
+      score,
+      teacherName: p.assignedTeacherName || 'OpenFrame Admin Council',
+      approvedByAdmin: true,
+      adminApproverEmail: params.adminEmail,
+      adminReviewNote: params.reviewNote?.trim() || 'Directly verified and approved by Administrator.',
+      reviewedAt: now,
+      submittedForApprovalAt: p.updatedAt || now,
+      lessonsCompleted: p.completedLessonIds?.length || 0,
+      totalLessons: p.totalMandatoryLessons || Math.max(1, p.completedLessonIds?.length || 1),
+      overallProgressPercent: 100,
+      quizAveragePercent: p.quizAveragePercent || score,
+      certificateType: params.certificateType || 'Course Completion Certificate',
+      status: 'Issued',
+      addressDetails: hasAddress
+        ? {
+            homeAddress: enr!.homeAddress!,
+            flatNumber: enr!.flatNumber!,
+            streetAddress: enr!.streetAddress!,
+            pincode: enr!.pincode!,
+            mobileNumber: enr!.mobileNumber!,
+            alternativeMobileNumber: enr!.alternativeMobileNumber!,
+            state: enr!.state!,
+          }
+        : undefined,
+    });
+
+    const updatedProgress: StudentProgressRecord = {
+      ...p,
+      adminCertificateApproved: true,
+      certificateIssued: true,
+      certificateEligible: true,
+      certificateId: cert.certificateId,
+      certificate: cert,
+      currentStage: 'CERTIFICATE',
+      completedStages: Array.from(new Set<LearningStage>([...(p.completedStages || []), 'CERTIFICATE'])),
+      overallProgressPercent: 100,
+    };
+    await this.saveStudentProgress(updatedProgress, true);
+
+    const enrollmentId = sanitizeId(`${p.studentId}_${p.courseId}`);
+    await setDoc(
+      doc(db, 'course_enrollments', enrollmentId),
+      stripUndefinedDeep({
+        id: enrollmentId,
+        studentId: p.studentId,
+        studentName: cert.studentName,
+        studentEmail: cert.studentEmail || '',
+        courseId: p.courseId,
+        courseTitle: cert.courseTitle || p.courseId,
+        status: 'Completed',
+        certificateApprovalStatus: 'Approved',
+        certificateId: cert.certificateId,
+        adminApprovedBy: params.adminEmail,
+        adminApprovedAt: now,
+        adminReviewNote: cert.adminReviewNote,
+        updatedAt: now,
+      }),
+      { merge: true }
+    ).catch(() => {});
+
+    await this.createNotification({
+      id: `notif_${Date.now()}_cert_direct`,
+      recipientId: p.studentId,
+      recipientEmail: cert.studentEmail,
+      recipientRole: 'STUDENT',
+      type: 'certificate_ready',
+      title: `Course Approved & Certificate Issued (${cert.certificateId})`,
+      message: `An administrator approved your course completion for "${cert.courseTitle}". Your official QR-verified PDF certificate is ready.`,
+      actionUrl: `/learn/${encodeURIComponent(p.courseId)}?tab=certificate`,
+      createdAt: now,
+      read: false,
+    });
+
+    return cert;
+  }
+
+  /**
+   * Builds the unified Admin Course Approval & Certification queue combining
+   * certificate requests, completed student_progress records, and course_enrollments.
+   */
+  async getCourseApprovalQueue(): Promise<{
+    items: CourseApprovalQueueItem[];
+    counts: {
+      pending: number;
+      readyToApprove: number;
+      approved: number;
+      revisionOrRevoked: number;
+      total: number;
+    };
+  }> {
+    try {
+      const [certSnap, progSnap, enrSnap] = await Promise.all([
+        getDocs(query(collection(db, 'certificates'), limit(150))).catch(() => null),
+        getDocs(query(collection(db, 'student_progress'), limit(150))).catch(() => null),
+        getDocs(query(collection(db, 'course_enrollments'), limit(150))).catch(() => null),
+      ]);
+
+      const certs = certSnap
+        ? certSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as IssuedCertificate))
+        : [];
+      const progresses = progSnap
+        ? progSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as StudentProgressRecord))
+        : [];
+      const enrollments = enrSnap
+        ? enrSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as CourseEnrollment))
+        : [];
+
+      const progressByKey = new Map<string, StudentProgressRecord>();
+      for (const p of progresses) {
+        if (!p.studentId || !p.courseId) continue;
+        progressByKey.set(`${p.studentId}::${p.courseId.toLowerCase()}`, p);
+      }
+
+      const enrollmentByKey = new Map<string, CourseEnrollment>();
+      for (const e of enrollments) {
+        if (!e.studentId || !e.courseId) continue;
+        enrollmentByKey.set(`${e.studentId}::${e.courseId.toLowerCase()}`, e);
+      }
+
+      const merged = new Map<string, CourseApprovalQueueItem>();
+
+      // 1. Add all certificate documents (highest priority source for approval requests & issued credentials)
+      for (const cert of certs) {
+        const key = `${cert.studentId}::${String(cert.courseId || '').toLowerCase()}`;
+        const prog = progressByKey.get(key);
+        const enr = enrollmentByKey.get(key);
+
+        let approvalState: CourseApprovalQueueItem['approvalState'] = 'Pending Admin Approval';
+        if (cert.status === 'Issued' || cert.status === 'VERIFIED') approvalState = 'Issued';
+        else if (cert.status === 'Revision Requested') approvalState = 'Revision Requested';
+        else if (cert.status === 'Revoked') approvalState = 'Revoked';
+
+        const addrParts = [
+          cert.flatNumber || enr?.flatNumber,
+          cert.homeAddress || enr?.homeAddress,
+          cert.streetAddress || enr?.streetAddress,
+          cert.state || enr?.state,
+          cert.pincode || enr?.pincode,
+        ].filter(Boolean);
+
+        const lessonsCompleted =
+          prog?.completedLessonIds?.length ?? cert.lessonsCompleted ?? 0;
+        const totalLessons =
+          prog?.totalMandatoryLessons ?? cert.totalLessons ?? Math.max(1, lessonsCompleted);
+
+        merged.set(key, {
+          key,
+          studentId: cert.studentId,
+          studentName: cert.studentName || prog?.studentName || enr?.studentName || 'Student',
+          studentEmail: cert.studentEmail || prog?.studentEmail || enr?.studentEmail || '',
+          registrationNumber: cert.registrationNumber || prog?.registrationNumber || enr?.registrationNumber,
+          courseId: cert.courseId,
+          courseTitle: cert.courseTitle || cert.courseName || prog?.courseTitle || enr?.courseTitle || cert.courseId,
+          courseDuration: cert.courseDuration || prog?.courseDuration,
+          approvalState,
+          lessonsCompleted,
+          totalLessons,
+          overallProgressPercent:
+            approvalState === 'Issued'
+              ? 100
+              : prog?.overallProgressPercent ?? cert.overallProgressPercent ?? 95,
+          quizAveragePercent:
+            prog?.quizAveragePercent ?? cert.quizAveragePercent ?? cert.score ?? cert.finalScore ?? 0,
+          quizzesPassed: prog?.quizzesPassed ?? ((cert.score ?? 0) >= 70 ? 1 : 0),
+          addressVerified: Boolean(cert.addressVerifiedAt || (cert.homeAddress && cert.pincode && cert.mobileNumber)),
+          addressSummary: addrParts.length > 0 ? addrParts.join(', ') : undefined,
+          submittedAt: cert.submittedForApprovalAt || cert.completionDate || cert.issuedAt || '',
+          reviewedAt: cert.reviewedAt,
+          adminApproverEmail: cert.adminApproverEmail,
+          adminReviewNote: cert.adminReviewNote,
+          certificate: cert,
+          progress: prog,
+          enrollment: enr,
+        });
+      }
+
+      // 2. Add completed / quiz-passed student_progress records that do NOT yet have a certificate doc
+      for (const prog of progresses) {
+        if (!prog.studentId || !prog.courseId) continue;
+        const key = `${prog.studentId}::${prog.courseId.toLowerCase()}`;
+        if (merged.has(key)) continue;
+
+        const lessonsCompleted = prog.completedLessonIds?.length || 0;
+        const totalLessons = Math.max(1, prog.totalMandatoryLessons || lessonsCompleted || 1);
+        const isCourseCompletedOrEligible =
+          lessonsCompleted >= 1 &&
+          (prog.overallProgressPercent >= 50 ||
+            prog.quizAveragePercent >= 70 ||
+            prog.completedStages?.includes('QUIZ_COMPLETION') ||
+            prog.certificateEligible);
+
+        if (!isCourseCompletedOrEligible) continue;
+
+        const enr = enrollmentByKey.get(key);
+        const addrParts = [
+          enr?.flatNumber,
+          enr?.homeAddress,
+          enr?.streetAddress,
+          enr?.state,
+          enr?.pincode,
+        ].filter(Boolean);
+
+        merged.set(key, {
+          key,
+          studentId: prog.studentId,
+          studentName: prog.studentName || enr?.studentName || 'Student',
+          studentEmail: prog.studentEmail || enr?.studentEmail || '',
+          registrationNumber: prog.registrationNumber || enr?.registrationNumber,
+          courseId: prog.courseId,
+          courseTitle: prog.courseTitle || enr?.courseTitle || prog.courseId,
+          courseDuration: prog.courseDuration,
+          approvalState: 'Ready for Approval',
+          lessonsCompleted,
+          totalLessons,
+          overallProgressPercent: prog.overallProgressPercent || 0,
+          quizAveragePercent: prog.quizAveragePercent || 0,
+          quizzesPassed: prog.quizzesPassed || (prog.quizAveragePercent >= 70 ? 1 : 0),
+          addressVerified: Boolean(enr?.homeAddress && enr?.pincode && enr?.mobileNumber),
+          addressSummary: addrParts.length > 0 ? addrParts.join(', ') : undefined,
+          submittedAt: prog.updatedAt || prog.lastActiveAt || prog.enrollmentDate || '',
+          progress: prog,
+          enrollment: enr,
+        });
+      }
+
+      const priorityOrder: Record<CourseApprovalQueueItem['approvalState'], number> = {
+        'Pending Admin Approval': 0,
+        'Ready for Approval': 1,
+        'Revision Requested': 2,
+        Issued: 3,
+        Revoked: 4,
+      };
+
+      const items = Array.from(merged.values()).sort((a, b) => {
+        const pDiff = priorityOrder[a.approvalState] - priorityOrder[b.approvalState];
+        if (pDiff !== 0) return pDiff;
+        return (b.submittedAt || '').localeCompare(a.submittedAt || '');
+      });
+
+      const counts = {
+        pending: items.filter((i) => i.approvalState === 'Pending Admin Approval').length,
+        readyToApprove: items.filter((i) => i.approvalState === 'Ready for Approval').length,
+        approved: items.filter((i) => i.approvalState === 'Issued').length,
+        revisionOrRevoked: items.filter(
+          (i) => i.approvalState === 'Revision Requested' || i.approvalState === 'Revoked'
+        ).length,
+        total: items.length,
+      };
+
+      return { items, counts };
+    } catch (err) {
+      console.warn('Error loading course approval queue:', err);
+      return {
+        items: [],
+        counts: { pending: 0, readyToApprove: 0, approved: 0, revisionOrRevoked: 0, total: 0 },
+      };
     }
   }
 

@@ -97,16 +97,45 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     ok: boolean;
     message: string;
     checkedAt: string;
+    ordersApiOk?: boolean;
+    paymentLinksApiOk?: boolean;
   } | null>(null);
 
-  const getAuthToken = async (): Promise<string | null> => {
+  const getAuthToken = async (forceRefresh = false): Promise<string | null> => {
     const user = auth.currentUser;
     if (!user) return null;
     try {
-      return await user.getIdToken();
+      return await user.getIdToken(forceRefresh);
     } catch {
       return null;
     }
+  };
+
+  const fetchAdminApiWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
+    let token = await getAuthToken(false);
+    if (!token) {
+      throw new Error('Super Admin authentication token required. Please sign in again.');
+    }
+    let resp = await fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (resp.status === 401) {
+      token = await getAuthToken(true);
+      if (token) {
+        resp = await fetch(url, {
+          ...init,
+          headers: {
+            ...(init.headers || {}),
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+    }
+    return resp;
   };
 
   const loadSettings = useCallback(async () => {
@@ -146,21 +175,18 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     }
 
     try {
-      const token = await getAuthToken();
-      if (token) {
-        const resp = await fetch('/api/admin/payment-settings', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data?.settings) {
-            const s = data.settings as ServerGatewayStatus;
-            setServerStatus(s);
-            if (!fsDocData && s.keyId) {
-              setKeyId(s.keyId);
-              setMode(s.mode || 'live');
-              setEnabled(s.enabled);
-            }
+      const resp = await fetchAdminApiWithRetry('/api/admin/payment-settings', {
+        method: 'GET',
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.settings) {
+          const s = data.settings as ServerGatewayStatus;
+          setServerStatus(s);
+          if (!fsDocData && s.keyId) {
+            setKeyId(s.keyId);
+            setMode(s.mode || 'live');
+            setEnabled(s.enabled);
           }
         }
       }
@@ -190,11 +216,11 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     if (!RAZORPAY_KEY_ID_REGEX.test(cleanKeyId)) {
       return 'Invalid Razorpay Key ID format. Must start with rzp_live_ or rzp_test_ followed by alphanumeric characters.';
     }
-    if (!cleanSecret || cleanSecret.length < 8) {
+    if (!cleanSecret && !serverStatus?.hasSecret) {
       return 'Razorpay Key Secret is required (minimum 8 characters).';
     }
-    if (cleanSecret.length > 200) {
-      return 'Razorpay Key Secret exceeds maximum allowed length.';
+    if (cleanSecret && (cleanSecret.length < 8 || cleanSecret.length > 200)) {
+      return 'Razorpay Key Secret must be between 8 and 200 characters.';
     }
     if (webhookSecret.trim().length > 200) {
       return 'Webhook Secret exceeds maximum allowed length.';
@@ -227,65 +253,54 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     const resolvedMode = detectModeFromKeyId(cleanKeyId, mode);
     const nowIso = new Date().toISOString();
 
-    const firestorePayload: FirestorePaymentSettingsDoc = {
-      provider: 'razorpay',
-      keyId: cleanKeyId,
-      keySecret: cleanKeySecret,
-      mode: resolvedMode,
-      enabled,
-      updatedByUid: currentUser.uid,
-      updatedByEmail: currentUser.email || 'superadmin@openframeitsolutions.com',
-      updatedAt: nowIso,
-      ...(cleanWebhookSecret ? { webhookSecret: cleanWebhookSecret } : {}),
-    };
-
     try {
-      await setDoc(doc(db, 'payment_settings', 'razorpay'), firestorePayload);
-    } catch (err) {
-      setSaving(false);
-      try {
-        handleFirestoreError(err, OperationType.WRITE, RAZORPAY_DOC_PATH);
-      } catch {
-        showToast(
-          'Failed to save Razorpay settings to Firestore. Check Super Admin permissions.',
-          'error'
-        );
-      }
-      return;
-    }
-
-    try {
-      const token = await getAuthToken();
-      if (!token) {
-        throw new Error('Could not verify Super Admin session token for checkout gateway link.');
-      }
-      const resp = await fetch('/api/admin/payment-settings', {
+      // 1. Primary save on server (updates live Razorpay Orders + Payment Links + Webhook endpoints immediately)
+      const resp = await fetchAdminApiWithRetry('/api/admin/payment-settings', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           keyId: cleanKeyId,
-          keySecret: cleanKeySecret,
-          webhookSecret: cleanWebhookSecret,
+          ...(cleanKeySecret ? { keySecret: cleanKeySecret } : {}),
+          ...(cleanWebhookSecret ? { webhookSecret: cleanWebhookSecret } : {}),
           mode: resolvedMode,
           enabled,
         }),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || !data.ok) {
-        throw new Error(data.error || 'Saved to Firestore, but failed to link live checkout server.');
+        throw new Error(data.error || 'Failed to update Razorpay API settings on server.');
       }
 
       if (data.settings) {
         setServerStatus(data.settings);
       }
-      setFirestoreRecordMeta({
-        exists: true,
-        updatedAt: nowIso,
-        updatedByEmail: firestorePayload.updatedByEmail,
-      });
+
+      // 2. Mirror to Firestore when a secret is present (non-blocking if Firestore is offline)
+      let firestoreSynced = false;
+      if (cleanKeySecret) {
+        const firestorePayload: FirestorePaymentSettingsDoc = {
+          provider: 'razorpay',
+          keyId: cleanKeyId,
+          keySecret: cleanKeySecret,
+          mode: resolvedMode,
+          enabled,
+          updatedByUid: currentUser.uid,
+          updatedByEmail: currentUser.email || 'superadmin@openframeitsolutions.com',
+          updatedAt: nowIso,
+          ...(cleanWebhookSecret ? { webhookSecret: cleanWebhookSecret } : {}),
+        };
+        try {
+          await setDoc(doc(db, 'payment_settings', 'razorpay'), firestorePayload);
+          firestoreSynced = true;
+          setFirestoreRecordMeta({
+            exists: true,
+            updatedAt: nowIso,
+            updatedByEmail: firestorePayload.updatedByEmail,
+          });
+        } catch {
+          // Server-side Razorpay settings are already live even if Firestore mirror skipped
+        }
+      }
 
       await logActivity(
         'Updated Razorpay Gateway Credentials',
@@ -296,11 +311,13 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
 
       showToast(
         enabled
-          ? `Razorpay ${resolvedMode.toUpperCase()} credentials saved to Firestore and linked to live checkout.`
+          ? firestoreSynced
+            ? `Razorpay ${resolvedMode.toUpperCase()} API updated and linked live.`
+            : `Razorpay ${resolvedMode.toUpperCase()} API updated on live checkout server.`
           : 'Razorpay credentials saved (checkout currently paused).'
       );
     } catch (err: any) {
-      showToast(err?.message || 'Saved to Firestore, but server link returned an error.', 'error');
+      showToast(err?.message || 'Unable to update Razorpay API settings.', 'error');
     } finally {
       setSaving(false);
     }
@@ -319,16 +336,9 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
     setTesting(true);
     setTestResult(null);
     try {
-      const token = await getAuthToken();
-      if (!token) {
-        throw new Error('Super Admin authentication token required.');
-      }
-      const resp = await fetch('/api/admin/payment-settings/test', {
+      const resp = await fetchAdminApiWithRetry('/api/admin/payment-settings/test', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           cleanKeyId && cleanSecret
             ? { keyId: cleanKeyId, keySecret: cleanSecret }
@@ -342,6 +352,8 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
           ok: true,
           message: data.message || `Razorpay ${String(data.mode || mode).toUpperCase()} API authentication verified.`,
           checkedAt,
+          ordersApiOk: Boolean(data.ordersApiOk),
+          paymentLinksApiOk: Boolean(data.paymentLinksApiOk),
         });
         showToast('Razorpay API credentials verified successfully!');
       } else {
@@ -349,6 +361,8 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
           ok: false,
           message: data.error || 'Razorpay API rejected these credentials. Double-check Key ID and Key Secret.',
           checkedAt,
+          ordersApiOk: Boolean(data.ordersApiOk),
+          paymentLinksApiOk: Boolean(data.paymentLinksApiOk),
         });
         showToast(data.error || 'Razorpay connection test failed.', 'error');
       }
@@ -598,8 +612,12 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
                     setKeySecret(e.target.value);
                     setTestResult(null);
                   }}
-                  placeholder="Enter Razorpay Key Secret"
-                  required
+                  placeholder={
+                    serverStatus?.hasSecret
+                      ? 'Leave blank to keep existing active secret, or paste new secret'
+                      : 'Enter Razorpay Key Secret'
+                  }
+                  required={!serverStatus?.hasSecret}
                   className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
                 <button
@@ -693,6 +711,28 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
                   {testResult.ok ? 'Razorpay API Connection Verified' : 'Razorpay Verification Failed'}
                 </div>
                 <div className="mt-0.5 opacity-90">{testResult.message}</div>
+                {(testResult.ordersApiOk !== undefined || testResult.paymentLinksApiOk !== undefined) && (
+                  <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] font-semibold">
+                    <span
+                      className={`px-2 py-0.5 rounded-md border ${
+                        testResult.ordersApiOk
+                          ? 'bg-emerald-100/80 border-emerald-300 text-emerald-900'
+                          : 'bg-rose-100/80 border-rose-300 text-rose-900'
+                      }`}
+                    >
+                      Orders API: {testResult.ordersApiOk ? 'OK' : 'Failed'}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-md border ${
+                        testResult.paymentLinksApiOk
+                          ? 'bg-emerald-100/80 border-emerald-300 text-emerald-900'
+                          : 'bg-amber-100/80 border-amber-300 text-amber-900'
+                      }`}
+                    >
+                      Hosted Payment Links API: {testResult.paymentLinksApiOk ? 'OK' : 'Not Enabled'}
+                    </span>
+                  </div>
+                )}
                 <div className="text-[10px] opacity-70 mt-1">Checked at {testResult.checkedAt}</div>
               </div>
             </div>

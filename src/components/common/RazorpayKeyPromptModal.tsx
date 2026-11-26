@@ -74,12 +74,30 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
 
   const mode = detectMode(keyId);
 
-  const getToken = async (): Promise<string> => {
+  const fetchAdminWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
     const user = auth.currentUser;
     if (!user) {
       throw new Error('Please sign in with your Super Admin account first.');
     }
-    return user.getIdToken();
+    let token = await user.getIdToken(false);
+    let resp = await fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (resp.status === 401) {
+      token = await user.getIdToken(true);
+      resp = await fetch(url, {
+        ...init,
+        headers: {
+          ...(init.headers || {}),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    }
+    return resp;
   };
 
   const handleTest = async () => {
@@ -99,13 +117,9 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
 
     setTesting(true);
     try {
-      const token = await getToken();
-      const resp = await fetch('/api/admin/payment-settings/test', {
+      const resp = await fetchAdminWithRetry('/api/admin/payment-settings/test', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyId: cleanId, keySecret: cleanSecret }),
       });
       const data = await resp.json().catch(() => ({}));
@@ -149,7 +163,23 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
     const resolvedMode = detectMode(cleanId);
 
     try {
-      // 1. Bind credentials to Firestore (strictly Super Admin protected)
+      // 1. Activate immediately on the live checkout backend
+      const resp = await fetchAdminWithRetry('/api/admin/payment-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyId: cleanId,
+          keySecret: cleanSecret,
+          mode: resolvedMode,
+          enabled: true,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to link Razorpay credentials to checkout server.');
+      }
+
+      // 2. Mirror to Firestore (non-blocking if Firestore rules/network delay)
       try {
         await setDoc(doc(db, 'payment_settings', 'razorpay'), {
           provider: 'razorpay',
@@ -161,28 +191,8 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
           updatedByEmail: currentUser.email || 'superadmin@openframeitsolutions.com',
           updatedAt: nowIso,
         });
-      } catch (fsErr) {
-        handleFirestoreError(fsErr, OperationType.WRITE, RAZORPAY_DOC_PATH);
-      }
-
-      // 2. Link immediately to live server checkout gateway
-      const token = await getToken();
-      const resp = await fetch('/api/admin/payment-settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          keyId: cleanId,
-          keySecret: cleanSecret,
-          mode: resolvedMode,
-          enabled: true,
-        }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data.ok) {
-        throw new Error(data.error || 'Failed to link Razorpay credentials to checkout server.');
+      } catch {
+        // Live checkout server is already active
       }
 
       await logActivity(
