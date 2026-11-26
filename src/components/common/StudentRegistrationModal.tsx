@@ -14,6 +14,9 @@ import {
   ShieldCheck,
   ArrowRight,
   AlertCircle,
+  CreditCard,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { useRouter } from '../../router/RouterContext';
 import { useAuth } from '../../context/AuthContext';
@@ -24,8 +27,18 @@ import { standaloneMockService } from '../../services/standaloneMockService';
 import { SUPPORTED_MULTILINGUAL_SEARCH_LANGUAGES } from '../../utils/searchIntelligence';
 import {
   ALL_INDIAN_STATES_AND_UTS,
+  compute90PercentCoursePricing,
+  formatInr,
   validateCertificateAddressDetails,
 } from '../../utils/pricingEngine';
+import {
+  fetchLiveRazorpayConfig,
+  launchLiveRazorpayPayment,
+  createRazorpayPaymentLink,
+  checkRazorpayPaymentLinkStatus,
+  type LiveRazorpayConfig,
+  type HostedRazorpayPaymentLink,
+} from '../../services/razorpayCheckoutService';
 
 interface StudentRegistrationModalProps {
   isOpen: boolean;
@@ -78,10 +91,26 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
   const [applicationId, setApplicationId] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [razorpayConfig, setRazorpayConfig] = useState<LiveRazorpayConfig | null>(null);
+  const [hostedLink, setHostedLink] = useState<HostedRazorpayPaymentLink | null>(null);
+  const [creatingLink, setCreatingLink] = useState(false);
+  const [checkingLink, setCheckingLink] = useState(false);
+  const [verifiedPaymentId, setVerifiedPaymentId] = useState('');
+
+  const coursePricing = compute90PercentCoursePricing({
+    id: courseId || videoId || courseTitle,
+    title: courseTitle,
+    category: courseCategory,
+  });
 
   useEffect(() => {
     if (!isOpen) return;
     setErrorMsg('');
+    setHostedLink(null);
+    setVerifiedPaymentId('');
+    fetchLiveRazorpayConfig()
+      .then((cfg) => setRazorpayConfig(cfg))
+      .catch(() => {});
   }, [isOpen]);
 
   const isMinor = (() => {
@@ -123,13 +152,11 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
     ? `/learn/${encodeURIComponent(courseId)}`
     : '/marketplace';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateRegistrationForm = (): boolean => {
     setErrorMsg('');
-
     if (!fullName.trim() || !emailAddress.trim()) {
       setErrorMsg('Please complete Full Name and Email Address.');
-      return;
+      return false;
     }
 
     const addressCheck = validateCertificateAddressDetails({
@@ -143,148 +170,252 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
     });
     if (!addressCheck.valid) {
       setErrorMsg(addressCheck.error || 'Please complete all 7 mandatory certificate address and mobile fields.');
-      return;
+      return false;
     }
 
     if (isMinor && (!parentName.trim() || parentMobile.trim().length < 10 || !guardianConsentAccepted)) {
       setErrorMsg('Parent / Guardian name, 10-digit mobile number, and Guardian Consent are mandatory for learners under 18.');
-      return;
+      return false;
     }
 
-    setIsSubmitting(true);
+    if (!razorpayConfig?.configured) {
+      setErrorMsg(
+        razorpayConfig?.note ||
+          'Razorpay payment gateway is currently being configured by the administrator. Please try again shortly.'
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const completeVerifiedRegistration = async (payment: {
+    orderId: string;
+    paymentId: string;
+    verifiedAt: string;
+    amountInr: number;
+  }) => {
     const generatedId = `OF-APP-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
     const recordUid = currentUser?.uid || standaloneMockService.getActiveLearner().uid;
     const targetCourseId = videoId ? `yt_${videoId}` : courseId && courseId !== 'VIDEO-SELECT' ? courseId : 'OF-ADMISSION';
 
+    const payload = {
+      fullName: fullName.trim(),
+      mobileNumber: mobileNumber.trim(),
+      alternativeMobileNumber: alternativeMobileNumber.trim(),
+      whatsappNumber: whatsappNumber.trim() || mobileNumber.trim(),
+      emailAddress: emailAddress.trim().toLowerCase(),
+      dob: dob || '',
+      gender: gender || undefined,
+      country: 'India',
+      state: state.trim(),
+      district: district.trim() || city.trim() || 'Bengaluru Urban',
+      city: city.trim() || 'Bengaluru',
+      homeAddress: homeAddress.trim(),
+      flatNumber: houseNumber.trim(),
+      houseNumber: houseNumber.trim(),
+      streetAddress: streetAddress.trim(),
+      pincode: pincode.trim(),
+      preferredLanguage,
+      schoolCollegeName: schoolCollegeName.trim() || 'Independent / Self-Paced',
+      currentClassQualification: currentQualification,
+      interestedCourse: courseTitle ? `${courseTitle} (${targetCourseId})` : 'OpenFrame Certified Learning Programme',
+      parentName: parentName.trim() || undefined,
+      parentMobile: parentMobile.trim() || undefined,
+      isMinor,
+      guardianConsentAccepted: isMinor ? guardianConsentAccepted : undefined,
+      gpsConsentAccepted,
+      gpsCoordinates: gpsConsentAccepted ? gpsCoordinates : undefined,
+      preferredLearningMode,
+      consentAccepted,
+      registeredAt: new Date().toISOString(),
+      status: 'Registered' as const,
+      internalNotes: `Razorpay Verified (${formatInr(payment.amountInr)} · Ref ${payment.paymentId} · Order ${payment.orderId}). Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
+    };
+
+    standaloneMockService.saveReservation({
+      userId: recordUid,
+      studentName: payload.fullName,
+      email: payload.emailAddress,
+      phone: payload.mobileNumber,
+      courseId: targetCourseId,
+      courseTitle: courseTitle || 'OpenFrame Certified Learning Programme',
+      courseCategory,
+      departmentOrLevel: payload.currentClassQualification,
+      notes: payload.internalNotes,
+    });
+    standaloneMockService.saveUserData(recordUid, {
+      fullName: payload.fullName,
+      email: payload.emailAddress,
+      phone: payload.mobileNumber,
+      degreeOrClass: payload.currentClassQualification,
+      institution: payload.schoolCollegeName,
+      city: payload.city,
+    });
+
     try {
-      const payload = {
-        fullName: fullName.trim(),
-        mobileNumber: mobileNumber.trim(),
-        alternativeMobileNumber: alternativeMobileNumber.trim(),
-        whatsappNumber: whatsappNumber.trim() || mobileNumber.trim(),
-        emailAddress: emailAddress.trim().toLowerCase(),
-        dob: dob || '',
-        gender: gender || undefined,
-        country: 'India',
-        state: state.trim(),
-        district: district.trim() || city.trim() || 'Bengaluru Urban',
-        city: city.trim() || 'Bengaluru',
-        homeAddress: homeAddress.trim(),
-        flatNumber: houseNumber.trim(),
-        houseNumber: houseNumber.trim(),
-        streetAddress: streetAddress.trim(),
-        pincode: pincode.trim(),
-        preferredLanguage,
-        schoolCollegeName: schoolCollegeName.trim() || 'Independent / Self-Paced',
-        currentClassQualification: currentQualification,
-        interestedCourse: courseTitle ? `${courseTitle} (${targetCourseId})` : 'OpenFrame Certified Learning Programme',
-        parentName: parentName.trim() || undefined,
-        parentMobile: parentMobile.trim() || undefined,
-        isMinor,
-        guardianConsentAccepted: isMinor ? guardianConsentAccepted : undefined,
-        gpsConsentAccepted,
-        gpsCoordinates: gpsConsentAccepted ? gpsCoordinates : undefined,
-        preferredLearningMode,
-        consentAccepted,
-        registeredAt: new Date().toISOString(),
-        status: 'Registered' as const,
-        internalNotes: `Direct Course Enrollment — Certification subject to Admin Course Approval. Category: ${courseCategory}. Student Notes: ${notes || 'None'}. Application ID: ${generatedId}`,
-      };
-
-      standaloneMockService.saveReservation({
+      await submitStudentRegistration(payload).catch(() => {});
+      await lmsService.recordConsentRecord({
         userId: recordUid,
-        studentName: payload.fullName,
         email: payload.emailAddress,
-        phone: payload.mobileNumber,
-        courseId: targetCourseId,
-        courseTitle: courseTitle || 'OpenFrame Certified Learning Programme',
-        courseCategory,
-        departmentOrLevel: payload.currentClassQualification,
-        notes: payload.internalNotes,
-      });
-      standaloneMockService.saveUserData(recordUid, {
         fullName: payload.fullName,
-        email: payload.emailAddress,
-        phone: payload.mobileNumber,
-        degreeOrClass: payload.currentClassQualification,
-        institution: payload.schoolCollegeName,
-        city: payload.city,
+        isMinor,
+        guardianName: payload.parentName,
+        guardianMobile: payload.parentMobile,
+        dpdpConsentAccepted: consentAccepted,
+        gpsOptInAccepted: gpsConsentAccepted,
+        termsAccepted: consentAccepted,
       });
 
-      try {
-        await submitStudentRegistration(payload).catch(() => {});
-        await lmsService.recordConsentRecord({
-          userId: recordUid,
-          email: payload.emailAddress,
+      const catalogCourse = videoId
+        ? null
+        : await marketplaceService.getCourseById(targetCourseId).catch(() => null);
+      const targetCourse = catalogCourse || ({
+        id: targetCourseId,
+        title: courseTitle,
+        category: courseCategory,
+        categoryGroup: 'Technology',
+        level: 'Beginner',
+        duration: 'Self-Paced',
+        price: payment.amountInr,
+        isFree: false,
+        courseType: videoId ? 'youtube_video' : 'standard',
+        youtubeVideoId: videoId || undefined,
+        language: preferredLanguage,
+        description: `OpenFrame certified learning workspace for ${courseTitle}.`,
+        skillsAcquired: [courseCategory],
+        status: 'Published',
+      } as any);
+      cacheYouTubeCourse(targetCourse);
+      await lmsService.enrollStudentInCourse(
+        targetCourse,
+        {
+          uid: recordUid,
           fullName: payload.fullName,
-          isMinor,
-          guardianName: payload.parentName,
-          guardianMobile: payload.parentMobile,
-          dpdpConsentAccepted: consentAccepted,
-          gpsOptInAccepted: gpsConsentAccepted,
-          termsAccepted: consentAccepted,
-        });
-
-        const catalogCourse = videoId
-          ? null
-          : await marketplaceService.getCourseById(targetCourseId).catch(() => null);
-        const targetCourse = catalogCourse || ({
-          id: targetCourseId,
-          title: courseTitle,
-          category: courseCategory,
-          categoryGroup: 'Technology',
-          level: 'Beginner',
-          duration: 'Self-Paced',
-          price: 0,
-          isFree: true,
-          courseType: videoId ? 'youtube_video' : 'standard',
-          youtubeVideoId: videoId || undefined,
-          language: preferredLanguage,
-          description: `OpenFrame certified learning workspace for ${courseTitle}.`,
-          skillsAcquired: [courseCategory],
-          status: 'Published',
-        } as any);
-        cacheYouTubeCourse(targetCourse);
-        await lmsService.enrollStudentInCourse(
-          targetCourse,
-          {
-            uid: recordUid,
-            fullName: payload.fullName,
-            email: payload.emailAddress,
-            addressDetails: {
-              homeAddress: payload.homeAddress,
-              flatNumber: payload.flatNumber,
-              streetAddress: payload.streetAddress,
-              pincode: payload.pincode,
-              mobileNumber: payload.mobileNumber,
-              alternativeMobileNumber: payload.alternativeMobileNumber,
-              state: payload.state,
-            },
+          email: payload.emailAddress,
+          addressDetails: {
+            homeAddress: payload.homeAddress,
+            flatNumber: payload.flatNumber,
+            streetAddress: payload.streetAddress,
+            pincode: payload.pincode,
+            mobileNumber: payload.mobileNumber,
+            alternativeMobileNumber: payload.alternativeMobileNumber,
+            state: payload.state,
           },
-          'Complimentary',
-          0
-        );
-      } catch (firestoreErr) {
-        console.warn('Firestore write fallback to local storage:', firestoreErr);
-      }
+        },
+        'Paid',
+        payment.amountInr,
+        {
+          razorpayOrderId: payment.orderId,
+          razorpayPaymentId: payment.paymentId,
+          paymentGateway: 'Razorpay',
+          verifiedAt: payment.verifiedAt,
+        }
+      );
+    } catch (firestoreErr) {
+      console.warn('Firestore write fallback to local storage:', firestoreErr);
+    }
 
-      try {
-        const stored = JSON.parse(localStorage.getItem('openframe_student_applications') || '[]');
-        stored.unshift({
-          id: generatedId,
-          ...payload,
-        });
-        localStorage.setItem('openframe_student_applications', JSON.stringify(stored));
-      } catch (storageErr) {
-        console.warn('LocalStorage error:', storageErr);
-      }
+    try {
+      const stored = JSON.parse(localStorage.getItem('openframe_student_applications') || '[]');
+      stored.unshift({
+        id: generatedId,
+        ...payload,
+      });
+      localStorage.setItem('openframe_student_applications', JSON.stringify(stored));
+    } catch (storageErr) {
+      console.warn('LocalStorage error:', storageErr);
+    }
 
-      setApplicationId(generatedId);
-      setSubmissionSuccess(true);
+    setVerifiedPaymentId(payment.paymentId);
+    setApplicationId(generatedId);
+    setHostedLink(null);
+    setSubmissionSuccess(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateRegistrationForm()) return;
+
+    setIsSubmitting(true);
+    const recordUid = currentUser?.uid || standaloneMockService.getActiveLearner().uid;
+    const targetCourseId = videoId ? `yt_${videoId}` : courseId && courseId !== 'VIDEO-SELECT' ? courseId : 'OF-ADMISSION';
+
+    try {
+      const verified = await launchLiveRazorpayPayment({
+        amountInr: coursePricing.finalPriceInr,
+        courseId: targetCourseId,
+        courseTitle,
+        userId: recordUid,
+        customerName: fullName.trim(),
+        customerEmail: emailAddress.trim().toLowerCase(),
+        customerPhone: mobileNumber.trim(),
+        purpose: `Programme Enrollment: ${courseTitle}`,
+        description: `${courseTitle} (90% OpenFrame Grant)`,
+        notes: {
+          courseId: targetCourseId,
+          studentEmail: emailAddress.trim().toLowerCase().slice(0, 120),
+        },
+      });
+
+      await completeVerifiedRegistration({
+        orderId: verified.orderId,
+        paymentId: verified.paymentId,
+        verifiedAt: verified.verifiedAt,
+        amountInr: coursePricing.finalPriceInr,
+      });
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Unable to complete registration right now. Please try again.');
+      setErrorMsg(err?.message || 'Unable to complete Razorpay payment right now. Try the Hosted Razorpay Page option.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCreateHostedLink = async () => {
+    if (!validateRegistrationForm()) return;
+    setCreatingLink(true);
+    setErrorMsg('');
+    const recordUid = currentUser?.uid || standaloneMockService.getActiveLearner().uid;
+    const targetCourseId = videoId ? `yt_${videoId}` : courseId && courseId !== 'VIDEO-SELECT' ? courseId : 'OF-ADMISSION';
+    try {
+      const link = await createRazorpayPaymentLink({
+        amountInr: coursePricing.finalPriceInr,
+        courseId: targetCourseId,
+        courseTitle,
+        userId: recordUid,
+        customerName: fullName.trim(),
+        customerEmail: emailAddress.trim().toLowerCase(),
+        customerPhone: mobileNumber.trim(),
+        purpose: `Programme Enrollment: ${courseTitle}`,
+        description: `${courseTitle} (90% OpenFrame Grant)`,
+      });
+      setHostedLink(link);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to generate Razorpay Hosted Payment Page.');
+    } finally {
+      setCreatingLink(false);
+    }
+  };
+
+  const handleVerifyHostedLink = async () => {
+    if (!hostedLink) return;
+    setCheckingLink(true);
+    setErrorMsg('');
+    try {
+      const status = await checkRazorpayPaymentLinkStatus(hostedLink.paymentLinkId);
+      if (status.paid) {
+        await completeVerifiedRegistration({
+          orderId: status.orderId || hostedLink.paymentLinkId,
+          paymentId: status.paymentId || `pay_${hostedLink.paymentLinkId.replace(/^plink_/, '')}`,
+          verifiedAt: status.verifiedAt || new Date().toISOString(),
+          amountInr: status.amountPaidInr || hostedLink.amountInr || coursePricing.finalPriceInr,
+        });
+      } else {
+        setErrorMsg(`Payment status is "${status.status}". Please finish payment on Razorpay and verify again.`);
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to check payment link status.');
+    } finally {
+      setCheckingLink(false);
     }
   };
 
@@ -313,7 +444,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
             </div>
             <div>
               <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 font-semibold">
-                Direct Course Enrollment · Admin-Approved Certification
+                90% OpenFrame Grant · Verified Razorpay Checkout
               </div>
               <h2 className="text-lg font-bold tracking-tight text-white leading-tight">
                 Student Programme Enrollment
@@ -341,8 +472,9 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               </span>
             )}
           </div>
-          <span className="hidden sm:inline text-[11px] text-emerald-700 font-bold shrink-0 ml-2">
-            Instant Access · Admin Cert Approval
+          <span className="hidden sm:inline text-[11px] text-emerald-800 font-bold shrink-0 ml-2 tabular-nums">
+            <span className="line-through text-slate-400 mr-1.5">{formatInr(coursePricing.marketBenchmarkPriceInr)}</span>
+            {formatInr(coursePricing.finalPriceInr)} · 90% Off
           </span>
         </div>
 
@@ -355,9 +487,9 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               </div>
 
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Enrollment Confirmed!</h3>
+                <h3 className="text-xl font-bold text-slate-900">Payment Verified &amp; Enrollment Confirmed!</h3>
                 <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
-                  Thank you, <strong className="text-slate-800">{fullName}</strong>. Your enrollment for <strong className="text-blue-700">{courseTitle}</strong> is active with your verified certificate dispatch details on file.
+                  Thank you, <strong className="text-slate-800">{fullName}</strong>. Your Razorpay payment of <strong>{formatInr(coursePricing.finalPriceInr)}</strong>{verifiedPaymentId ? ` (Ref: ${verifiedPaymentId})` : ''} for <strong className="text-blue-700">{courseTitle}</strong> is confirmed and your workspace is unlocked.
                 </p>
               </div>
 
@@ -761,9 +893,37 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span>
-                  I accept the DPDP Act 2023 privacy terms and agree to enroll for immediate course access with Admin-approved certification upon completion.
+                  I accept the DPDP Act 2023 privacy terms and agree to complete secure Razorpay checkout ({formatInr(coursePricing.finalPriceInr)}) for immediate course access with Admin-approved certification upon completion.
                 </span>
               </label>
+
+              {hostedLink && (
+                <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-left space-y-2.5">
+                  <div className="text-xs font-bold text-blue-950">
+                    Razorpay Hosted Payment Page Ready ({formatInr(hostedLink.amountInr)})
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={hostedLink.shortUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-bold"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open Razorpay Page</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleVerifyHostedLink}
+                      disabled={checkingLink}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-blue-300 text-blue-900 text-xs font-semibold cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${checkingLink ? 'animate-spin' : ''}`} />
+                      <span>{checkingLink ? 'Verifying...' : "I've Paid — Verify Now"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-2 flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-100">
                 <button
@@ -774,19 +934,28 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                   Cancel
                 </button>
                 <button
+                  type="button"
+                  onClick={handleCreateHostedLink}
+                  disabled={creatingLink || isSubmitting || !consentAccepted || !razorpayConfig?.configured}
+                  className="px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white font-bold text-xs shadow-sm transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>{creatingLink ? 'Creating Link...' : `Pay ${formatInr(coursePricing.finalPriceInr)} on Razorpay Page`}</span>
+                </button>
+                <button
                   type="submit"
-                  disabled={isSubmitting || !consentAccepted}
-                  className="px-6 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs shadow-md transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                  disabled={isSubmitting || creatingLink || !consentAccepted || !razorpayConfig?.configured}
+                  className="px-5 py-2.5 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs shadow-md transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   {isSubmitting ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Confirming Enrollment...</span>
+                      <span>Opening Razorpay...</span>
                     </>
                   ) : (
                     <>
-                      <GraduationCap className="w-3.5 h-3.5" />
-                      <span>Complete Registration &amp; Start Learning</span>
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>Pay {formatInr(coursePricing.finalPriceInr)} via Razorpay</span>
                     </>
                   )}
                 </button>

@@ -19,6 +19,20 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const portalAccounts = pgTable('portal_accounts', {
+  uid: text('uid').primaryKey(),
+  email: text('email').notNull().unique(),
+  displayName: text('display_name').notNull(),
+  role: text('role').default('student').notNull(),
+  passwordSalt: text('password_salt').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  registrationNumber: text('registration_number').notNull(),
+  specialization: text('specialization'),
+  parentStudentEmail: text('parent_student_email'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const aiChatSessions = pgTable('ai_chat_sessions', {
   id: serial('id').primaryKey(),
   userUid: text('user_uid')
@@ -127,3 +141,4 @@ export type AiChatSessionRecord = typeof aiChatSessions.$inferSelect;
 export type AiChatMessageRecord = typeof aiChatMessages.$inferSelect;
 export type AiTranscriptionRecord = typeof aiTranscriptions.$inferSelect;
 export type PaymentGatewaySettingsRecord = typeof paymentGatewaySettings.$inferSelect;
+export type PortalAccountRecord = typeof portalAccounts.$inferSelect;

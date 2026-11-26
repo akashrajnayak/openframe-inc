@@ -262,7 +262,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap"
                   >
                     <GraduationCap className="w-3.5 h-3.5" />
-                    <span>Enroll Now &middot; Start Course</span>
+                    <span>Enroll Now &middot; Pay via Razorpay</span>
                   </button>
                 </div>
               </div>

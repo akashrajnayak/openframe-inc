@@ -900,18 +900,18 @@ export const CourseDetailPage: React.FC = () => {
                 );
               })()}
 
-              {/* Direct Enrollment -> Open Learning Workspace Action Buttons */}
+              {/* Razorpay Checkout -> Open Learning Workspace Action Buttons */}
               <div className="space-y-2.5 pt-1">
                 {!hasPaidEnrollment ? (
                   <>
-                    {/* Step 1: Direct Enrollment */}
+                    {/* Step 1: Razorpay Checkout */}
                     <button
                       type="button"
                       onClick={() => setIsRegModalOpen(true)}
                       className="w-full py-3.5 px-4 rounded-xl bg-[#123D32] hover:bg-[#0D2E25] text-white font-bold text-xs text-center flex items-center justify-center space-x-2 transition-all shadow-md cursor-pointer"
                     >
                       <GraduationCap className="w-4 h-4 text-emerald-300" />
-                      <span>1. Enroll Now &amp; Unlock Course Workspace</span>
+                      <span>1. Pay via Razorpay &amp; Unlock Course Workspace</span>
                     </button>
 
                     {/* Step 2: Admin Certification Track info */}
