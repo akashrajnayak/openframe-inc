@@ -95,6 +95,7 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
 
   const [serverStatus, setServerStatus] = useState<ServerGatewayStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{
     ok: boolean;
     message: string;
@@ -284,6 +285,11 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
       if (data.settings) {
         setServerStatus(data.settings);
       }
+      setPersistenceWarning(
+        typeof data.persistenceWarning === 'string' && data.persistenceWarning.trim()
+          ? data.persistenceWarning.trim()
+          : null
+      );
 
       // 2. Mirror to Firestore when signed in via Firebase Super Admin (non-blocking)
       let firestoreSynced = false;
@@ -487,15 +493,33 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={loadSettings}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 self-start sm:self-center"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setKeyId('');
+                setKeySecret('');
+                setWebhookSecret('');
+                setTestResult(null);
+                setPersistenceWarning(null);
+                const el = document.getElementById('razorpay-key-id');
+                if (el) el.focus();
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Insert New Key</span>
+            </button>
+            <button
+              type="button"
+              onClick={loadSettings}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
 
         {/* Status Summary Strip */}
@@ -567,6 +591,16 @@ export const PaymentSettings: React.FC<PaymentSettingsProps> = ({
           <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             <span>{loadError}</span>
+          </div>
+        )}
+
+        {persistenceWarning && (
+          <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3.5 text-xs text-amber-950 flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="font-bold">Action Required for Vercel Deployment</div>
+              <p className="leading-relaxed">{persistenceWarning}</p>
+            </div>
           </div>
         )}
 

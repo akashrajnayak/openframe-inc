@@ -110,7 +110,7 @@ import { AdminSchoolManagement } from '../components/admin/AdminSchoolManagement
 import { AdminCourseApprovalPanel } from '../components/admin/AdminCourseApprovalPanel';
 
 export const AdminPage: React.FC = () => {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
   const {
     currentUser,
     adminProfile,
@@ -123,25 +123,32 @@ export const AdminPage: React.FC = () => {
 
   // Navigation & UI States
   const [activeModule, setActiveModule] = useState<AdminModuleKey>(() => {
-    if (typeof window !== 'undefined') {
-      const p = window.location.pathname.toLowerCase();
-      const params = new URLSearchParams(window.location.search);
-      if (
-        p.includes('/course-approvals') ||
-        params.get('module') === 'course_approvals'
-      ) {
-        return 'course_approvals';
-      }
-      if (
-        p.includes('/payment-settings') ||
-        p.includes('/razorpay') ||
-        params.get('module') === 'payment_settings'
-      ) {
-        return 'payment_settings';
-      }
+    const p = currentPath.toLowerCase();
+    if (p.includes('/course-approvals') || p.includes('module=course_approvals')) {
+      return 'course_approvals';
+    }
+    if (
+      p.includes('/payment-settings') ||
+      p.includes('/razorpay') ||
+      p.includes('module=payment_settings')
+    ) {
+      return 'payment_settings';
     }
     return 'dashboard';
   });
+
+  useEffect(() => {
+    const p = currentPath.toLowerCase();
+    if (
+      p.includes('/payment-settings') ||
+      p.includes('/razorpay') ||
+      p.includes('module=payment_settings')
+    ) {
+      setActiveModule('payment_settings');
+    } else if (p.includes('/course-approvals') || p.includes('module=course_approvals')) {
+      setActiveModule('course_approvals');
+    }
+  }, [currentPath]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);

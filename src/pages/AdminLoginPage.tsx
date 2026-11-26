@@ -57,7 +57,7 @@ function generateStrongRandomPassword(length = 16): string {
 }
 
 export const AdminLoginPage: React.FC = () => {
-  const { navigate } = useRouter();
+  const { currentPath, navigate } = useRouter();
   const {
     isAdminSession,
     authError,
@@ -88,10 +88,21 @@ export const AdminLoginPage: React.FC = () => {
   const [firebasePassInput, setFirebasePassInput] = useState('');
   const [resetSent, setResetSent] = useState(false);
 
-  // Destination after sign-in: Home Page Admin Panel or Full Console
-  const [destination, setDestination] = useState<'home' | 'dashboard'>('home');
+  // Destination after sign-in: Home Page Admin Panel, Razorpay Keys, or Full Console
+  const [destination, setDestination] = useState<'home' | 'razorpay' | 'dashboard'>(() => {
+    const p = currentPath.toLowerCase();
+    if (p.includes('/razorpay') || p.includes('/payment-settings')) return 'razorpay';
+    if (p.includes('/admin/dashboard') || p.includes('/course-approvals')) return 'dashboard';
+    return 'home';
+  });
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [loginError, setLoginError] = useState('');
+
+  const resolveDestinationPath = useCallback((): string => {
+    if (destination === 'razorpay') return '/admin/razorpay';
+    if (destination === 'dashboard') return '/admin/dashboard';
+    return '/';
+  }, [destination]);
 
   const fetchAuthStatus = useCallback(async () => {
     setStatusLoading(true);
@@ -126,9 +137,9 @@ export const AdminLoginPage: React.FC = () => {
   useEffect(() => {
     if (isAdminSession) {
       storageService.setAdminLoggedIn(true);
-      navigate(destination === 'home' ? '/' : '/admin/dashboard');
+      navigate(resolveDestinationPath());
     }
-  }, [isAdminSession, destination, navigate]);
+  }, [isAdminSession, resolveDestinationPath, navigate]);
 
   const handleRegeneratePassword = () => {
     setPasswordInput(generateStrongRandomPassword(16));
@@ -154,7 +165,7 @@ export const AdminLoginPage: React.FC = () => {
     try {
       await loginGoogle();
       storageService.setAdminLoggedIn(true);
-      navigate(destination === 'home' ? '/' : '/admin/dashboard');
+      navigate(resolveDestinationPath());
     } catch (err: any) {
       setLoginError(
         err?.message || 'Google authentication failed or your account is not provisioned as an administrator.'
@@ -188,7 +199,7 @@ export const AdminLoginPage: React.FC = () => {
         await loginAdminCredentials(usernameInput.trim(), passwordInput);
       }
       storageService.setAdminLoggedIn(true);
-      navigate(destination === 'home' ? '/' : '/admin/dashboard');
+      navigate(resolveDestinationPath());
     } catch (err: any) {
       setLoginError(err?.message || 'Unable to verify administrator credentials.');
     } finally {
@@ -208,7 +219,7 @@ export const AdminLoginPage: React.FC = () => {
     try {
       await loginEmail(emailInput.trim(), firebasePassInput);
       storageService.setAdminLoggedIn(true);
-      navigate(destination === 'home' ? '/' : '/admin/dashboard');
+      navigate(resolveDestinationPath());
     } catch (err: any) {
       const code = err?.code || '';
       if (code === 'auth/operation-not-allowed') {
@@ -254,31 +265,42 @@ export const AdminLoginPage: React.FC = () => {
                 OpenFrame Admin Access
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
-                Student Intelligence Panel · Course Approvals · Platform Console
+                Student Intelligence · Razorpay API Setup · Course Approvals
               </p>
             </div>
           </div>
         </div>
 
         {/* Landing Preference */}
-        <div className="flex items-center justify-between gap-3 text-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
           <span className="text-slate-400 font-medium">Open after sign-in</span>
           <div className="inline-flex items-center p-0.5 bg-slate-900 rounded-lg border border-slate-700">
             <button
               type="button"
               onClick={() => setDestination('home')}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap cursor-pointer ${
                 destination === 'home'
                   ? 'bg-[#123D32] text-white'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Home Admin Panel
+              Home Panel
+            </button>
+            <button
+              type="button"
+              onClick={() => setDestination('razorpay')}
+              className={`px-2.5 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                destination === 'razorpay'
+                  ? 'bg-[#123D32] text-white'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Razorpay Keys
             </button>
             <button
               type="button"
               onClick={() => setDestination('dashboard')}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap cursor-pointer ${
                 destination === 'dashboard'
                   ? 'bg-[#123D32] text-white'
                   : 'text-slate-400 hover:text-white'

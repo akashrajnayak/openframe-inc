@@ -20,7 +20,9 @@ import {
   GraduationCap,
   IndianRupee,
   TrendingUp,
+  KeyRound,
 } from 'lucide-react';
+import { RazorpayKeyPromptModal } from '../common/RazorpayKeyPromptModal';
 
 type StudentFilterTab = 'all' | 'enrolled' | 'projects' | 'high_ability' | 'pending_approval';
 
@@ -87,6 +89,7 @@ export const HomeAdminStudentPanel: React.FC = () => {
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
   const [linkingGoogle, setLinkingGoogle] = useState<boolean>(false);
   const [linkError, setLinkError] = useState<string>('');
+  const [razorpayModalOpen, setRazorpayModalOpen] = useState<boolean>(false);
 
   const hasFirebaseAdminAuth = Boolean(currentUser && (adminProfile?.isActive || isSuperAdmin));
 
@@ -247,6 +250,17 @@ export const HomeAdminStudentPanel: React.FC = () => {
                 </span>
               )}
             </Link>
+
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setRazorpayModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Insert Razorpay Key</span>
+              </button>
+            )}
 
             <Link
               to="/admin/dashboard"
@@ -654,6 +668,16 @@ export const HomeAdminStudentPanel: React.FC = () => {
           </div>
         )}
       </div>
+
+      {isSuperAdmin && (
+        <RazorpayKeyPromptModal
+          isOpen={razorpayModalOpen}
+          onClose={() => setRazorpayModalOpen(false)}
+          onSaved={() => {
+            setRazorpayModalOpen(false);
+          }}
+        />
+      )}
     </section>
   );
 };

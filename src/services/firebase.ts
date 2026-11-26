@@ -15,7 +15,8 @@ import {
   limit,
   Firestore,
   FirestoreError,
-  getDocFromServer
+  getDocFromServer,
+  setLogLevel
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -73,16 +74,23 @@ import {
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with auto-detect long-polling (uses fast native WebChannel
-// when available and falls back to long-polling only when proxies block streams)
-// and ignoreUndefinedProperties so optional fields never crash writes
+// Silence internal @firebase/firestore transient offline transport console.error noise;
+// application & security-rule errors continue to surface via handleFirestoreError().
+setLogLevel('silent');
+
+// Initialize Firestore with forced long-polling and a short 8s poll timeout so
+// sandboxed iframes, mobile browsers, and buffering proxies connect reliably
+// without stalling past the 10s watch timeout.
 let dbInstance: Firestore;
 const hasNamedFirestoreDb =
   Boolean(firebaseConfig.firestoreDatabaseId) &&
   firebaseConfig.firestoreDatabaseId !== '(default)';
 const firestoreInitSettings = {
   ignoreUndefinedProperties: true,
-  experimentalAutoDetectLongPolling: true,
+  experimentalForceLongPolling: true,
+  experimentalLongPollingOptions: {
+    timeoutSeconds: 8,
+  },
 };
 try {
   dbInstance = hasNamedFirestoreDb

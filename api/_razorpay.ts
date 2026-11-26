@@ -74,7 +74,11 @@ export function maskSecretValue(secret: string): string {
 }
 
 function isSqlConfigured(): boolean {
-  return Boolean(process.env.SQL_HOST && process.env.SQL_USER && process.env.SQL_DB_NAME);
+  return Boolean(
+    process.env.DATABASE_URL ||
+      process.env.POSTGRES_URL ||
+      (process.env.SQL_HOST && process.env.SQL_USER && process.env.SQL_DB_NAME)
+  );
 }
 
 async function runSqlQuery<T = any>(sql: string, params: any[] = []): Promise<T[] | null> {
@@ -82,15 +86,25 @@ async function runSqlQuery<T = any>(sql: string, params: any[] = []): Promise<T[
   try {
     const pgMod = await import('pg');
     const PoolCtor = pgMod.default?.Pool || pgMod.Pool;
-    const pool = new PoolCtor({
-      host: process.env.SQL_HOST,
-      port: Number(process.env.SQL_PORT || 5432),
-      user: process.env.SQL_USER,
-      password: process.env.SQL_PASSWORD,
-      database: process.env.SQL_DB_NAME,
-      max: 2,
-      connectionTimeoutMillis: 5000,
-    });
+    const connectionString = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
+    const pool = connectionString
+      ? new PoolCtor({
+          connectionString,
+          ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1')
+            ? undefined
+            : { rejectUnauthorized: false },
+          max: 2,
+          connectionTimeoutMillis: 5000,
+        })
+      : new PoolCtor({
+          host: process.env.SQL_HOST,
+          port: Number(process.env.SQL_PORT || 5432),
+          user: process.env.SQL_USER,
+          password: process.env.SQL_PASSWORD,
+          database: process.env.SQL_DB_NAME,
+          max: 2,
+          connectionTimeoutMillis: 5000,
+        });
     try {
       const result = await pool.query(sql, params);
       return result.rows as T[];
@@ -102,9 +116,47 @@ async function runSqlQuery<T = any>(sql: string, params: any[] = []): Promise<T[
   }
 }
 
+export function getRazorpayEnvDiagnostics(): {
+  hasKeyId: boolean;
+  hasKeySecret: boolean;
+  hasDatabase: boolean;
+  isVercel: boolean;
+} {
+  const envKeyId = (
+    process.env.RAZORPAY_KEY_ID ||
+    process.env.RAZORPAY_API_KEY ||
+    process.env.VITE_RAZORPAY_KEY_ID ||
+    process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+    ''
+  ).trim();
+  const envKeySecret = (
+    process.env.RAZORPAY_KEY_SECRET ||
+    process.env.RAZORPAY_SECRET ||
+    process.env.RAZORPAY_API_SECRET ||
+    ''
+  ).trim();
+  return {
+    hasKeyId: Boolean(envKeyId),
+    hasKeySecret: Boolean(envKeySecret),
+    hasDatabase: isSqlConfigured(),
+    isVercel: Boolean(process.env.VERCEL),
+  };
+}
+
 function resolveFromEnvironment(): ActiveRazorpayCredentials {
-  const envKeyId = (process.env.RAZORPAY_KEY_ID || '').trim();
-  const envKeySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+  const envKeyId = (
+    process.env.RAZORPAY_KEY_ID ||
+    process.env.RAZORPAY_API_KEY ||
+    process.env.VITE_RAZORPAY_KEY_ID ||
+    process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+    ''
+  ).trim();
+  const envKeySecret = (
+    process.env.RAZORPAY_KEY_SECRET ||
+    process.env.RAZORPAY_SECRET ||
+    process.env.RAZORPAY_API_SECRET ||
+    ''
+  ).trim();
   const envWebhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
 
   if (envKeyId && envKeySecret) {
@@ -179,7 +231,7 @@ export async function getActiveRazorpayCredentials(): Promise<ActiveRazorpayCred
 
 export async function saveRazorpayGatewaySettings(
   input: SaveRazorpaySettingsInput
-): Promise<ActiveRazorpayCredentials> {
+): Promise<ActiveRazorpayCredentials & { persistedToDatabase: boolean }> {
   const now = new Date();
   const cleanKeyId = input.keyId.trim();
   const cleanKeySecret = input.keySecret.trim();
@@ -197,8 +249,22 @@ export async function saveRazorpayGatewaySettings(
     updatedAt: now.toISOString(),
   };
 
+  let persistedToDatabase = false;
   if (isSqlConfigured()) {
     await runSqlQuery(
+      `CREATE TABLE IF NOT EXISTS payment_gateway_settings (
+         provider TEXT PRIMARY KEY,
+         key_id TEXT NOT NULL,
+         key_secret TEXT NOT NULL,
+         webhook_secret TEXT,
+         mode TEXT NOT NULL DEFAULT 'live',
+         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+         updated_by_uid TEXT,
+         updated_by_email TEXT,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+    const writeResult = await runSqlQuery(
       `INSERT INTO payment_gateway_settings
          (provider, key_id, key_secret, webhook_secret, mode, enabled, updated_by_uid, updated_by_email, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -210,7 +276,8 @@ export async function saveRazorpayGatewaySettings(
          enabled = EXCLUDED.enabled,
          updated_by_uid = EXCLUDED.updated_by_uid,
          updated_by_email = EXCLUDED.updated_by_email,
-         updated_at = EXCLUDED.updated_at`,
+         updated_at = EXCLUDED.updated_at
+       RETURNING provider`,
       [
         'razorpay',
         cleanKeyId,
@@ -223,6 +290,7 @@ export async function saveRazorpayGatewaySettings(
         now,
       ]
     );
+    persistedToDatabase = Boolean(writeResult && writeResult.length > 0);
   }
 
   return {
@@ -235,6 +303,7 @@ export async function saveRazorpayGatewaySettings(
     source: input.enabled ? 'super_admin' : 'super_admin_disabled',
     updatedAt: now.toISOString(),
     updatedByEmail: input.updatedByEmail,
+    persistedToDatabase,
   };
 }
 

@@ -1,5 +1,6 @@
 import {
   getActiveRazorpayCredentials,
+  getRazorpayEnvDiagnostics,
   sendJson,
   type VercelApiRequest,
   type VercelApiResponse,
@@ -11,6 +12,17 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
   }
 
   const creds = await getActiveRazorpayCredentials();
+  const diag = getRazorpayEnvDiagnostics();
+  let unconfiguredNote =
+    'Razorpay credentials not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Vercel → Settings → Environment Variables (Production) and Redeploy.';
+  if (diag.hasKeyId && !diag.hasKeySecret) {
+    unconfiguredNote =
+      'RAZORPAY_KEY_ID is set, but RAZORPAY_KEY_SECRET is missing in Vercel Environment Variables. Add RAZORPAY_KEY_SECRET and Redeploy.';
+  } else if (!diag.hasKeyId && diag.hasKeySecret) {
+    unconfiguredNote =
+      'RAZORPAY_KEY_SECRET is set, but RAZORPAY_KEY_ID is missing in Vercel Environment Variables. Add RAZORPAY_KEY_ID and Redeploy.';
+  }
+
   return sendJson(res, 200, {
     ok: true,
     gateway: 'razorpay',
@@ -22,6 +34,6 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
       ? `Razorpay ${creds.mode.toUpperCase()} server-side verification active.`
       : creds.source === 'super_admin_disabled'
       ? 'Razorpay online checkout is currently paused by Super Admin.'
-      : 'Razorpay credentials not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Vercel Environment Variables (or Admin → Payment Gateway).',
+      : unconfiguredNote,
   });
 }

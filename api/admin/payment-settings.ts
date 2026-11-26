@@ -76,8 +76,16 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         updatedByUid: caller.uid,
         updatedByEmail: caller.email || 'superadmin@openframeitsolutions.com',
       });
+      const needsVercelEnv = Boolean(process.env.VERCEL) && !saved.persistedToDatabase;
       return sendJson(res, 200, {
         ok: true,
+        persistedToDatabase: saved.persistedToDatabase,
+        ...(needsVercelEnv
+          ? {
+              persistenceWarning:
+                'Vercel serverless functions do not share in-memory keys across routes without a Postgres database. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Vercel → Project Settings → Environment Variables (Production & Preview) and click Redeploy.',
+            }
+          : {}),
         settings: serializeAdminPaymentSettings(saved),
       });
     } catch (err: any) {

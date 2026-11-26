@@ -12,13 +12,11 @@ import {
   Save,
   ExternalLink,
 } from 'lucide-react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import {
   db,
   auth,
   logActivity,
-  handleFirestoreError,
-  OperationType,
 } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
 
@@ -29,7 +27,6 @@ interface RazorpayKeyPromptModalProps {
 }
 
 const RAZORPAY_KEY_ID_REGEX = /^rzp_(live|test)_[a-zA-Z0-9]+$/;
-const RAZORPAY_DOC_PATH = 'payment_settings/razorpay';
 
 function detectMode(keyId: string): 'live' | 'test' {
   return keyId.trim().startsWith('rzp_test_') ? 'test' : 'live';
@@ -49,27 +46,30 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
   const [testing, setTesting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+  const [activeKeyId, setActiveKeyId] = useState<string | null>(null);
+  const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setErrorMsg('');
     setStatusMsg('');
-    setLoading(true);
+    setKeyId('');
+    setKeySecret('');
+    setSavedSuccess(false);
+    setLoading(false);
 
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, 'payment_settings', 'razorpay'));
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          setKeyId(data.keyId || '');
-          setKeySecret(data.keySecret || '');
+    fetch('/api/payments/razorpay/config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.configured && typeof data?.keyId === 'string') {
+          setActiveKeyId(data.keyId);
+        } else {
+          setActiveKeyId(null);
         }
-      } catch {
-        // Non-blocking if doc doesn't exist yet
-      } finally {
-        setLoading(false);
-      }
-    })();
+      })
+      .catch(() => {
+        setActiveKeyId(null);
+      });
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -149,6 +149,7 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setStatusMsg('');
+    setSavedSuccess(false);
 
     const cleanId = keyId.trim();
     const cleanSecret = keySecret.trim();
@@ -214,8 +215,14 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
         ).catch(() => {});
       }
 
-      setStatusMsg(`Razorpay ${resolvedMode.toUpperCase()} keys saved & linked! Ready for payment.`);
-      if (onSaved) onSaved({ keyId: cleanId, mode: resolvedMode });
+      setActiveKeyId(cleanId);
+      setSavedSuccess(true);
+      setStatusMsg(
+        typeof data.persistenceWarning === 'string' && data.persistenceWarning.trim()
+          ? `Key validated & active locally. Note for Vercel: ${data.persistenceWarning}`
+          : `Razorpay ${resolvedMode.toUpperCase()} keys (${cleanId}) saved & activated for live checkout!`
+      );
+      if (onSaved && !data.persistenceWarning) onSaved({ keyId: cleanId, mode: resolvedMode });
     } catch (err: any) {
       setErrorMsg(err?.message || 'Unable to save Razorpay API credentials.');
     } finally {
@@ -234,15 +241,15 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
       >
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
               <KeyRound className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-sky-300">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
                 Super Admin · Razorpay API Setup
               </div>
               <h3 className="text-sm font-bold text-white">
-                Insert Razorpay API Key ID &amp; Key Secret
+                Insert Razorpay Live API Key &amp; Key Secret
               </h3>
             </div>
           </div>
@@ -260,9 +267,16 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
           <div className="rounded-xl bg-blue-50 border border-blue-200 p-3.5 text-xs text-blue-950 flex items-start justify-between gap-3">
             <div className="flex items-start gap-2">
               <ShieldCheck className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
-              <span>
-                Your keys are saved to Firestore (<code className="font-mono text-[11px]">payment_settings/razorpay</code>) and linked immediately to live Razorpay Checkout.
-              </span>
+              <div className="space-y-1">
+                <div>
+                  Paste your new Razorpay Key ID &amp; Key Secret below to activate live checkout immediately.
+                </div>
+                {activeKeyId && (
+                  <div className="text-[11px] font-mono text-emerald-800 font-semibold">
+                    Currently active: {activeKeyId}
+                  </div>
+                )}
+              </div>
             </div>
             <a
               href="https://dashboard.razorpay.com/app/keys"
@@ -298,6 +312,7 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
               <input
                 id="prompt-rzp-key-id"
                 type="text"
+                autoFocus
                 autoComplete="off"
                 spellCheck={false}
                 disabled={loading}
@@ -381,7 +396,7 @@ export const RazorpayKeyPromptModal: React.FC<RazorpayKeyPromptModalProps> = ({
                 onClick={onClose}
                 className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold cursor-pointer"
               >
-                Cancel
+                {savedSuccess ? 'Done' : 'Cancel'}
               </button>
               <button
                 type="submit"

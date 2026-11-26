@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db, isSqlConfigured } from './index.ts';
+import { db, isSqlConfigured, pool } from './index.ts';
 import { paymentGatewaySettings } from './schema.ts';
 
 export type RazorpayMode = 'live' | 'test';
@@ -63,8 +63,18 @@ export function invalidateRazorpayCache(): void {
 }
 
 function resolveFromEnvironment(): ActiveRazorpayCredentials {
-  const envKeyId = (process.env.RAZORPAY_KEY_ID || '').trim();
-  const envKeySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+  const envKeyId = (
+    process.env.RAZORPAY_KEY_ID ||
+    process.env.RAZORPAY_API_KEY ||
+    process.env.VITE_RAZORPAY_KEY_ID ||
+    ''
+  ).trim();
+  const envKeySecret = (
+    process.env.RAZORPAY_KEY_SECRET ||
+    process.env.RAZORPAY_SECRET ||
+    process.env.RAZORPAY_API_SECRET ||
+    ''
+  ).trim();
   const envWebhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
 
   if (envKeyId && envKeySecret) {
@@ -173,6 +183,19 @@ export async function saveRazorpayGatewaySettings(
 
   if (isSqlConfigured()) {
     try {
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS payment_gateway_settings (
+           provider TEXT PRIMARY KEY,
+           key_id TEXT NOT NULL,
+           key_secret TEXT NOT NULL,
+           webhook_secret TEXT,
+           mode TEXT NOT NULL DEFAULT 'live',
+           enabled BOOLEAN NOT NULL DEFAULT TRUE,
+           updated_by_uid TEXT,
+           updated_by_email TEXT,
+           updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+         )`
+      );
       await db
         .insert(paymentGatewaySettings)
         .values({

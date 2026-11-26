@@ -137,9 +137,24 @@ export const HomePage: React.FC = () => {
     };
   }, [featuredFilter]);
 
-  // Fetch real live announcements (falling back cleanly to published editorial blog posts)
+  // Fetch real live announcements when signed in (falling back cleanly to published editorial blog posts)
   useEffect(() => {
     let active = true;
+    const fallbackItems = initialBlogPosts.slice(0, 3).map((post) => ({
+      id: post.id,
+      title: post.title,
+      summary: post.excerpt,
+      date: post.publishedDate,
+      path: '/blog',
+    }));
+
+    if (!currentUser) {
+      setLiveAnnouncements(fallbackItems);
+      return () => {
+        active = false;
+      };
+    }
+
     getDocs(query(collection(db, 'announcements'), orderBy('createdAt', 'desc'), limit(3)))
       .then((snap) => {
         if (!active) return;
@@ -157,33 +172,17 @@ export const HomePage: React.FC = () => {
             }))
           );
         } else {
-          setLiveAnnouncements(
-            initialBlogPosts.slice(0, 3).map((post) => ({
-              id: post.id,
-              title: post.title,
-              summary: post.excerpt,
-              date: post.publishedDate,
-              path: '/blog',
-            }))
-          );
+          setLiveAnnouncements(fallbackItems);
         }
       })
       .catch(() => {
         if (!active) return;
-        setLiveAnnouncements(
-          initialBlogPosts.slice(0, 3).map((post) => ({
-            id: post.id,
-            title: post.title,
-            summary: post.excerpt,
-            date: post.publishedDate,
-            path: '/blog',
-          }))
-        );
+        setLiveAnnouncements(fallbackItems);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     let active = true;
